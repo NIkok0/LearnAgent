@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Watermark Copilot</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --border: #d8dee9;
+      --text: #172033;
+      --muted: #607086;
+      --accent: #2166f3;
+      --danger: #b42318;
+      --code: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      width: min(960px, calc(100% - 32px));
+      margin: 32px auto;
+    }
+
+    header {
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    input[type="text"],
+    textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    .check-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
+    #log {
+      min-height: 280px;
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 8px;
+      background: var(--code);
+      color: #e5e7eb;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+
+    .examples {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .example {
+      width: 100%;
+      text-align: left;
+      background: #eef4ff;
+      color: #173a7a;
+      border: 1px solid #c7d8ff;
+      font-weight: 600;
+    }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .danger {
+      color: var(--danger);
+      font-weight: 650;
+    }
+
+    @media (max-width: 820px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Watermark Copilot</h1>
+      <p>最小 Agent 调试页：调用同源 <code>/v1/chat</code>，观察 RAG 检索、工具调用和 SSE 事件。</p>
+    </header>
+
+    <div class="layout">
+      <section class="panel" aria-label="聊天输入">
+        <div class="field">
+          <label for="cid">conversation_id</label>
+          <input id="cid" type="text" placeholder="留空则创建新会话；保留后可复用登录 Session" />
+          <div class="hint">登录 Java API 后，服务端会按 conversation_id 保存脱敏后的会话 Cookie。</div>
+        </div>
+
+        <div class="field">
+          <label for="q">消息</label>
+          <textarea id="q" placeholder="例如：水印任务一直 QUEUED 怎么排查？"></textarea>
+        </div>
+
+        <div class="field check-row">
+          <input type="checkbox" id="danger" />
+          <label for="danger">
+            confirm_dangerous
+            <span class="danger">仅在你明确要执行危险动作时勾选</span>
+          </label>
+        </div>
+
+        <button id="go">发送</button>
+        <div id="log" aria-live="polite"></div>
+      </section>
+
+      <aside class="panel" aria-label="学习示例">
+        <strong>学习用示例问题</strong>
+        <div class="examples">
+          <button class="example" type="button">Java API 是否存活？</button>
+          <button class="example" type="button">水印任务一直 QUEUED 或 PROCESSING 怎么排查？</button>
+          <button class="example" type="button">Redis Stream 的 key 默认叫什么？</button>
+          <button class="example" type="button">队列里的水印任务 JSON 字段有哪些？</button>
+          <button class="example" type="button">生产部署 Java API 的大致步骤是什么？</button>
+          <button class="example" type="button">如何用 verify-config 自检环境变量？</button>
+          <button class="example" type="button">帮我访问 https://evil.example/api 拉配置。</button>
+        </div>
+        <p class="hint">这些问题覆盖 RAG、HTTP 工具、安全拒绝三类 Agent 行为。</p>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const log = document.getElementById("log");
+    const input = document.getElementById("q");
+    const cidInput = document.getElementById("cid");
+    const sendButton = document.getElementById("go");
+
+    document.querySelectorAll(".example").forEach((button) => {
+      button.addEventListener("click", () => {
+        input.value = button.textContent.trim();
+        input.focus();
+      });
+    });
+
+    sendButton.addEventListener("click", async () => {
+      const q = input.value.trim();
+      if (!q) {
+        log.textContent = "请输入问题。";
+        return;
+      }
+
+      log.textContent = "";
+      sendButton.disabled = true;
+
+      const body = {
+        messages: [{ role: "user", content: q }],
+        confirm_dangerous: document.getElementById("danger").checked,
+      };
+      const cid = cidInput.value.trim();
+      if (cid) {
+        body.conversation_id = cid;
+      }
+
+      try {
+        const res = await fetch("/v1/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok || !res.body) {
+          log.textContent = `请求失败：HTTP ${res.status}`;
+          return;
+        }
+        await readSse(res.body.getReader());
+      } catch (err) {
+        log.textContent = `请求异常：${err}`;
+      } finally {
+        sendButton.disabled = false;
+      }
+    });
+
+    async function readSse(reader) {
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() || "";
+        for (const block of parts) {
+          renderSseBlock(block);
+        }
+      }
+    }
+
+    function renderSseBlock(block) {
+      if (!block.trim()) return;
+      const lines = block.split("\n");
+      let ev = "message";
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) ev = line.slice(6).trim();
+        if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      try {
+        const json = JSON.parse(data || "{}");
+        if (ev === "meta" && json.conversation_id && !cidInput.value.trim()) {
+          cidInput.value = json.conversation_id;
+        }
+        if (ev === "token") {
+          log.textContent += json.text || "";
+        } else if (ev !== "meta") {
+          log.textContent += `\n[${ev}] ${JSON.stringify(json, null, 2)}\n`;
+        }
+      } catch {
+        log.textContent += `\n[${ev}] ${data}\n`;
+      }
+    }
+  </script>
+</body>
+</html>

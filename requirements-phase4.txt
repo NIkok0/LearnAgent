@@ -1,0 +1,6 @@
+# Optional dependencies for Phase 4 Step 2 (RAGAS evaluation mode).
+# Install with:
+#   conda run -n myenv39 python -m pip install -r copilot-agent/requirements-phase4.txt
+
+ragas>=0.1.19,<0.2.0
+datasets>=2.19.0,<3.0.0

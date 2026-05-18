@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-05-17T18:08:04Z",
+  "source": {
+    "overall_summary": "E:\\code\\watermarking\\copilot-agent\\artifacts\\phase4\\phase4-overall-summary.json",
+    "git_sha": "",
+    "run_id": ""
+  },
+  "metrics": {
+    "docs_search_docs_rate": 1.0,
+    "api_http_tool_rate": 1.0,
+    "blocked_case_forbidden_tool_rate": 1.0,
+    "retrieval_hit_rate": 1.0,
+    "required_source_full_match_rate": 0.8333,
+    "avg_required_source_coverage": 0.8333
+  }
+}

@@ -1,0 +1,17 @@
+# Optional: run the Copilot container while Java runs on the host or in another compose stack.
+# From this directory: docker compose up --build
+# Java API URL defaults to host gateway (Linux Docker 20.10+).
+
+services:
+  copilot-agent:
+    build: .
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    environment:
+      WATERMARK_API_BASE_URL: ${WATERMARK_API_BASE_URL:-http://host.docker.internal:8080}
+      # Optional: mount ../backend-java/docs to /docs and set WATERMARK_DOCS_PATH=/docs
+      # WATERMARK_DOCS_PATH: /docs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
