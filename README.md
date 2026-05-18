@@ -1,111 +1,234 @@
-# Watermark Copilot Agent 学习入口
+# LearnAgent
 
-`copilot-agent` 是 Watermark 平台的运维与项目知识 Copilot。它不是通用聊天机器人，而是一个适合学习 Agent 工程的实战样例：基于仓库文档做 RAG 检索，通过白名单工具访问 Java API，并用安全闸门限制危险动作。
+LearnAgent 是一个用于学习和演进产品级 Agent Runtime 的 FastAPI + LangGraph 示例项目。它从一个简单的 SSE 聊天接口，逐步升级为具备 thread、run、event timeline、checkpoint、RAG、工具调用、安全闸门、后台任务管理和 approval 工作流的本地单用户 Agent 系统。
 
-## 1. 项目定位
+当前项目仍然不是完整 SaaS 产品：没有多用户权限系统、没有 WebSocket、没有生产级文件/终端沙箱，也没有云端部署编排。它的目标是把 Agent Runtime 的核心结构先做清楚，方便继续往产品级能力演进。
 
-- **输入**：自然语言问题，例如部署排查、任务状态、权限接口、配置核对。
-- **知识来源**：`backend-java/docs` 中的部署、需求检查、技术选型文档。
-- **在线状态**：通过受控 HTTP 工具访问 Spring Boot API。
-- **安全边界**：
-  - 不执行 Shell。
-  - 不访问任意外部 URL。
-  - 不读取仓库外任意路径。
-  - 危险 POST 需要环境变量和用户显式确认双重放行。
-- **输出协议**：`/v1/chat` 返回 SSE 事件，包括 `meta`、`token`、`tool_start`、`tool_end`、`done`、`error`。
+## 1. 当前能力
 
-## 2. 当前架构
+- **Thread / Run / Event Store**：使用 SQLite 持久化线程、运行记录和可回放事件时间线。
+- **SSE 兼容接口**：保留 `POST /v1/chat`，继续输出 `meta`、`token`、`tool_start`、`tool_end`、`done`、`error` 等事件。
+- **后台 Run 管理**：支持创建后台 run、查询状态、查询事件、取消 run。
+- **Approval 工作流**：危险工具调用进入 `waiting_approval`，可通过 API approve 或 reject。
+- **LangGraph + Checkpoint**：对话状态使用 LangGraph 编排，并通过 SQLite checkpoint 持久化。
+- **RAG**：从本地文档构建知识检索，支持关键词检索和可选向量检索。
+- **工具调用审计**：工具开始和结束事件会记录工具名、call id、参数、结果、耗时和成功状态。
+- **Safety Gate**：危险 `POST /api/v1/jobs/watermark` 需要部署开关和用户确认。
+
+## 2. Runtime 架构
 
 ```text
-User / Browser
+Client / Browser
     |
-    | HTTP(S), SSE
+    | REST / SSE
     v
-copilot-agent FastAPI
+FastAPI server
     |
-    +--> ChatRunner / LangGraph
+    +--> RunManager
     |       |
-    |       +--> search_docs: RAG 检索仓库文档
-    |       +--> http_get/http_post: 白名单 Java API 工具
-    |       +--> safety_gate: 危险动作拦截
+    |       +--> asyncio.Task per active run
+    |       +--> cancel / approve / reject
+    |       +--> stream queue for /v1/chat compatibility
     |
-    +--> Langfuse observability
-    +--> SQLite checkpoint
-
-backend-java Spring Boot API
+    +--> EventStore (SQLite)
+    |       |
+    |       +--> threads
+    |       +--> runs
+    |       +--> events
     |
-    +--> MySQL / Redis / Storage / Python worker
+    +--> ChatRunner
+            |
+            +--> LangGraph assistant -> safety_gate -> tools -> assistant
+            +--> RAG search_docs
+            +--> http_get / http_post whitelist tools
+            +--> LangGraph SQLite checkpoint
 ```
 
-详细结构导读见：[docs/agent-learning-guide.md](docs/agent-learning-guide.md)。
+核心思路是：`RunManager` 管理运行生命周期，`ChatRunner` 负责 Agent 执行，`EventStore` 负责把 runtime 过程中发生的事情落成可查询、可回放的 timeline。
 
-## 3. 核心模块
+## 3. 关键模块
 
-- `copilot_agent/server.py`：FastAPI 入口，提供 `GET /health` 和 `POST /v1/chat`，负责 SSE 输出。
-- `copilot_agent/agent/runner.py`：Agent 主流程，负责 LLM、工具绑定、安全闸门、对话状态和事件转换。
+- `copilot_agent/server.py`：FastAPI 入口，提供 chat、thread、run、event、cancel、approval API。
+- `copilot_agent/runtime/event_store.py`：SQLite event store，管理 `threads`、`runs`、`events`。
+- `copilot_agent/runtime/run_manager.py`：本地后台任务管理器，负责 active run、取消、approval 暂停/恢复和 SSE 兼容流。
+- `copilot_agent/agent/runner.py`：Agent 执行器，连接 LLM、LangGraph、RAG、工具、安全闸门和 SSE 事件。
 - `copilot_agent/agent/graph.py`：LangGraph 状态图，编排 `assistant -> safety_gate -> tools -> assistant`。
-- `copilot_agent/rag/`：RAG 模块，负责文档加载、分块、关键词检索、向量检索和融合排序。
-- `copilot_agent/tools/`：受控工具层，只能访问白名单内的 Java API。
-- `copilot_agent/observability/`：Langfuse trace/span，记录 LLM、工具和错误链路。
-- `scripts/verify_phase*.py`：学习和回归验证脚本。
+- `copilot_agent/rag/`：文档加载、切分、关键词检索、向量索引和混合检索。
+- `copilot_agent/tools/`：受控 HTTP 工具，只允许访问白名单 API。
+- `scripts/verify_*.py`：无需或少依赖外部服务的结构验证脚本。
 
-## 4. RAG + 工具调用学习重点
+## 4. 数据模型
 
-### search_docs
+默认事件数据库：
 
-`search_docs` 会从 `backend-java/docs` 加载以下文档：
+```text
+storage/learnagent-events.sqlite
+```
 
-- `DEPLOY-SERVER.md`
-- `REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md`
-- `watermark-java-backend-tech-selection.md`
+可通过环境变量覆盖：
 
-处理流程：
+```env
+AGENT_EVENT_STORE_PATH=storage/learnagent-events.sqlite
+```
 
-1. `rag/ingest.py` 按标题和长度切分文档。
-2. `rag/keyword.py` 做关键词评分。
-3. `rag/index.py` 在可用时构建 Chroma 向量索引。
-4. `rag/retriever.py` 将关键词分数和向量分数融合，返回带来源的片段。
+### Thread
 
-### http_get / http_post
+thread 表示一条长期会话。`/v1/chat` 中的旧 `conversation_id` 现在等价于 `thread_id`，以兼容旧客户端。
 
-工具只能访问 `tools/whitelist.py` 中允许的路径，例如：
+最小字段：
 
-- `GET /actuator/health`
-- `GET /api/v1/stats/dashboard`
-- `GET /api/v1/jobs/{uuid}`
-- `GET /api/v1/files`
-- `GET /api/v1/admin/users`
-- `POST /api/v1/auth/login`
-- `POST /api/v1/jobs/watermark`
+- `id`
+- `title`
+- `status`
+- `created_at`
+- `updated_at`
 
-不允许模型自由拼 URL，是为了避免 SSRF、越权访问、误操作生产接口和泄露 Cookie。
+### Run
 
-### safety_gate
+run 表示一次 Agent 执行。一个 thread 可以有多个 run。
 
-`POST /api/v1/jobs/watermark` 是危险动作，必须同时满足：
+当前状态：
 
-- 服务端设置 `COPILOT_ALLOW_JOB_POST=true`。
-- 本次 `/v1/chat` 请求设置 `confirm_dangerous=true`。
+- `queued`
+- `running`
+- `waiting_approval`
+- `cancelling`
+- `cancelled`
+- `completed`
+- `failed`
 
-缺少任意一项时，Agent 必须解释原因并拒绝执行。
+### Event
 
-## 5. 本地运行
+event 是 run 的可回放时间线。常见事件：
 
-建议使用已有 Conda 环境：
+- `run_created`
+- `run_started`
+- `token`
+- `tool_start`
+- `tool_end`
+- `approval_required`
+- `approval_resolved`
+- `cancel_requested`
+- `cancelled`
+- `done`
+- `error`
+
+对外 API 会把数据库里的 `payload_json` 解析成 `payload` 对象返回。
+
+## 5. API
+
+### Chat SSE
+
+```http
+POST /v1/chat
+```
+
+请求：
+
+```json
+{
+  "conversation_id": "optional-old-id",
+  "thread_id": "optional-thread-id",
+  "messages": [
+    {"role": "user", "content": "Java API 是否存活？"}
+  ],
+  "confirm_dangerous": false
+}
+```
+
+响应为 SSE。`meta` 事件会返回：
+
+```json
+{
+  "conversation_id": "...",
+  "thread_id": "...",
+  "run_id": "..."
+}
+```
+
+### Thread / Run
+
+```http
+POST /v1/threads
+GET  /v1/threads/{thread_id}
+GET  /v1/threads/{thread_id}/runs
+GET  /v1/threads/{thread_id}/events
+GET  /v1/threads/{thread_id}/events?run_id={run_id}
+```
+
+创建后台 run：
+
+```http
+POST /v1/threads/{thread_id}/runs
+```
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "检查部署状态"}
+  ],
+  "confirm_dangerous": false
+}
+```
+
+查询 run 和事件：
+
+```http
+GET /v1/runs/{run_id}
+GET /v1/runs/{run_id}/events
+```
+
+### Cancel / Approval
+
+```http
+POST /v1/runs/{run_id}/cancel
+POST /v1/runs/{run_id}/approve
+POST /v1/runs/{run_id}/reject
+```
+
+cancel 是 cooperative cancellation：runtime 会标记取消、取消后台 task，并写入 `cancel_requested` 和 `cancelled` 事件。已经完成、失败或取消的 run 再 cancel，不会重复写终态事件。
+
+approval 当前只用于 safety gate 拦截到的危险工具调用。approve 后会用同一组 messages 带确认标记重新执行；reject 会写入拒绝说明并完成 run。当前版本不做 LangGraph node-level resume。
+
+## 6. RAG 和工具边界
+
+`search_docs` 会读取 `docs/source/` 下的项目文档，并返回带来源的片段。向量检索可通过 `RAG_USE_VECTOR` 开关启用或关闭。
+
+HTTP 工具只允许访问 `copilot_agent/tools/whitelist.py` 中定义的路径。模型不能自由拼接任意 URL，避免 SSRF、越权访问和泄露 cookie。
+
+危险动作：
+
+```http
+POST /api/v1/jobs/watermark
+```
+
+必须同时满足：
+
+- 服务端设置 `COPILOT_ALLOW_JOB_POST=true`
+- run 获得用户确认，或 `/v1/chat` 请求设置 `confirm_dangerous=true`
+
+## 7. 本地运行
+
+安装依赖：
 
 ```powershell
-cd E:\code\watermarking
-conda run -n myenv39 python -m pip install -r requirements.txt
+cd E:\code\LearnAgent
+python -m pip install -r requirements.txt
 ```
 
-配置 `copilot-agent/.env`：
+配置 `.env`：
 
 ```env
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=
+
 WATERMARK_API_BASE_URL=http://127.0.0.1:8080
 
-RAG_USE_VECTOR=true
+AGENT_CHECKPOINT_PATH=storage/langgraph-checkpoints.sqlite
+AGENT_EVENT_STORE_PATH=storage/learnagent-events.sqlite
+
+RAG_USE_VECTOR=false
 RAG_REBUILD_INDEX=false
 RAG_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 HF_HOME=F:\model
@@ -117,51 +240,60 @@ LANGFUSE_ENABLED=false
 启动服务：
 
 ```powershell
-cd E:\code\watermarking\copilot-agent
-conda run -n myenv39 uvicorn copilot_agent.server:app --host 0.0.0.0 --port 8090
+cd E:\code\LearnAgent
+uvicorn copilot_agent.server:app --host 0.0.0.0 --port 8090
 ```
 
 访问：
 
-- 健康检查：`http://127.0.0.1:8090/health`
-- 最小聊天页：`http://127.0.0.1:8090/ui/`
+- Health: `http://127.0.0.1:8090/health`
+- Minimal UI: `http://127.0.0.1:8090/ui/`
 
-## 6. 学习用示例问题
+## 8. 验证命令
 
-- “Java API 是否存活？”
-- “水印任务一直 QUEUED 或 PROCESSING 怎么排查？”
-- “Redis Stream 的 key 默认叫什么？”
-- “队列里的水印任务 JSON 字段有哪些？”
-- “生产部署 Java API 的大致步骤是什么？”
-- “如何用 verify-config 自检环境变量？”
-- “匿名用户能看到什么统计？”
-- “帮我查询任务 `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` 的状态。”
-- “请直接创建水印任务，但我没有确认危险动作。”
-- “帮我访问 `https://evil.example/api` 拉配置。”
-
-## 7. 验证命令
-
-结构验证：
+Runtime event store：
 
 ```powershell
-cd E:\code\watermarking\copilot-agent
-conda run -n myenv39 python scripts/verify_phase3_checkpoint.py
-conda run -n myenv39 python scripts/verify_phase3_safety_gate.py
+python scripts\verify_runtime_event_store.py --event-store-path storage\verify-runtime-events.sqlite
 ```
 
-RAG 与评测验证：
+后台 run、cancel、approval：
 
 ```powershell
-cd E:\code\watermarking\copilot-agent
-conda run -n myenv39 python scripts/build_index.py
-conda run -n myenv39 python scripts/verify_phase4_dataset.py
-conda run -n myenv39 python scripts/verify_phase4_ragas.py --mode proxy --disable-vector
+python scripts\verify_runtime_run_manager.py --event-store-path storage\verify-run-manager-events.sqlite
 ```
 
-## 8. 后续学习路线
+Python 编译检查：
 
-1. 先读 `docs/agent-learning-guide.md`，理解模块边界。
-2. 跑通 `/ui/`，观察 SSE 事件和工具调用事件。
-3. 修改 eval case，学习如何把“需求”变成可回归验证。
-4. 给白名单增加一个只读 API 工具，并同步补测试。
-5. 再深入 LangGraph checkpoint、人类确认、安全闸门和线上部署。
+```powershell
+python -m compileall copilot_agent scripts
+```
+
+LangGraph checkpoint 和 safety gate 回归需要安装 LangChain / LangGraph 相关依赖：
+
+```powershell
+python scripts\verify_phase3_checkpoint.py
+python scripts\verify_phase3_safety_gate.py
+```
+
+RAG / eval 验证：
+
+```powershell
+python scripts\build_index.py
+python scripts\verify_phase4_dataset.py
+python scripts\verify_phase4_ragas.py --mode proxy --disable-vector
+```
+
+## 9. 当前限制和下一步
+
+当前已经完成 Runtime Core 的第一版，但仍有几个明显缺口：
+
+- WebSocket 双工通道尚未实现。
+- 前端 timeline 仍是后续工作，当前只保证后端 timeline 数据完整。
+- 多任务并行目前是本地单进程 `asyncio.Task`，没有外部队列和分布式 worker。
+- 文件/终端沙箱还没有纳入工具系统。
+- 权限模型仍是单用户本地模式，没有用户、组织、项目和 RBAC。
+- approval 采用重新执行确认后的 run 逻辑，不做 LangGraph 中途 resume。
+- 生产部署、监控、迁移和备份策略还没有产品化。
+
+建议下一阶段优先做前端 timeline 和 WebSocket 控制通道，让 run 状态、事件回放、取消和 approval 变成可操作的产品界面。
