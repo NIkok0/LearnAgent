@@ -1,0 +1,18 @@
+{
+  "thread_id": "runtime-2e307980",
+  "run_id": "aefa9047-7c94-4781-a5de-7abe3c1758c8",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-runtime-events.sqlite",
+  "event_count": 4,
+  "event_types": [
+    "token",
+    "tool_start",
+    "tool_end",
+    "done"
+  ],
+  "db_exists": true,
+  "thread_ok": true,
+  "run_ok": true,
+  "events_ok": true,
+  "payload_ok": true,
+  "runtime_event_store": "PASS"
+}

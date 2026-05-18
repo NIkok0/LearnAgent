@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Phase 3: persisted LangGraph checkpoint.
     agent_checkpoint_path: str = "storage/langgraph-checkpoints.sqlite"
 
+    # Runtime event store for threads, runs, and replayable SSE events.
+    agent_event_store_path: str = "storage/learnagent-events.sqlite"
+
     # HuggingFace model cache root (hub/ lives under this directory).
     hf_home: str = r"F:\model"
 

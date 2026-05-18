@@ -23,6 +23,7 @@ from copilot_agent.observability import (
     start_tool_span,
 )
 from copilot_agent.rag import RagStore, format_chunks_for_prompt
+from copilot_agent.runtime.event_store import EventStore
 from copilot_agent.settings import settings
 from copilot_agent.tools.http_tools import WatermarkHttpTools, extract_session_cookie_from_set_cookie_headers
 
@@ -103,10 +104,12 @@ class ChatRunner:
         self,
         rag_store: RagStore,
         cookie_store: ConversationCookieStore,
+        event_store: EventStore | None = None,
         http: Optional[WatermarkHttpTools] = None,
     ) -> None:
         self._rag = rag_store
         self._cookies = cookie_store
+        self._events = event_store
         self._http = http or WatermarkHttpTools()
         self._llm: Optional[ChatOpenAI] = None
         self._tools = self._build_tools()
@@ -121,6 +124,7 @@ class ChatRunner:
         self,
         *,
         conversation_id: str,
+        run_id: str | None = None,
         messages: list[dict[str, Any]],
         confirm_dangerous: bool,
     ) -> AsyncIterator[str]:
@@ -144,6 +148,7 @@ class ChatRunner:
                 },
             }
             last_assistant_output = ""
+            tool_started_at: dict[str, float] = {}
             async for event in self._graph.astream_events(graph_input, config=graph_config, version="v2"):
                 kind = str(event.get("event", ""))
                 if kind == "on_chat_model_stream":
@@ -151,31 +156,66 @@ class ChatRunner:
                     text = _extract_text_from_chunk(chunk)
                     if text:
                         last_assistant_output += text
-                        yield _sse("token", {"text": text})
+                        yield self._emit(conversation_id, run_id, "token", {"text": text})
                     continue
                 blocked_text = _extract_blocked_message_text(event)
                 if blocked_text:
+                    if "gated" in blocked_text.lower() and "confirm_dangerous=true" in blocked_text:
+                        yield self._emit(
+                            conversation_id,
+                            run_id,
+                            "approval_required",
+                            {"required": True, "reason": "dangerous_tool", "message": blocked_text},
+                        )
+                        continue
                     last_assistant_output += blocked_text
-                    yield _sse("token", {"text": blocked_text})
+                    yield self._emit(conversation_id, run_id, "token", {"text": blocked_text})
                     continue
                 if kind == "on_tool_start":
                     name = str(event.get("name", ""))
+                    call_id = _extract_call_id(event)
+                    if call_id:
+                        tool_started_at[call_id] = time.perf_counter()
                     args = (event.get("data") or {}).get("input", {})
-                    yield _sse("tool_start", {"name": name, "arguments": _sanitize_tool_result(args)})
+                    yield self._emit(
+                        conversation_id,
+                        run_id,
+                        "tool_start",
+                        {"name": name, "call_id": call_id, "arguments": _sanitize_tool_result(args)},
+                    )
                     continue
                 if kind == "on_tool_end":
                     name = str(event.get("name", ""))
+                    call_id = _extract_call_id(event)
+                    started_at = tool_started_at.pop(call_id, None) if call_id else None
                     result = (event.get("data") or {}).get("output", {})
-                    yield _sse("tool_end", {"name": name, "result": _sanitize_tool_result(result)})
+                    duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
+                    yield self._emit(
+                        conversation_id,
+                        run_id,
+                        "tool_end",
+                        {
+                            "name": name,
+                            "call_id": call_id,
+                            "result": _sanitize_tool_result(result),
+                            "duration_ms": duration_ms,
+                            "success": True,
+                        },
+                    )
                     continue
 
             end_chat_trace(trace, output_preview=last_assistant_output)
-            yield _sse("done", {})
+            yield self._emit(conversation_id, run_id, "done", {})
         except Exception as e:
             end_chat_trace(trace, error=str(e))
             raise
         finally:
             flush_langfuse()
+
+    def _emit(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> str:
+        if self._events is not None and run_id:
+            self._events.append_event(thread_id, run_id, event_type, payload)
+        return _sse(event_type, payload)
 
     def _build_tools(self) -> list[StructuredTool]:
         return [
@@ -380,3 +420,16 @@ class ChatRunner:
 
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _extract_call_id(event: dict[str, Any]) -> str:
+    run_id = event.get("run_id")
+    if run_id:
+        return str(run_id)
+    data = event.get("data") or {}
+    if isinstance(data, dict):
+        for key in ("id", "tool_call_id", "run_id"):
+            value = data.get(key)
+            if value:
+                return str(value)
+    return ""
