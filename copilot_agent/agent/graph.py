@@ -34,24 +34,41 @@ def route_after_safety_gate(state: AgentState) -> str:
     return "__end__"
 
 
-def _build_checkpointer(checkpoint_path: str):
+def _build_checkpointer(checkpoint_path: str, *, async_checkpoint: bool = False):
+    p = Path(checkpoint_path).expanduser().resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if async_checkpoint:
+        try:
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        except Exception:
+            log.warning("async sqlite checkpoint unavailable; using in-memory checkpoint")
+            return MemorySaver()
+        conn = aiosqlite.connect(str(p))
+        if not hasattr(conn, "is_alive"):
+            conn.is_alive = lambda: bool(getattr(conn, "_connection", None))  # type: ignore[attr-defined]
+        return AsyncSqliteSaver(conn)
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
     except Exception:
         log.warning("langgraph-checkpoint-sqlite unavailable; using in-memory checkpoint")
         return MemorySaver()
-    p = Path(checkpoint_path).expanduser().resolve()
-    p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(p), check_same_thread=False)
     return SqliteSaver(conn)
 
 
-def build_agent_graph(assistant_node, safety_gate_node, tools, *, checkpoint_path: str):
+def build_agent_graph(planner_node, assistant_node=None, safety_gate_node=None, tools=None, *, checkpoint_path: str, async_checkpoint: bool = False):
+    if tools is None:
+        # Backward compatibility: build_agent_graph(assistant, safety_gate, tools, ...)
+        assistant_node, safety_gate_node, tools = planner_node, assistant_node, safety_gate_node
+        planner_node = _noop_planner_node
     workflow = StateGraph(AgentState)
+    workflow.add_node("planner", planner_node)
     workflow.add_node("assistant", assistant_node)
     workflow.add_node("safety_gate", safety_gate_node)
     workflow.add_node("tools", ToolNode(tools))
-    workflow.set_entry_point("assistant")
+    workflow.set_entry_point("planner")
+    workflow.add_edge("planner", "assistant")
     workflow.add_conditional_edges(
         "assistant",
         route_after_assistant,
@@ -69,4 +86,8 @@ def build_agent_graph(assistant_node, safety_gate_node, tools, *, checkpoint_pat
         },
     )
     workflow.add_edge("tools", "assistant")
-    return workflow.compile(checkpointer=_build_checkpointer(checkpoint_path))
+    return workflow.compile(checkpointer=_build_checkpointer(checkpoint_path, async_checkpoint=async_checkpoint))
+
+
+def _noop_planner_node(_state, _config=None):
+    return {}

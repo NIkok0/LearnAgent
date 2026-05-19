@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
+    openai_reasoning_effort: Optional[str] = None
+    openai_thinking_type: Optional[str] = None
 
     copilot_host: str = "0.0.0.0"
     copilot_port: int = 8090
@@ -28,7 +30,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
 
-    rag_use_vector: bool = True
+    rag_use_vector: bool = False
     rag_rebuild_index: bool = False
     rag_embedding_model: str = "BAAI/bge-small-en-v1.5"
     rag_chroma_path: str = ""
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
 
     # Runtime event store for threads, runs, and replayable SSE events.
     agent_event_store_path: str = "storage/learnagent-events.sqlite"
+
+    # Thread lifecycle cleanup.
+    thread_ended_archive_ttl_seconds: int = 3600
+    thread_lifecycle_cleaner_interval_seconds: int = 60
 
     # HuggingFace model cache root (hub/ lives under this directory).
     hf_home: str = r"F:\model"

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.event_store import EventStore, ThreadNotActiveError  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 
 
@@ -53,12 +53,27 @@ def main() -> int:
     runs = store.list_runs(args.thread_id)
     events = store.list_events(args.thread_id, run_id=run["id"])
     run_events = store.list_run_events(run["id"])
+    archived = store.archive_thread(args.thread_id)
+    archived_runs = store.list_runs(args.thread_id)
+    archived_events = store.list_run_events(run["id"])
+    archived_create_blocked = False
+    try:
+        store.create_run(args.thread_id)
+    except ThreadNotActiveError:
+        archived_create_blocked = True
 
     ok_db_exists = event_store_path.exists()
     ok_thread = bool(thread and fetched and fetched["id"] == args.thread_id and fetched["status"] == "active")
     ok_run = bool(runs and fetched_run and completed["status"] == "completed" and completed["completed_at"])
     ok_events = [e["type"] for e in events] == ["token", "tool_start", "tool_end", "done"] and events == run_events
     ok_payload = events[0].get("payload", {}).get("text") == "hello" and "payload_json" not in events[0]
+    ok_archived = bool(
+        archived
+        and archived["status"] == "archived"
+        and archived_create_blocked
+        and archived_runs
+        and archived_events == run_events
+    )
 
     summary = {
         "thread_id": args.thread_id,
@@ -71,7 +86,8 @@ def main() -> int:
         "run_ok": ok_run,
         "events_ok": ok_events,
         "payload_ok": ok_payload,
-        "runtime_event_store": "PASS" if all([ok_db_exists, ok_thread, ok_run, ok_events, ok_payload]) else "FAIL",
+        "archived_ok": ok_archived,
+        "runtime_event_store": "PASS" if all([ok_db_exists, ok_thread, ok_run, ok_events, ok_payload, ok_archived]) else "FAIL",
     }
 
     summary_path = Path(args.summary_json).resolve()
@@ -88,6 +104,7 @@ def main() -> int:
     print(f"run_ok={summary['run_ok']}")
     print(f"events_ok={summary['events_ok']}")
     print(f"payload_ok={summary['payload_ok']}")
+    print(f"archived_ok={summary['archived_ok']}")
     print(f"summary_json={summary_path}")
     print(f"runtime_event_store={summary['runtime_event_store']}")
 

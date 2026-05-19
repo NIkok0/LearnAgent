@@ -1,0 +1,70 @@
+{
+  "thread_id": "memory-v1-e5ffc756",
+  "run_id": "5fc99cce-2003-42f9-928c-8120ad593d6d",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-memory-v1-events.sqlite",
+  "event_types": [
+    "plan_created",
+    "token",
+    "tool_start",
+    "tool_end",
+    "done",
+    "memory_run_summary",
+    "memory_thread_summary"
+  ],
+  "run_summary": {
+    "summary_type": "run",
+    "goal": "check redis stream status",
+    "outcome": "completed",
+    "tools_used": [
+      "search_docs"
+    ],
+    "tool_details": [
+      {
+        "name": "search_docs",
+        "category": "memory",
+        "risk_level": "low"
+      }
+    ],
+    "key_outputs": [
+      "Redis stream status should be checked with docs and health APIs."
+    ],
+    "errors": [],
+    "source_event_ids": [
+      22,
+      23,
+      24,
+      25,
+      26
+    ]
+  },
+  "thread_summary": {
+    "summary_type": "thread",
+    "recent_goals": [
+      "check redis stream status"
+    ],
+    "recent_outcomes": [
+      "completed"
+    ],
+    "tools_used": [
+      "search_docs"
+    ],
+    "open_items": [],
+    "source_run_ids": [
+      "5fc99cce-2003-42f9-928c-8120ad593d6d"
+    ],
+    "source_event_ids": [
+      27
+    ]
+  },
+  "checks": {
+    "run_summary_event": true,
+    "thread_summary_event": true,
+    "run_summary_sources": true,
+    "thread_summary_sources": true,
+    "latest_thread_summary": true,
+    "context_working": true,
+    "context_semantic": true,
+    "context_episodic": true
+  },
+  "memory_v1": "PASS"
+}

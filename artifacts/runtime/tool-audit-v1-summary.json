@@ -1,0 +1,42 @@
+{
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-tool-audit-events.sqlite",
+  "thread_id": "tool-audit-648f0f2a",
+  "run_id": "4a248af2-f781-43da-a182-fceaea2d8176",
+  "start_contract": {
+    "has_call_id": true,
+    "has_metadata": true,
+    "arguments_sanitized": true,
+    "cookie_redacted": true,
+    "password_redacted": true
+  },
+  "end_contract": {
+    "has_result_envelope": true,
+    "success": true,
+    "duration_ms": 42,
+    "result_sanitized": true,
+    "raw_cookie_removed": true
+  },
+  "failure_contract": {
+    "success": false,
+    "error": "backend timeout",
+    "body_truncated": true
+  },
+  "timeline": {
+    "tool_count": 2,
+    "failed_tool_success": false,
+    "warning_codes": [
+      "tool_failed"
+    ]
+  },
+  "persisted": {
+    "start_has_secret": false,
+    "end_has_secret": false
+  },
+  "direct_sanitizer": {
+    "token": "***REDACTED***",
+    "nested": {
+      "secret": "***REDACTED***"
+    }
+  },
+  "tool_audit_v1": "PASS"
+}

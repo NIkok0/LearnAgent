@@ -8,12 +8,12 @@ from typing import Any, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import StructuredTool
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from copilot_agent.agent.graph import build_agent_graph
 from copilot_agent.conversation_store import ConversationCookieStore
+from copilot_agent.llm import LLMProvider
+from copilot_agent.memory import MemoryManager
 from copilot_agent.observability import (
     end_chat_trace,
     end_tool_span,
@@ -22,10 +22,13 @@ from copilot_agent.observability import (
     start_chat_trace,
     start_tool_span,
 )
+from copilot_agent.policy import PolicyRegistry
 from copilot_agent.rag import RagStore, format_chunks_for_prompt
 from copilot_agent.runtime.event_store import EventStore
 from copilot_agent.settings import settings
 from copilot_agent.tools.http_tools import WatermarkHttpTools, extract_session_cookie_from_set_cookie_headers
+from copilot_agent.tools.audit import build_tool_end_payload, build_tool_start_payload, sanitize_tool_payload
+from copilot_agent.tools.registry import ToolRegistry
 
 log = logging.getLogger(__name__)
 
@@ -56,19 +59,6 @@ class HttpPostArgs(BaseModel):
     json_body: dict[str, Any]
     cookie_header: Optional[str] = None
     idempotency_key: Optional[str] = None
-
-
-def _sanitize_tool_result(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        out = {}
-        for k, v in obj.items():
-            if k == "_raw_set_cookie_for_store_only":
-                continue
-            out[k] = _sanitize_tool_result(v)
-        return out
-    if isinstance(obj, list):
-        return [_sanitize_tool_result(x) for x in obj]
-    return obj
 
 
 def _extract_text_from_chunk(chunk: Any) -> str:
@@ -106,18 +96,28 @@ class ChatRunner:
         cookie_store: ConversationCookieStore,
         event_store: EventStore | None = None,
         http: Optional[WatermarkHttpTools] = None,
+        memory: MemoryManager | None = None,
+        llm_provider: LLMProvider | None = None,
+        policy_registry: PolicyRegistry | None = None,
     ) -> None:
-        self._rag = rag_store
         self._cookies = cookie_store
-        self._events = event_store
+        self._memory = memory or MemoryManager(
+            rag_store=rag_store,
+            event_store=event_store,
+            checkpoint_path=settings.agent_checkpoint_path,
+        )
         self._http = http or WatermarkHttpTools()
-        self._llm: Optional[ChatOpenAI] = None
-        self._tools = self._build_tools()
+        self._llm_provider = llm_provider or LLMProvider()
+        self._tool_registry = self._build_tool_registry()
+        self._policy = policy_registry or PolicyRegistry(self._tool_registry)
+        self._tools = self._tool_registry.tools()
         self._graph = build_agent_graph(
+            self._planner_node,
             self._assistant_node,
             self._safety_gate_node,
             self._tools,
-            checkpoint_path=settings.agent_checkpoint_path,
+            checkpoint_path=self._memory.checkpoint_path,
+            async_checkpoint=True,
         )
 
     async def run_stream(
@@ -135,13 +135,26 @@ class ChatRunner:
             model=settings.openai_model,
         )
         try:
-            lc_messages = [SystemMessage(content=SYSTEM_PROMPT), *self._to_lc_messages(messages)]
+            goal = _last_user_content(messages)
+            memory_context = self._memory.build_context(
+                thread_id=conversation_id,
+                run_id=run_id,
+                messages=messages,
+                goal=goal,
+            )
+            lc_messages = [
+                SystemMessage(content=SYSTEM_PROMPT),
+                *_memory_context_messages(memory_context.as_dict()),
+                *self._to_lc_messages(messages),
+            ]
             graph_input = {"messages": lc_messages}
             graph_config = {
                 "recursion_limit": (MAX_ROUNDS * 2) + 4,
                 "configurable": {
                     "thread_id": conversation_id,
                     "conversation_id": conversation_id,
+                    "run_id": run_id,
+                    "input_messages": messages,
                     "confirm_dangerous": confirm_dangerous,
                     "allow_job_post": settings.copilot_allow_job_post,
                     "trace": trace,
@@ -177,11 +190,17 @@ class ChatRunner:
                     if call_id:
                         tool_started_at[call_id] = time.perf_counter()
                     args = (event.get("data") or {}).get("input", {})
+                    spec = self._tool_registry.get_spec(name)
                     yield self._emit(
                         conversation_id,
                         run_id,
                         "tool_start",
-                        {"name": name, "call_id": call_id, "arguments": _sanitize_tool_result(args)},
+                        build_tool_start_payload(
+                            name=name,
+                            call_id=call_id,
+                            **_tool_audit_metadata(spec, args if isinstance(args, dict) else {}),
+                            arguments=args,
+                        ),
                     )
                     continue
                 if kind == "on_tool_end":
@@ -194,13 +213,12 @@ class ChatRunner:
                         conversation_id,
                         run_id,
                         "tool_end",
-                        {
-                            "name": name,
-                            "call_id": call_id,
-                            "result": _sanitize_tool_result(result),
-                            "duration_ms": duration_ms,
-                            "success": True,
-                        },
+                        build_tool_end_payload(
+                            name=name,
+                            call_id=call_id,
+                            result=result,
+                            duration_ms=duration_ms,
+                        ),
                     )
                     continue
 
@@ -213,37 +231,45 @@ class ChatRunner:
             flush_langfuse()
 
     def _emit(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> str:
-        if self._events is not None and run_id:
-            self._events.append_event(thread_id, run_id, event_type, payload)
+        self._memory.append_event(thread_id, run_id, event_type, payload)
         return _sse(event_type, payload)
 
-    def _build_tools(self) -> list[StructuredTool]:
-        return [
-            StructuredTool.from_function(
-                coroutine=self._tool_search_docs,
-                func=None,
-                name="search_docs",
-                description="Keyword search over DEPLOY-SERVER.md, REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md, watermark-java-backend-tech-selection.md.",
-                args_schema=SearchDocsArgs,
-            ),
-            StructuredTool.from_function(
-                coroutine=self._tool_http_get,
-                func=None,
-                name="http_get",
-                description="GET from the Watermark Java API (whitelist only). Optional cookie_header overrides the server-stored session for this conversation.",
-                args_schema=HttpGetArgs,
-            ),
-            StructuredTool.from_function(
-                coroutine=self._tool_http_post,
-                func=None,
-                name="http_post",
-                description="POST login or (if enabled) enqueue watermark job. Paths strictly whitelisted.",
-                args_schema=HttpPostArgs,
-            ),
-        ]
+    def finalize_memory(self, thread_id: str, run_id: str, *, messages: list[dict[str, Any]] | None = None) -> None:
+        fallback_goal = _last_user_content(messages or [])
+        self._memory.summarize_run(thread_id, run_id, fallback_goal=fallback_goal)
+        self._memory.update_thread_summary(thread_id, run_id)
+
+    def _build_tool_registry(self) -> ToolRegistry:
+        return ToolRegistry.from_agent_tools(
+            search_docs=self._tool_search_docs,
+            http_get=self._tool_http_get,
+            http_post=self._tool_http_post,
+            search_docs_args_schema=SearchDocsArgs,
+            http_get_args_schema=HttpGetArgs,
+            http_post_args_schema=HttpPostArgs,
+            dangerous_post_requires_approval=_requires_dangerous_post_approval,
+        )
+
+    async def _planner_node(self, _state, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+        ctx = (config.get("configurable") or {}) if config else {}
+        thread_id = str(ctx.get("conversation_id") or ctx.get("thread_id") or "")
+        run_id = str(ctx.get("run_id") or "")
+        messages = ctx.get("input_messages") if isinstance(ctx.get("input_messages"), list) else []
+        goal = _last_user_content(messages)
+        self._memory.append_event(
+            thread_id,
+            run_id or None,
+            "plan_created",
+            {
+                "goal": goal,
+                "strategy": "react_with_safety_gate",
+                "available_tools": self._tool_registry.public_specs(),
+            },
+        )
+        return {}
 
     async def _assistant_node(self, state) -> dict[str, list[BaseMessage]]:
-        llm = self._get_llm().bind_tools(self._tools)
+        llm = self._llm_provider.get_tool_bound_model(self._tools)
         ai = await llm.ainvoke(state["messages"])
         return {"messages": [ai]}
 
@@ -257,51 +283,21 @@ class ChatRunner:
         ctx = (config.get("configurable") or {}) if config else {}
         allow_job_post = bool(ctx.get("allow_job_post", settings.copilot_allow_job_post))
         confirm_dangerous = bool(ctx.get("confirm_dangerous", False))
-        for call in last.tool_calls:
-            name = str(call.get("name", ""))
-            args = call.get("args") if isinstance(call.get("args"), dict) else {}
-            path = str(args.get("path", ""))
-            if name == "http_post" and path.split("?", 1)[0] == DANGEROUS_JOB_PATH:
-                if not allow_job_post:
-                    return {
-                        "messages": [
-                            AIMessage(
-                                content=(
-                                    "POST /api/v1/jobs/watermark is disabled by deployment. "
-                                    "Enable COPILOT_ALLOW_JOB_POST=true, then retry with explicit confirmation."
-                                )
-                            )
-                        ]
-                    }
-                if not confirm_dangerous:
-                    return {
-                        "messages": [
-                            AIMessage(
-                                content=(
-                                    "This action is gated. Re-send chat request with confirm_dangerous=true "
-                                    "if you want to enqueue a watermark job."
-                                )
-                            )
-                        ]
-                    }
+        decision = self._policy.evaluate_tool_calls(
+            list(last.tool_calls),
+            allow_job_post=allow_job_post,
+            confirm_dangerous=confirm_dangerous,
+        )
+        if not decision.allowed:
+            return {"messages": [AIMessage(content=decision.message)]}
         return {}
-
-    def _get_llm(self) -> ChatOpenAI:
-        if self._llm is None:
-            self._llm = ChatOpenAI(
-                api_key=settings.openai_api_key or None,
-                base_url=settings.openai_base_url,
-                model=settings.openai_model,
-                streaming=True,
-            )
-        return self._llm
 
     async def _tool_search_docs(self, query: str, config: RunnableConfig) -> dict[str, Any]:
         trace = ((config.get("configurable") or {}).get("trace")) if config else None
         tool_span = start_tool_span(trace, name="search_docs", args={"query": query})
         t0 = time.perf_counter()
         try:
-            hits = self._rag.search(query, top_k=8)
+            hits = self._memory.search_docs(query, top_k=8)
             excerpts = format_chunks_for_prompt(hits, max_chars=14000)
             result = {
                 "excerpts_markdown": excerpts,
@@ -338,7 +334,7 @@ class ChatRunner:
                 tool_span,
                 result={"duration_ms": int((time.perf_counter() - t0) * 1000), **safe},
             )
-            return _sanitize_tool_result(result)
+            return sanitize_tool_payload(result)
         except Exception as e:
             end_tool_span(
                 tool_span,
@@ -393,7 +389,7 @@ class ChatRunner:
                 tool_span,
                 result={"duration_ms": int((time.perf_counter() - t0) * 1000), **safe},
             )
-            return _sanitize_tool_result(raw)
+            return sanitize_tool_payload(raw)
         except Exception as e:
             end_tool_span(
                 tool_span,
@@ -433,3 +429,45 @@ def _extract_call_id(event: dict[str, Any]) -> str:
             if value:
                 return str(value)
     return ""
+
+
+def _last_user_content(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        if str(message.get("role", "")).lower() == "user":
+            return str(message.get("content", ""))
+    return ""
+
+
+def _memory_context_messages(memory_context: dict[str, Any]) -> list[SystemMessage]:
+    thread_summary = ((memory_context.get("episodic") or {}).get("thread_summary") or {})
+    if not isinstance(thread_summary, dict) or not thread_summary:
+        return []
+    recent_goals = thread_summary.get("recent_goals") or []
+    recent_outcomes = thread_summary.get("recent_outcomes") or []
+    tools_used = thread_summary.get("tools_used") or []
+    content = (
+        "Thread memory summary from previous runs:\n"
+        f"- Recent goals: {', '.join(str(x) for x in recent_goals) or 'none'}\n"
+        f"- Recent outcomes: {', '.join(str(x) for x in recent_outcomes) or 'none'}\n"
+        f"- Tools used recently: {', '.join(str(x) for x in tools_used) or 'none'}\n"
+        "Use this as context only; prefer current user input, retrieved docs, and live tool results when they conflict."
+    )
+    return [SystemMessage(content=content)]
+
+
+def _requires_dangerous_post_approval(args: dict[str, Any]) -> bool:
+    return str(args.get("path", "")).split("?", 1)[0] == DANGEROUS_JOB_PATH
+
+
+def _tool_audit_metadata(spec, args: dict[str, Any]) -> dict[str, Any]:
+    if spec is None:
+        return {
+            "category": "",
+            "risk_level": "",
+            "requires_approval": False,
+        }
+    return {
+        "category": spec.category,
+        "risk_level": spec.risk_level,
+        "requires_approval": spec.requires_approval_for(args),
+    }

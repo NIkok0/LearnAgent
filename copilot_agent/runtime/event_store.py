@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 
 THREAD_STATUS_ACTIVE = "active"
+THREAD_STATUS_ENDED = "ended"
+THREAD_STATUS_ARCHIVED = "archived"
 RUN_STATUS_RUNNING = "running"
 RUN_STATUS_QUEUED = "queued"
 RUN_STATUS_WAITING_APPROVAL = "waiting_approval"
@@ -18,12 +21,34 @@ RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
 
 TERMINAL_RUN_STATUSES = {RUN_STATUS_CANCELLED, RUN_STATUS_COMPLETED, RUN_STATUS_FAILED}
+NON_TERMINAL_RUN_STATUSES = {
+    RUN_STATUS_QUEUED,
+    RUN_STATUS_RUNNING,
+    RUN_STATUS_WAITING_APPROVAL,
+    RUN_STATUS_CANCELLING,
+}
+
+
+class ThreadNotActiveError(RuntimeError):
+    def __init__(self, thread_id: str, status: str | None) -> None:
+        self.thread_id = thread_id
+        self.status = status
+        super().__init__("thread is not active")
+
+
+class ActiveRunExistsError(RuntimeError):
+    def __init__(self, thread_id: str, run_id: str) -> None:
+        self.thread_id = thread_id
+        self.run_id = run_id
+        super().__init__("thread already has an active run")
 
 
 def utc_now_iso() -> str:
-    from datetime import UTC, datetime
-
     return datetime.now(UTC).isoformat()
+
+
+def utc_iso_before(seconds: int | float) -> str:
+    return (datetime.now(UTC) - timedelta(seconds=max(0, seconds))).isoformat()
 
 
 class EventStore:
@@ -34,6 +59,7 @@ class EventStore:
         db_path = Path(self.path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
+        self._subscribers: list[Callable[[dict[str, Any]], None]] = []
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -98,11 +124,119 @@ class EventStore:
             row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
         return _row_to_dict(row)
 
+    def end_thread(self, thread_id: str) -> dict[str, Any] | None:
+        now = utc_now_iso()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE threads
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (THREAD_STATUS_ENDED, now, thread_id),
+            )
+            row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        return _row_to_dict(row) if row is not None else None
+
+    def archive_thread(self, thread_id: str) -> dict[str, Any] | None:
+        now = utc_now_iso()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE threads
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (THREAD_STATUS_ARCHIVED, now, thread_id),
+            )
+            row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        return _row_to_dict(row) if row is not None else None
+
+    def list_ended_threads_before(self, cutoff_iso: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM threads
+                WHERE status = ?
+                  AND updated_at <= ?
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (THREAD_STATUS_ENDED, cutoff_iso, limit),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def archive_ended_threads_before(self, cutoff_iso: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        now = utc_now_iso()
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM threads
+                WHERE status = ?
+                  AND updated_at <= ?
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (THREAD_STATUS_ENDED, cutoff_iso, limit),
+            ).fetchall()
+            thread_ids = [str(row["id"]) for row in rows]
+            if thread_ids:
+                placeholders = ",".join("?" for _ in thread_ids)
+                conn.execute(
+                    f"""
+                    UPDATE threads
+                    SET status = ?, updated_at = ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    [THREAD_STATUS_ARCHIVED, now, *thread_ids],
+                )
+                rows = conn.execute(
+                    f"SELECT * FROM threads WHERE id IN ({placeholders}) ORDER BY updated_at ASC",
+                    thread_ids,
+                ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
+    def archive_ended_threads_older_than(self, ttl_seconds: int | float, *, limit: int = 100) -> list[dict[str, Any]]:
+        return self.archive_ended_threads_before(utc_iso_before(ttl_seconds), limit=limit)
+
     def create_run(self, thread_id: str, *, run_id: str | None = None, status: str = RUN_STATUS_QUEUED) -> dict[str, Any]:
-        self.ensure_thread(thread_id)
         run_id = run_id or str(uuid4())
         now = utc_now_iso()
         with self._lock, self._connect() as conn:
+            thread = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+            if thread is None:
+                conn.execute(
+                    """
+                    INSERT INTO threads (id, title, status, created_at, updated_at)
+                    VALUES (?, NULL, ?, ?, ?)
+                    """,
+                    (thread_id, THREAD_STATUS_ACTIVE, now, now),
+                )
+                thread_status = THREAD_STATUS_ACTIVE
+            else:
+                thread_status = str(thread["status"])
+            if thread_status != THREAD_STATUS_ACTIVE:
+                raise ThreadNotActiveError(thread_id, thread_status)
+
+            active_run = conn.execute(
+                """
+                SELECT id FROM runs
+                WHERE thread_id = ?
+                  AND status IN (?, ?, ?, ?)
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (
+                    thread_id,
+                    RUN_STATUS_QUEUED,
+                    RUN_STATUS_RUNNING,
+                    RUN_STATUS_WAITING_APPROVAL,
+                    RUN_STATUS_CANCELLING,
+                ),
+            ).fetchone()
+            if active_run is not None:
+                raise ActiveRunExistsError(thread_id, str(active_run["id"]))
+
             conn.execute(
                 """
                 INSERT INTO runs (id, thread_id, status, created_at, completed_at, error)
@@ -127,7 +261,9 @@ class EventStore:
             )
             conn.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
             row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
-        return _event_row_to_dict(row)
+        event = _event_row_to_dict(row)
+        self._notify(event)
+        return event
 
     def update_run_status(self, run_id: str, status: str, *, error: str | None = None, completed: bool = False) -> dict[str, Any]:
         now = utc_now_iso()
@@ -183,6 +319,26 @@ class EventStore:
         with self._lock, self._connect() as conn:
             rows = conn.execute("SELECT * FROM events WHERE run_id = ? ORDER BY id ASC", (run_id,)).fetchall()
         return [_event_row_to_dict(row) for row in rows]
+
+    def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
+        with self._lock:
+            self._subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if callback in self._subscribers:
+                    self._subscribers.remove(callback)
+
+        return unsubscribe
+
+    def _notify(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for callback in subscribers:
+            try:
+                callback(event)
+            except Exception:
+                continue
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any]:

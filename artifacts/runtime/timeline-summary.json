@@ -1,0 +1,47 @@
+{
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
+  "completed": {
+    "run_id": "7c89a396-0277-47d9-bba1-fd640338abaf",
+    "assistant_output": "hello world",
+    "kinds": [
+      "lifecycle",
+      "lifecycle",
+      "tool_call",
+      "lifecycle",
+      "assistant_output"
+    ],
+    "tool_merged": true,
+    "tool_success": true,
+    "warnings": []
+  },
+  "missing_tool": {
+    "run_id": "783dd8ea-7f3d-4030-84a3-88ef2a7b18b0",
+    "warnings": [
+      "tool_missing_end"
+    ]
+  },
+  "approval": {
+    "run_id": "8fee504e-a12c-4747-a683-33186d1a8125",
+    "status": "approved",
+    "resolved": {
+      "approved": true
+    }
+  },
+  "memory": {
+    "run_id": "10768cdd-60b2-4d8e-a9f3-b2d6329a2430",
+    "derived": true,
+    "summary_type": "run"
+  },
+  "cancelled": {
+    "run_id": "2fe5011c-a4d5-4de0-94a1-24d1768e746f",
+    "status": "cancelled",
+    "warnings": []
+  },
+  "failed_without_error": {
+    "run_id": "042755c8-8068-4143-b06e-dc9255df0145",
+    "warnings": [
+      "failed_without_error_event"
+    ]
+  },
+  "runtime_timeline": "PASS"
+}

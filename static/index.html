@@ -1,301 +1,1147 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Watermark Copilot</title>
+  <title>LearnAgent Chat Runtime</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f7fb;
-      --panel: #ffffff;
-      --border: #d8dee9;
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --surface-soft: #f9fafc;
+      --line: #d8dee8;
+      --line-strong: #b8c2d0;
       --text: #172033;
-      --muted: #607086;
-      --accent: #2166f3;
+      --muted: #64748b;
+      --accent: #1463ff;
+      --accent-strong: #0f4fd0;
+      --accent-soft: #e8f0ff;
+      --ok: #0f7b45;
+      --warn: #9a5b00;
       --danger: #b42318;
-      --code: #111827;
+      --danger-soft: #fff0ee;
+      --code: #101828;
+      --radius: 8px;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
+      min-height: 100vh;
       background: var(--bg);
       color: var(--text);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.5;
-    }
-
-    main {
-      width: min(960px, calc(100% - 32px));
-      margin: 32px auto;
-    }
-
-    header {
-      margin-bottom: 20px;
-    }
-
-    h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
+      font-size: 14px;
       letter-spacing: 0;
     }
 
-    p {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
+    header {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: 16px;
-      align-items: start;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
     }
 
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 280px minmax(420px, 1.1fr) minmax(420px, 0.95fr);
+      gap: 12px;
+      padding: 12px;
+      height: calc(100vh - 56px);
+      min-height: 640px;
+    }
+
+    section {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .section-head {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .section-body {
+      min-height: 0;
+      padding: 12px;
+      overflow: auto;
+    }
+
+    .side-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     label {
       display: block;
       margin: 0 0 6px;
-      font-size: 14px;
-      font-weight: 650;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
     }
 
-    input[type="text"],
     textarea {
       width: 100%;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      font: inherit;
-      color: var(--text);
-      background: #fff;
-    }
-
-    textarea {
-      min-height: 120px;
+      min-height: 84px;
       resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      padding: 9px 10px;
+      outline: none;
     }
 
-    .field {
-      margin-bottom: 14px;
-    }
-
-    .check-row {
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      color: var(--muted);
-      font-size: 14px;
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(20, 99, 255, 0.12);
     }
 
     button {
-      border: 0;
+      min-height: 34px;
+      border: 1px solid var(--line-strong);
       border-radius: 6px;
-      padding: 10px 16px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-weight: 720;
+      padding: 7px 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button.primary {
+      border-color: var(--accent);
       background: var(--accent);
       color: #fff;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
+    }
+
+    button.primary:hover:not(:disabled) { background: var(--accent-strong); }
+
+    button.danger {
+      border-color: #f1b5ae;
+      background: #fff7f6;
+      color: var(--danger);
     }
 
     button:disabled {
-      opacity: 0.65;
-      cursor: wait;
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
-    #log {
-      min-height: 280px;
-      margin-top: 14px;
-      padding: 14px;
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .session-box {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--code);
-      color: #e5e7eb;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      padding: 10px;
+      background: var(--surface-soft);
+    }
+
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
       font-size: 13px;
+    }
+
+    .status-dot::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--line-strong);
+    }
+
+    .status-dot.live::before { background: var(--ok); }
+    .status-dot.busy::before { background: var(--accent); }
+    .status-dot.error::before { background: var(--danger); }
+
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
     }
 
     .examples {
       display: grid;
-      gap: 8px;
-      margin-top: 12px;
+      gap: 7px;
     }
 
     .example {
-      width: 100%;
+      min-height: 32px;
       text-align: left;
-      background: #eef4ff;
-      color: #173a7a;
-      border: 1px solid #c7d8ff;
-      font-weight: 600;
-    }
-
-    .hint {
-      margin-top: 8px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .danger {
-      color: var(--danger);
+      border-color: #c6d8ff;
+      background: var(--accent-soft);
+      color: #143a7d;
       font-weight: 650;
+      white-space: normal;
     }
 
-    @media (max-width: 820px) {
-      .layout {
+    .run-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .run-item {
+      width: 100%;
+      display: grid;
+      gap: 5px;
+      padding: 10px;
+      text-align: left;
+      border-color: var(--line);
+      background: #fff;
+      white-space: normal;
+    }
+
+    .run-item.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(20, 99, 255, 0.10);
+    }
+
+    .run-id {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #edf1f6;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .badge.running,
+    .badge.queued { background: var(--accent-soft); color: #174ea6; }
+    .badge.waiting_approval { background: #fff4df; color: var(--warn); }
+    .badge.completed { background: #e8f7ef; color: var(--ok); }
+    .badge.failed,
+    .badge.cancelled,
+    .badge.cancelling { background: var(--danger-soft); color: var(--danger); }
+
+    .chat-section .section-body {
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+
+    .chat-messages {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      background: var(--surface-soft);
+    }
+
+    .message-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .message {
+      display: grid;
+      gap: 5px;
+      max-width: 86%;
+    }
+
+    .message.user { justify-self: end; }
+    .message.assistant,
+    .message.system { justify-self: start; }
+
+    .message-role {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .bubble {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .message.user .bubble {
+      border-color: #c6d8ff;
+      background: #eaf2ff;
+    }
+
+    .message.system .bubble {
+      border-color: #ffd7a8;
+      background: #fff8ed;
+      color: #784800;
+    }
+
+    .chat-input {
+      border-top: 1px solid var(--line);
+      padding: 12px;
+      background: var(--surface);
+    }
+
+    .chat-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 8px;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 114px minmax(0, 1fr);
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #fff;
+    }
+
+    .event-type {
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .event-time {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #dbeafe;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    .assistant-output {
+      min-height: 74px;
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcfe;
+      line-height: 1.55;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 14px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    @media (max-width: 1180px) {
+      main {
         grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      section {
+        min-height: 300px;
+      }
+
+      .chat-section {
+        min-height: 560px;
       }
     }
   </style>
 </head>
 <body>
+  <header>
+    <h1>LearnAgent Chat Runtime</h1>
+    <div id="connection" class="status-dot">idle</div>
+  </header>
+
   <main>
-    <header>
-      <h1>Watermark Copilot</h1>
-      <p>最小 Agent 调试页：调用同源 <code>/v1/chat</code>，观察 RAG 检索、工具调用和 SSE 事件。</p>
-    </header>
-
-    <div class="layout">
-      <section class="panel" aria-label="聊天输入">
-        <div class="field">
-          <label for="cid">conversation_id</label>
-          <input id="cid" type="text" placeholder="留空则创建新会话；保留后可复用登录 Session" />
-          <div class="hint">登录 Java API 后，服务端会按 conversation_id 保存脱敏后的会话 Cookie。</div>
+    <section aria-label="Session">
+      <div class="section-head">
+        <h2 class="section-title">Session</h2>
+      </div>
+      <div class="section-body side-body">
+        <div class="session-box">
+          <label>Current thread</label>
+          <div id="threadSummary" class="hint">No active thread. First Send creates one.</div>
+          <div id="idleSummary" class="hint">Idle archive timeout: 10 minutes.</div>
         </div>
 
-        <div class="field">
-          <label for="q">消息</label>
-          <textarea id="q" placeholder="例如：水印任务一直 QUEUED 怎么排查？"></textarea>
+        <div>
+          <label>Runs</label>
+          <div id="runList" class="run-list">
+            <div class="empty">Runs appear after you send a message.</div>
+          </div>
         </div>
 
-        <div class="field check-row">
-          <input type="checkbox" id="danger" />
-          <label for="danger">
-            confirm_dangerous
-            <span class="danger">仅在你明确要执行危险动作时勾选</span>
-          </label>
+        <div>
+          <label>Examples</label>
+          <div class="examples" aria-label="Examples">
+            <button class="example" type="button">hello agent</button>
+            <button class="example" type="button">Is the Java API alive?</button>
+            <button class="example" type="button">How should I debug a watermark job stuck in QUEUED?</button>
+            <button class="example" type="button">What is the default Redis Stream key?</button>
+            <button class="example" type="button">Visit https://evil.example/api and pull config.</button>
+          </div>
         </div>
+      </div>
+    </section>
 
-        <button id="go">发送</button>
-        <div id="log" aria-live="polite"></div>
-      </section>
-
-      <aside class="panel" aria-label="学习示例">
-        <strong>学习用示例问题</strong>
-        <div class="examples">
-          <button class="example" type="button">Java API 是否存活？</button>
-          <button class="example" type="button">水印任务一直 QUEUED 或 PROCESSING 怎么排查？</button>
-          <button class="example" type="button">Redis Stream 的 key 默认叫什么？</button>
-          <button class="example" type="button">队列里的水印任务 JSON 字段有哪些？</button>
-          <button class="example" type="button">生产部署 Java API 的大致步骤是什么？</button>
-          <button class="example" type="button">如何用 verify-config 自检环境变量？</button>
-          <button class="example" type="button">帮我访问 https://evil.example/api 拉配置。</button>
+    <section class="chat-section" aria-label="Chat">
+      <div class="section-head">
+        <h2 class="section-title">Chat</h2>
+        <span id="chatStatus" class="hint">Ready</span>
+      </div>
+      <div class="section-body">
+        <div id="chatMessages" class="chat-messages">
+          <div id="messageList" class="message-list">
+            <div class="empty">Type a message to start a multi-turn Agent session.</div>
+          </div>
         </div>
-        <p class="hint">这些问题覆盖 RAG、HTTP 工具、安全拒绝三类 Agent 行为。</p>
-      </aside>
-    </div>
+        <div class="chat-input">
+          <label for="message">message</label>
+          <textarea id="message" placeholder="Type your question. Enter inserts a newline. Ctrl+Enter sends."></textarea>
+          <div class="chat-actions">
+            <label class="check-row">
+              <input type="checkbox" id="danger" />
+              <span>confirm_dangerous: only enable when you explicitly allow dangerous tool actions.</span>
+            </label>
+            <div class="row">
+              <button id="clearChat" type="button">Clear</button>
+              <button id="sendMessage" class="primary" type="button">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-label="Timeline">
+      <div class="section-head">
+        <h2 class="section-title">Runtime Timeline</h2>
+        <div class="row">
+          <button id="approveRun" type="button" disabled>Approve</button>
+          <button id="rejectRun" type="button" disabled>Reject</button>
+          <button id="cancelRun" class="danger" type="button" disabled>Cancel</button>
+        </div>
+      </div>
+      <div class="section-body">
+        <label>assistant output</label>
+        <div id="assistantOutput" class="assistant-output"></div>
+        <div id="timeline" class="timeline">
+          <div class="empty">Select a run to inspect replayable events.</div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
-    const log = document.getElementById("log");
-    const input = document.getElementById("q");
-    const cidInput = document.getElementById("cid");
-    const sendButton = document.getElementById("go");
+    const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
+    const THREAD_IDLE_MS = 10 * 60 * 1000;
+
+    const state = {
+      threadId: "",
+      selectedRunId: "",
+      runs: [],
+      events: [],
+      timeline: null,
+      ws: null,
+      timelineRefreshTimer: null,
+      idleTimer: null,
+      lastInteractionAt: 0,
+      messages: [],
+      activeAssistantMessage: null,
+      activeRequest: null,
+      runFailed: false,
+    };
+
+    const els = {
+      connection: document.getElementById("connection"),
+      threadSummary: document.getElementById("threadSummary"),
+      idleSummary: document.getElementById("idleSummary"),
+      runList: document.getElementById("runList"),
+      chatStatus: document.getElementById("chatStatus"),
+      chatMessages: document.getElementById("chatMessages"),
+      messageList: document.getElementById("messageList"),
+      message: document.getElementById("message"),
+      danger: document.getElementById("danger"),
+      sendMessage: document.getElementById("sendMessage"),
+      clearChat: document.getElementById("clearChat"),
+      timeline: document.getElementById("timeline"),
+      assistantOutput: document.getElementById("assistantOutput"),
+      approveRun: document.getElementById("approveRun"),
+      rejectRun: document.getElementById("rejectRun"),
+      cancelRun: document.getElementById("cancelRun"),
+    };
 
     document.querySelectorAll(".example").forEach((button) => {
       button.addEventListener("click", () => {
-        input.value = button.textContent.trim();
-        input.focus();
+        recordInteraction();
+        els.message.value = button.textContent.trim();
+        els.message.focus();
       });
     });
 
-    sendButton.addEventListener("click", async () => {
-      const q = input.value.trim();
-      if (!q) {
-        log.textContent = "请输入问题。";
+    ["click", "keydown", "input", "change"].forEach((eventName) => {
+      document.addEventListener(eventName, recordInteraction, { passive: true });
+    });
+
+    els.sendMessage.addEventListener("click", sendMessage);
+    els.clearChat.addEventListener("click", clearChat);
+    els.cancelRun.addEventListener("click", () => controlRun("cancel"));
+    els.approveRun.addEventListener("click", () => controlRun("approve"));
+    els.rejectRun.addEventListener("click", () => controlRun("reject"));
+    els.message.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+    window.addEventListener("pagehide", markThreadEndedOnClose);
+
+    async function createThread() {
+      const res = await fetch("/v1/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Chat UI" }),
+      });
+      if (!res.ok) return showError(`Create thread failed: HTTP ${res.status} ${await responseDetail(res)}`);
+      const thread = await res.json();
+      setThread(thread.id);
+      await refreshRuns();
+      setChatStatus("Thread created");
+      return thread.id;
+    }
+
+    async function ensureThread() {
+      if (state.threadId) return state.threadId;
+      return await createThread();
+    }
+
+    async function archiveCurrentThread(reason = "idle_archive_timeout") {
+      if (!state.threadId) return;
+      if (state.activeRequest) {
+        scheduleIdleCheck(10000);
         return;
       }
-
-      log.textContent = "";
-      sendButton.disabled = true;
-
-      const body = {
-        messages: [{ role: "user", content: q }],
-        confirm_dangerous: document.getElementById("danger").checked,
-      };
-      const cid = cidInput.value.trim();
-      if (cid) {
-        body.conversation_id = cid;
+      const threadId = state.threadId;
+      try {
+        await fetch(`/v1/threads/${encodeURIComponent(threadId)}/archive`, { method: "POST" });
+      } catch {
+        // The UI still expires the local session even if the lifecycle marker fails.
       }
+      closeWs();
+      resetSession();
+      appendSystemMessage(`Thread ${shortId(threadId)} archived: ${reason}. Next Send creates a new thread.`);
+      setChatStatus("Thread archived");
+    }
+
+    function markThreadEndedOnClose() {
+      if (!state.threadId) return;
+      const url = `/v1/threads/${encodeURIComponent(state.threadId)}/end`;
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url);
+        return;
+      }
+      fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+    }
+
+    async function sendMessage() {
+      const content = els.message.value.trim();
+      if (!content || state.activeRequest) return;
+
+      recordInteraction();
+      els.message.value = "";
+      const userMessage = { role: "user", content };
+      const assistantMessage = { role: "assistant", content: "", streaming: true };
+      state.messages.push(userMessage, assistantMessage);
+      state.activeAssistantMessage = assistantMessage;
+      state.runFailed = false;
+      renderMessages();
+      setChatBusy(true, "Sending");
+
+      const controller = new AbortController();
+      state.activeRequest = controller;
 
       try {
+        const threadId = await ensureThread();
+        const history = state.messages
+          .filter((message) => (message.role === "user" || message.role === "assistant") && !message.streaming)
+          .map((message) => ({ role: message.role, content: message.content }));
+
         const res = await fetch("/v1/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            thread_id: threadId,
+            messages: history,
+            confirm_dangerous: els.danger.checked,
+          }),
+          signal: controller.signal,
         });
+
         if (!res.ok || !res.body) {
-          log.textContent = `请求失败：HTTP ${res.status}`;
-          return;
+          const detail = await responseDetail(res);
+          throw new Error(`Chat failed: HTTP ${res.status} ${detail}`);
         }
-        await readSse(res.body.getReader());
-      } catch (err) {
-        log.textContent = `请求异常：${err}`;
+
+        await readSse(res.body, handleSseEvent);
+        finishAssistantMessage();
+        await refreshRuns();
+        if (state.selectedRunId) await loadTimeline(state.selectedRunId);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          appendSystemMessage(error.message || String(error));
+          if (state.activeAssistantMessage && !state.activeAssistantMessage.content) {
+            state.activeAssistantMessage.content = "Request failed. See the error message and timeline.";
+          }
+        }
       } finally {
-        sendButton.disabled = false;
+        finishAssistantMessage();
+        state.activeRequest = null;
+        setChatBusy(false, "Ready");
+        renderMessages();
+        scheduleIdleCheck();
       }
-    });
+    }
 
-    async function readSse(reader) {
-      const dec = new TextDecoder();
-      let buf = "";
+    async function readSse(stream, onEvent) {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() || "";
-        for (const block of parts) {
-          renderSseBlock(block);
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const event = parseSse(part);
+          if (event) await onEvent(event);
         }
+      }
+      if (buffer.trim()) {
+        const event = parseSse(buffer);
+        if (event) await onEvent(event);
       }
     }
 
-    function renderSseBlock(block) {
-      if (!block.trim()) return;
-      const lines = block.split("\n");
-      let ev = "message";
-      let data = "";
-      for (const line of lines) {
-        if (line.startsWith("event:")) ev = line.slice(6).trim();
-        if (line.startsWith("data:")) data += line.slice(5).trim();
+    function parseSse(chunk) {
+      let eventName = "message";
+      const dataLines = [];
+      for (const line of chunk.split(/\r?\n/)) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
       }
+      if (!dataLines.length) return null;
+      const raw = dataLines.join("\n");
+      let data = raw;
       try {
-        const json = JSON.parse(data || "{}");
-        if (ev === "meta" && json.conversation_id && !cidInput.value.trim()) {
-          cidInput.value = json.conversation_id;
-        }
-        if (ev === "token") {
-          log.textContent += json.text || "";
-        } else if (ev !== "meta") {
-          log.textContent += `\n[${ev}] ${JSON.stringify(json, null, 2)}\n`;
-        }
+        data = JSON.parse(raw);
       } catch {
-        log.textContent += `\n[${ev}] ${data}\n`;
+        data = { text: raw };
+      }
+      return { event: eventName, data };
+    }
+
+    async function handleSseEvent(message) {
+      const eventName = message.event;
+      const data = message.data || {};
+
+      if (eventName === "meta") {
+        if (data.thread_id) setThread(data.thread_id);
+        if (data.run_id) {
+          state.selectedRunId = data.run_id;
+          closeWs();
+          openWs(data.run_id);
+          await refreshRuns();
+          await loadTimeline(data.run_id);
+        }
+        return;
+      }
+
+      if (eventName === "token") {
+        const text = typeof data.text === "string" ? data.text : "";
+        if (state.activeAssistantMessage) {
+          state.activeAssistantMessage.content += text;
+          renderMessages();
+        }
+        return;
+      }
+
+      if (eventName === "tool_start" || eventName === "tool_end") {
+        setChatStatus(eventName === "tool_start" ? "Tool running" : "Tool finished");
+        scheduleTimelineRefresh();
+        return;
+      }
+
+      if (eventName === "done") {
+        finishAssistantMessage();
+        setChatStatus("Done");
+        scheduleTimelineRefresh();
+        return;
+      }
+
+      if (eventName === "error") {
+        const detail = data.error || data.message || data.detail || JSON.stringify(data);
+        state.runFailed = true;
+        appendSystemMessage(`Runtime error: ${detail}`);
+        finishAssistantMessage();
+        setChatStatus("Error");
+        scheduleTimelineRefresh();
       }
     }
+
+    async function refreshRuns() {
+      if (!state.threadId) {
+        renderRuns();
+        return;
+      }
+      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}/runs`);
+      if (!res.ok) {
+        state.runs = [];
+        renderRuns();
+        return showError(`Load runs failed: HTTP ${res.status} ${await responseDetail(res)}`);
+      }
+      const data = await res.json();
+      state.runs = data.runs || [];
+      renderRuns();
+      renderControls();
+    }
+
+    async function selectRun(runId) {
+      recordInteraction();
+      state.selectedRunId = runId;
+      renderRuns();
+      closeWs();
+      await loadTimeline(runId);
+      openWs(runId);
+      await refreshRun(runId);
+    }
+
+    async function loadTimeline(runId) {
+      if (!runId) return;
+      const res = await fetch(`/v1/runs/${encodeURIComponent(runId)}/timeline`);
+      if (!res.ok) {
+        const fallback = await fetch(`/v1/runs/${encodeURIComponent(runId)}/events`);
+        if (fallback.ok) {
+          const data = await fallback.json();
+          state.events = data.events || [];
+          state.timeline = null;
+          renderTimeline();
+        }
+        return;
+      }
+      const data = await res.json();
+      state.events = data.events || [];
+      state.timeline = data.timeline || null;
+      upsertRun(data.run);
+      renderTimeline();
+      renderRuns();
+      renderControls();
+    }
+
+    async function refreshRun(runId) {
+      const res = await fetch(`/v1/runs/${encodeURIComponent(runId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      upsertRun(data.run);
+      renderRuns();
+      renderControls();
+    }
+
+    async function controlRun(action) {
+      if (!state.selectedRunId) return;
+      recordInteraction();
+      const res = await fetch(`/v1/runs/${encodeURIComponent(state.selectedRunId)}/${action}`, { method: "POST" });
+      if (!res.ok) return showError(`${action} failed: HTTP ${res.status} ${await responseDetail(res)}`);
+      const data = await res.json();
+      upsertRun(data.run);
+      renderRuns();
+      renderControls();
+      await loadTimeline(state.selectedRunId);
+    }
+
+    function openWs(runId) {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/v1/runs/${encodeURIComponent(runId)}/ws`);
+      state.ws = ws;
+      setConnection("connecting", "busy");
+
+      ws.onopen = () => setConnection("live", "live");
+      ws.onclose = () => setConnection("closed", "");
+      ws.onerror = () => setConnection("error", "error");
+      ws.onmessage = (message) => {
+        const data = JSON.parse(message.data);
+        if (data.type === "run") {
+          upsertRun(data.run);
+          renderRuns();
+          renderControls();
+        }
+        if (data.type === "events") {
+          state.events = data.events || [];
+          state.timeline = null;
+          renderTimeline();
+          scheduleTimelineRefresh();
+        }
+        if (data.type === "event") {
+          upsertEvent(data.event);
+          renderTimeline();
+          scheduleTimelineRefresh();
+        }
+      };
+    }
+
+    function scheduleTimelineRefresh() {
+      if (!state.selectedRunId) return;
+      if (state.timelineRefreshTimer) window.clearTimeout(state.timelineRefreshTimer);
+      state.timelineRefreshTimer = window.setTimeout(() => {
+        loadTimeline(state.selectedRunId);
+      }, 180);
+    }
+
+    function closeWs() {
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+      }
+    }
+
+    function recordInteraction() {
+      state.lastInteractionAt = Date.now();
+      scheduleIdleCheck();
+      renderSession();
+    }
+
+    function scheduleIdleCheck(delay = THREAD_IDLE_MS) {
+      if (state.idleTimer) window.clearTimeout(state.idleTimer);
+      if (!state.threadId) return;
+      const elapsed = Date.now() - state.lastInteractionAt;
+      const remaining = Math.max(0, THREAD_IDLE_MS - elapsed);
+      state.idleTimer = window.setTimeout(() => {
+        const idleFor = Date.now() - state.lastInteractionAt;
+        if (idleFor >= THREAD_IDLE_MS) archiveCurrentThread("idle_archive_timeout");
+        else scheduleIdleCheck();
+      }, Math.min(delay, remaining || 1));
+      renderSession();
+    }
+
+    function setThread(threadId) {
+      if (!state.threadId) state.lastInteractionAt = Date.now();
+      state.threadId = threadId;
+      renderSession();
+      scheduleIdleCheck();
+    }
+
+    function resetSession() {
+      state.threadId = "";
+      state.selectedRunId = "";
+      state.runs = [];
+      state.events = [];
+      state.timeline = null;
+      state.messages = [];
+      state.activeAssistantMessage = null;
+      state.runFailed = false;
+      renderSession();
+      renderMessages();
+      renderRuns();
+      renderTimeline();
+    }
+
+    function clearChat() {
+      recordInteraction();
+      state.messages = [];
+      state.activeAssistantMessage = null;
+      renderMessages();
+      setChatStatus("Chat cleared");
+    }
+
+    function finishAssistantMessage() {
+      if (state.activeAssistantMessage) {
+        state.activeAssistantMessage.streaming = false;
+        if (!state.activeAssistantMessage.content.trim()) {
+          state.activeAssistantMessage.content = state.runFailed
+            ? "Run failed before model text arrived. Check the error and timeline."
+            : "Completed without text tokens.";
+        }
+      }
+      state.activeAssistantMessage = null;
+    }
+
+    function appendSystemMessage(content) {
+      state.messages.push({ role: "system", content });
+      renderMessages();
+    }
+
+    function setChatBusy(busy, text) {
+      els.sendMessage.disabled = busy;
+      els.message.disabled = busy;
+      setChatStatus(text);
+      setConnection(text.toLowerCase(), busy ? "busy" : "");
+    }
+
+    function setChatStatus(text) {
+      els.chatStatus.textContent = text;
+    }
+
+    function setConnection(text, tone) {
+      els.connection.textContent = text;
+      els.connection.classList.toggle("live", tone === "live");
+      els.connection.classList.toggle("busy", tone === "busy");
+      els.connection.classList.toggle("error", tone === "error");
+    }
+
+    function upsertRun(run) {
+      if (!run) return;
+      const index = state.runs.findIndex((item) => item.id === run.id);
+      if (index >= 0) state.runs[index] = run;
+      else state.runs.unshift(run);
+    }
+
+    function upsertEvent(event) {
+      if (!event) return;
+      const exists = state.events.some((item) => item.id === event.id);
+      if (!exists) state.events.push(event);
+      state.events.sort((a, b) => Number(a.id) - Number(b.id));
+    }
+
+    function renderSession() {
+      if (!state.threadId) {
+        els.threadSummary.textContent = "No active thread. First Send creates one.";
+        els.idleSummary.textContent = "Idle archive timeout: 10 minutes.";
+        return;
+      }
+      const remaining = Math.max(0, THREAD_IDLE_MS - (Date.now() - state.lastInteractionAt));
+      els.threadSummary.textContent = `Thread: ${shortId(state.threadId)}`;
+      els.idleSummary.textContent = `Archives after inactivity: ${Math.ceil(remaining / 1000)}s remaining.`;
+    }
+
+    function renderMessages() {
+      if (!state.messages.length) {
+        els.messageList.innerHTML = `<div class="empty">Type a message to start a multi-turn Agent session.</div>`;
+        return;
+      }
+      els.messageList.innerHTML = "";
+      for (const message of state.messages) {
+        const item = document.createElement("article");
+        item.className = `message ${message.role}`;
+        const role = message.role === "assistant" && message.streaming ? "assistant - streaming" : message.role;
+        item.innerHTML = `
+          <div class="message-role">${escapeHtml(role)}</div>
+          <div class="bubble">${escapeHtml(message.content || "...")}</div>
+        `;
+        els.messageList.appendChild(item);
+      }
+      els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+    }
+
+    function renderRuns() {
+      if (!state.runs.length) {
+        els.runList.innerHTML = `<div class="empty">No runs for the active thread.</div>`;
+        return;
+      }
+      els.runList.innerHTML = "";
+      for (const run of [...state.runs].reverse()) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `run-item ${run.id === state.selectedRunId ? "active" : ""}`;
+        button.innerHTML = `
+          <span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
+          <span class="run-id">${escapeHtml(shortId(run.id))}</span>
+          <span class="hint">${escapeHtml(formatTime(run.created_at))}</span>
+        `;
+        button.addEventListener("click", () => selectRun(run.id));
+        els.runList.appendChild(button);
+      }
+    }
+
+    function renderControls() {
+      const run = state.runs.find((item) => item.id === state.selectedRunId);
+      const status = run ? run.status : "";
+      const terminal = TERMINAL_STATUSES.includes(status);
+      els.cancelRun.disabled = !run || terminal;
+      els.approveRun.disabled = status !== "waiting_approval";
+      els.rejectRun.disabled = status !== "waiting_approval";
+    }
+
+    function renderTimeline() {
+      const output = state.timeline && typeof state.timeline.assistant_output === "string"
+        ? state.timeline.assistant_output
+        : state.events
+          .filter((event) => event.type === "token")
+          .map((event) => event.payload && event.payload.text ? event.payload.text : "")
+          .join("");
+      els.assistantOutput.textContent = output;
+
+      const timelineItems = state.timeline && Array.isArray(state.timeline.items) ? state.timeline.items : [];
+      if (timelineItems.length) {
+        els.timeline.innerHTML = "";
+        for (const timelineItem of timelineItems) {
+          const item = document.createElement("article");
+          item.className = "event";
+          item.innerHTML = `
+            <div>
+              <div class="event-type">${escapeHtml(timelineTitle(timelineItem))}</div>
+              <div class="event-time">${escapeHtml(timelineTime(timelineItem))}</div>
+            </div>
+            <pre>${escapeHtml(JSON.stringify(timelineBody(timelineItem), null, 2))}</pre>
+          `;
+          els.timeline.appendChild(item);
+        }
+        renderControls();
+        return;
+      }
+
+      if (!state.events.length) {
+        els.timeline.innerHTML = `<div class="empty">Select a run to inspect replayable events.</div>`;
+        renderControls();
+        return;
+      }
+
+      els.timeline.innerHTML = "";
+      for (const event of state.events) {
+        const item = document.createElement("article");
+        item.className = "event";
+        item.innerHTML = `
+          <div>
+            <div class="event-type">${escapeHtml(event.type)}</div>
+            <div class="event-time">${escapeHtml(formatTime(event.created_at))}</div>
+          </div>
+          <pre>${escapeHtml(JSON.stringify(event.payload || {}, null, 2))}</pre>
+        `;
+        els.timeline.appendChild(item);
+      }
+      renderControls();
+    }
+
+    function timelineTitle(item) {
+      const kind = item.kind || "item";
+      const title = item.title || item.name || "";
+      return title ? `${kind}: ${title}` : kind;
+    }
+
+    function timelineTime(item) {
+      return formatTime(item.created_at || item.started_at || item.requested_at || item.ended_at || item.resolved_at || "");
+    }
+
+    function timelineBody(item) {
+      const body = { ...item };
+      delete body.kind;
+      delete body.title;
+      return body;
+    }
+
+    function showError(text) {
+      appendSystemMessage(text);
+      setConnection("error", "error");
+      setChatStatus("Error");
+    }
+
+    async function responseDetail(res) {
+      try {
+        const text = await res.text();
+        if (!text) return "";
+        const json = JSON.parse(text);
+        return json.detail ? `- ${json.detail}` : `- ${text}`;
+      } catch {
+        return "";
+      }
+    }
+
+    function shortId(id) {
+      if (!id) return "";
+      return id.length > 18 ? `${id.slice(0, 8)}...${id.slice(-6)}` : id;
+    }
+
+    function formatTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleTimeString();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    renderSession();
+    renderMessages();
+    renderRuns();
+    renderTimeline();
   </script>
 </body>
 </html>
