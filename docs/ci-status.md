@@ -124,3 +124,44 @@ conda run -n myenv39 python scripts/verify_phase3_safety_gate.py `
 ## 5. 后续扩展建议
 
 - 把 CI summary 输出为统一 JSON，供后续 dashboard/历史趋势分析使用。
+
+---
+
+## 6. LearnAgent Eval CI（新增）
+
+> 工作流：`.github/workflows/eval-ci.yml`（`LearnAgent Eval CI`）
+
+当前 Eval CI 分为两层：
+
+- PR/Push：`python scripts/verify_eval_suite.py --profile core`
+- Nightly/手动：`python scripts/verify_eval_suite.py --profile full [--enable-ragas]`
+
+统一聚合产物：
+
+- `artifacts/eval/eval-suite-summary.json`
+
+关键汇总字段：
+
+- `overall_pass`
+- `suites_total`
+- `suites_failed`
+- `skipped_suites`
+- `failed_scenarios`
+- `runtime_contract_breaks`
+- `rag_metrics`
+
+### RAG 前置条件与 SKIP 语义
+
+`phase4_ragas` 依赖以下文档源文件：
+
+- `DEPLOY-SERVER.md`
+- `REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md`
+- `watermark-java-backend-tech-selection.md`
+
+解析路径来源：
+
+1. 环境变量 `WATERMARK_DOCS_PATH`
+2. 仓库内 `docs/source`
+3. 上级 `backend-java/docs`
+
+如果文档前置条件不满足且启用 `--allow-missing-docs`，脚本 `verify_phase4_ragas.py` 会输出 `phase4_ragas=SKIP` 并返回 0，避免因环境不完整导致 PR 门禁误报。Nightly 环境建议配置完整文档路径以获得真实 `rag_metrics`。

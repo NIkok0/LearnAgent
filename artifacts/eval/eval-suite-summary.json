@@ -1,42 +1,250 @@
 {
-  "profile": "rag",
+  "profile": "full",
   "enable_ragas": false,
-  "overall_pass": false,
-  "suites_total": 1,
-  "suites_failed": 1,
-  "failed_suites": [
+  "overall_pass": true,
+  "suites_total": 7,
+  "suites_failed": 0,
+  "failed_suites": [],
+  "skipped_suites": [
     "phase4_ragas"
   ],
-  "duration_total_ms": 318,
+  "failed_scenarios": [],
+  "runtime_contract_breaks": [],
+  "rag_metrics": {
+    "docs_cases": 0,
+    "vector_enabled": false,
+    "avg_required_source_coverage": 0.0,
+    "required_source_full_match_rate": 0.0,
+    "retrieval_hit_rate": 0.0
+  },
+  "duration_total_ms": 158112,
   "results": [
+    {
+      "suite_name": "golden_scenarios",
+      "script": "scripts/verify_golden_scenarios.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 68,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\eval\\golden-scenarios-summary.json",
+      "checks": {
+        "dataset_exists": true,
+        "case_count_minimum": true,
+        "duplicate_ids_none": true,
+        "missing_required_keys_none": true,
+        "field_shape_valid": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\eval\\golden-scenarios-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "dataset_path=E:\\code\\LearnAgent\\eval\\golden\\runtime-golden-scenarios.json",
+        "case_count=10",
+        "min_cases=8",
+        "duplicate_ids=0",
+        "missing_required_keys=0",
+        "invalid_fields=0",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\eval\\golden-scenarios-summary.json",
+        "golden_scenarios=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_event_store",
+      "script": "scripts/verify_runtime_event_store.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 360,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "event_count=4",
+        "event_types=token,tool_start,tool_end,done",
+        "db_exists=True",
+        "thread_ok=True",
+        "run_ok=True",
+        "events_ok=True",
+        "payload_ok=True",
+        "schema_ok=True",
+        "pagination_ok=True",
+        "archived_ok=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json",
+        "runtime_event_store=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_timeline",
+      "script": "scripts/verify_runtime_timeline.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 524,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "event_store_path=E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
+        "completed_assistant_output=hello world",
+        "completed_tool_merged=True",
+        "missing_tool_warnings=tool_missing_end",
+        "approval_status=approved",
+        "memory_summary_type=run",
+        "cancelled_status=cancelled",
+        "failed_warnings=failed_without_error_event",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json",
+        "runtime_timeline=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_checkpoint_link",
+      "script": "scripts/verify_runtime_checkpoint_link.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 150029,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\checkpoint-link-summary.json",
+      "checks": {
+        "meta_written": true,
+        "message_count_matches": true,
+        "meta_schema_version": true,
+        "had_checkpoint_before_archive": true,
+        "archive_purged_checkpoint": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\checkpoint-link-summary.json"
+      ],
+      "errors": [
+        "timeout_after_seconds=150",
+        "timeout_after_pass_signal"
+      ],
+      "stdout_tail": [
+        "meta_written=True",
+        "message_count_matches=True",
+        "meta_schema_version=True",
+        "had_checkpoint_before_archive=True",
+        "archive_purged_checkpoint=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\checkpoint-link-summary.json",
+        "runtime_checkpoint_link=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "runtime_run_manager",
+      "script": "scripts/verify_runtime_run_manager.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 819,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\run-manager-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\run-manager-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "completed_cancel_after_terminal_status=completed",
+        "completed_second_run_status=completed",
+        "completed_tool_start_has_metadata=True",
+        "cancelled_status=cancelled",
+        "cancelled_concurrent_blocked=True",
+        "approved_status=completed",
+        "approved_waiting_status_seen=True",
+        "rejected_status=completed",
+        "rejected_tool_executed=False",
+        "archived_blocked=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\run-manager-summary.json",
+        "runtime_run_manager=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "session_mvp",
+      "script": "scripts/verify_session_mvp.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 6022,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\session-mvp-summary.json",
+      "checks": {
+        "approval_waiting": true,
+        "approval_completed": true,
+        "approval_events": true,
+        "approval_resumed_once": true,
+        "approval_token": true,
+        "timeout_failed": true,
+        "timeout_error_event": true,
+        "timeout_reason": true,
+        "chatrunner_approval_waiting": true,
+        "chatrunner_approval_reached_tool": true,
+        "chatrunner_resumed_once": true,
+        "chatrunner_no_tool_before_approve": true,
+        "chatrunner_tool_executed_once": true,
+        "chatrunner_tool_audit": true,
+        "concurrency_blocked": true,
+        "concurrency_running_cap": true,
+        "rehydrate_completed": true,
+        "rehydrate_resumed_once": true,
+        "rehydrate_token": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\session-mvp-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "chatrunner_approval_reached_tool=True",
+        "chatrunner_resumed_once=True",
+        "chatrunner_no_tool_before_approve=True",
+        "chatrunner_tool_executed_once=True",
+        "chatrunner_tool_audit=True",
+        "concurrency_blocked=True",
+        "concurrency_running_cap=True",
+        "rehydrate_completed=True",
+        "rehydrate_resumed_once=True",
+        "rehydrate_token=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\session-mvp-summary.json",
+        "session_mvp=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer",
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\transformers\\utils\\hub.py:128: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.",
+        "  warnings.warn("
+      ]
+    },
     {
       "suite_name": "phase4_ragas",
       "script": "scripts/verify_phase4_ragas.py",
-      "status": "FAIL",
-      "duration_ms": 318,
+      "pass": true,
+      "status": "SKIP",
+      "duration_ms": 290,
       "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
       "checks": {},
       "artifacts": [
         "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json"
       ],
-      "errors": [
-        "exit_code=1",
-        "stderr_present"
-      ],
+      "errors": [],
       "stdout_tail": [
         "dataset_path=E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
         "eval_mode=proxy",
-        "docs_cases=6",
+        "docs_cases=0",
         "retrieval_hit_rate=0.0",
         "required_source_full_match_rate=0.0",
         "avg_required_source_coverage=0.0",
         "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
-        "phase4_ragas=FAIL"
+        "phase4_ragas=SKIP"
       ],
-      "stderr_tail": [
-        "project docs not found (set WATERMARK_DOCS_PATH or add Markdown files under docs/source). RAG disabled."
-      ]
+      "stderr_tail": []
     }
   ],
-  "eval_suite": "FAIL"
+  "eval_suite": "PASS"
 }

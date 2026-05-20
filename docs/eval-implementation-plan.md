@@ -102,6 +102,7 @@ flowchart LR
 #### B1. 新增场景集文件
 
 - 新增文件：`eval/golden/runtime-golden-scenarios.json`
+- 新增字段校验脚本：`scripts/verify_golden_scenarios.py`
 - 先放 8-10 条 case，覆盖：
   1. 正常问答触发 `search_docs`
   2. 危险 `http_post` 触发 `approval_required`
@@ -120,6 +121,8 @@ flowchart LR
 - `must_not_have_events`
 - `expected_run_status`
 - `notes`
+
+并在 `verify_eval_suite.py --profile core` 中默认包含 `golden_scenarios` 套件，确保场景集结构变更会触发门禁。
 
 ### Phase C：CI 门禁接入
 

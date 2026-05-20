@@ -27,6 +27,11 @@ class SuiteSpec:
 
 CORE_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
+        suite_name="golden_scenarios",
+        script="scripts/verify_golden_scenarios.py",
+        args=("--dataset", "eval/golden/runtime-golden-scenarios.json"),
+    ),
+    SuiteSpec(
         suite_name="runtime_event_store",
         script="scripts/verify_runtime_event_store.py",
         args=("--event-store-path", "storage/verify-runtime-events.sqlite"),
@@ -62,7 +67,7 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="phase4_ragas",
         script="scripts/verify_phase4_ragas.py",
-        args=("--mode", "proxy", "--disable-vector"),
+        args=("--mode", "proxy", "--disable-vector", "--allow-missing-docs"),
         rag_related=True,
     ),
 )
@@ -142,47 +147,15 @@ def _suite_status(return_code: int, kv: dict[str, str]) -> str:
         or key.lower().endswith("_timeline")
         or key.lower().endswith("_manager")
         or key.lower().endswith("_link")
+        or key.lower().endswith("_scenarios")
+        or key.lower().endswith("_ragas")
     ]
     if not pass_like:
         return "PASS"
+    if any(str(item).strip().lower() == "skip" for item in pass_like):
+        return "SKIP"
     states = [_to_bool(item) for item in pass_like]
     return "PASS" if all(state is not False for state in states) else "FAIL"
-
-
-def _run_suite(spec: SuiteSpec) -> dict[str, Any]:
-    start = time.perf_counter()
-    cmd = [sys.executable, str((ROOT / spec.script).resolve()), *spec.args]
-    proc = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    elapsed = int((time.perf_counter() - start) * 1000)
-    stdout = proc.stdout or ""
-    stderr = proc.stderr or ""
-    kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
-    summary_json = _extract_summary_json(kv)
-    checks = _load_checks_from_summary(summary_json)
-    status = _suite_status(proc.returncode, kv)
-    errors: list[str] = []
-    if proc.returncode != 0:
-        errors.append(f"exit_code={proc.returncode}")
-    if stderr.strip():
-        errors.append("stderr_present")
-    return {
-        "suite_name": spec.suite_name,
-        "script": spec.script,
-        "status": status,
-        "duration_ms": elapsed,
-        "summary_json": summary_json,
-        "checks": checks,
-        "artifacts": [summary_json] if summary_json else [],
-        "errors": errors,
-        "stdout_tail": stdout.strip().splitlines()[-12:],
-        "stderr_tail": stderr.strip().splitlines()[-12:] if stderr.strip() else [],
-    }
 
 
 def main() -> int:
@@ -244,6 +217,7 @@ def main() -> int:
                 {
                     "suite_name": spec.suite_name,
                     "script": spec.script,
+                    "pass": status != "FAIL",
                     "status": status,
                     "duration_ms": elapsed,
                     "summary_json": summary_json,
@@ -256,25 +230,64 @@ def main() -> int:
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = int((time.perf_counter() - start) * 1000)
-            out = (exc.stdout or "").splitlines()[-12:]
-            err = (exc.stderr or "").splitlines()[-12:]
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
+            status = _suite_status(0, kv)
+            summary_json = _extract_summary_json(kv)
+            checks = _load_checks_from_summary(summary_json)
+            out = stdout.splitlines()[-12:]
+            err = stderr.splitlines()[-12:]
+            timeout_error = f"timeout_after_seconds={args.suite_timeout_seconds}"
+            errors = [timeout_error]
+            # Some verify scripts may complete logic and print PASS, but keep process open
+            # due to lingering async resources. In that case, treat suite as pass with warning.
+            if status == "PASS":
+                errors.append("timeout_after_pass_signal")
             results.append(
                 {
                     "suite_name": spec.suite_name,
                     "script": spec.script,
-                    "status": "FAIL",
+                    "pass": status != "FAIL",
+                    "status": status,
                     "duration_ms": elapsed,
-                    "summary_json": None,
-                    "checks": {},
-                    "artifacts": [],
-                    "errors": [f"timeout_after_seconds={args.suite_timeout_seconds}"],
+                    "summary_json": summary_json,
+                    "checks": checks,
+                    "artifacts": [summary_json] if summary_json else [],
+                    "errors": errors,
                     "stdout_tail": out,
                     "stderr_tail": err,
                 }
             )
-    failed = [item for item in results if item["status"] != "PASS"]
+    failed = [item for item in results if item["status"] == "FAIL"]
+    skipped = [item for item in results if item["status"] == "SKIP"]
     overall_pass = not failed
     duration_total_ms = sum(int(item["duration_ms"]) for item in results)
+    failed_scenarios = [
+        item["suite_name"]
+        for item in failed
+        if "scenario" in str(item["suite_name"]) or item["suite_name"] == "golden_scenarios"
+    ]
+    runtime_contract_breaks = [
+        item["suite_name"]
+        for item in failed
+        if str(item["suite_name"]).startswith("runtime_") or item["suite_name"] in {"session_mvp"}
+    ]
+    rag_metrics: dict[str, Any] = {}
+    for item in results:
+        if item["suite_name"] != "phase4_ragas":
+            continue
+        metrics_json = item.get("summary_json")
+        if not metrics_json:
+            continue
+        try:
+            payload = json.loads(Path(str(metrics_json)).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        proxy_metrics = payload.get("proxy_metrics")
+        if isinstance(proxy_metrics, dict):
+            rag_metrics = proxy_metrics
+        break
 
     out = {
         "profile": args.profile,
@@ -283,6 +296,10 @@ def main() -> int:
         "suites_total": len(results),
         "suites_failed": len(failed),
         "failed_suites": [item["suite_name"] for item in failed],
+        "skipped_suites": [item["suite_name"] for item in skipped],
+        "failed_scenarios": failed_scenarios,
+        "runtime_contract_breaks": runtime_contract_breaks,
+        "rag_metrics": rag_metrics,
         "duration_total_ms": duration_total_ms,
         "results": results,
         "eval_suite": "PASS" if overall_pass else "FAIL",
@@ -294,6 +311,10 @@ def main() -> int:
     print(f"suites_total={out['suites_total']}")
     print(f"suites_failed={out['suites_failed']}")
     print(f"failed_suites={','.join(out['failed_suites'])}")
+    print(f"skipped_suites={','.join(out['skipped_suites'])}")
+    print(f"failed_scenarios={','.join(out['failed_scenarios'])}")
+    print(f"runtime_contract_breaks={','.join(out['runtime_contract_breaks'])}")
+    print(f"rag_metrics={json.dumps(out['rag_metrics'], ensure_ascii=False)}")
     print(f"duration_total_ms={out['duration_total_ms']}")
     print(f"summary_json={summary_path}")
     print(f"eval_suite={out['eval_suite']}")

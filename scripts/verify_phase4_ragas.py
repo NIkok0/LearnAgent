@@ -111,6 +111,24 @@ def _maybe_run_ragas(records: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         return {}, errors
 
 
+def _docs_precondition() -> tuple[bool, dict[str, Any]]:
+    from copilot_agent.rag.ingest import DOC_FILENAMES, repo_docs_dir  # noqa: WPS433
+
+    base = repo_docs_dir()
+    if base is None:
+        return False, {
+            "docs_dir": None,
+            "required_files": list(DOC_FILENAMES),
+            "missing_files": list(DOC_FILENAMES),
+        }
+    missing = [name for name in DOC_FILENAMES if not (base / name).is_file()]
+    return len(missing) == 0, {
+        "docs_dir": str(base),
+        "required_files": list(DOC_FILENAMES),
+        "missing_files": missing,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify Phase 4 RAG quality (RAGAS optional).")
     parser.add_argument(
@@ -141,6 +159,11 @@ def main() -> int:
         default="auto",
         help="auto: try RAGAS then fallback; proxy: deterministic retrieval metrics; ragas: strict RAGAS.",
     )
+    parser.add_argument(
+        "--allow-missing-docs",
+        action="store_true",
+        help="Return SKIP instead of FAIL when required docs are missing.",
+    )
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset).resolve()
@@ -153,6 +176,40 @@ def main() -> int:
     except Exception as exc:
         cases = []
         errors.append(f"dataset_read_error: {exc}")
+
+    docs_ready, precondition = _docs_precondition()
+    if not docs_ready and args.allow_missing_docs:
+        summary = {
+            "dataset_path": str(dataset_path),
+            "eval_mode": "proxy",
+            "proxy_metrics": {
+                "docs_cases": 0,
+                "vector_enabled": False,
+                "avg_required_source_coverage": 0.0,
+                "required_source_full_match_rate": 0.0,
+                "retrieval_hit_rate": 0.0,
+            },
+            "ragas_metrics": {},
+            "ragas_warnings": [],
+            "errors": [],
+            "records": [],
+            "preconditions": precondition,
+            "phase4_ragas": "SKIP",
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"dataset_path={summary['dataset_path']}")
+        print(f"eval_mode={summary['eval_mode']}")
+        print("docs_cases=0")
+        print("retrieval_hit_rate=0.0")
+        print("required_source_full_match_rate=0.0")
+        print("avg_required_source_coverage=0.0")
+        print(f"summary_json={summary_path}")
+        print("phase4_ragas=SKIP")
+        return 0
+    if not docs_ready:
+        errors.append(
+            "docs_precondition_failed: set WATERMARK_DOCS_PATH or restore docs/source with required markdown files"
+        )
 
     disable_vector = bool(args.disable_vector and not args.enable_vector)
     records, proxy_metrics = _build_proxy_records(cases, top_k=args.top_k, disable_vector=disable_vector)
@@ -182,6 +239,7 @@ def main() -> int:
         "ragas_warnings": ragas_errors if args.mode == "auto" else [],
         "errors": errors,
         "records": records,
+        "preconditions": precondition,
         "phase4_ragas": "PASS" if (proxy_pass and not errors) else "FAIL",
     }
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -32,6 +32,7 @@ CI 输出指标：
   - `proxy`：离线确定性指标（CI 默认 gate，配合 `--disable-vector`）
   - `ragas`：开启 RAGAS 实评分（需额外依赖与 `OPENAI_API_KEY`）
   - `auto`：先尝试 RAGAS，不可用则回退到 proxy
+  - `allow-missing-docs`：文档前置条件不满足时返回 `SKIP`（用于避免环境缺 docs 导致误报）
 
 CI 输出指标：
 
@@ -97,6 +98,8 @@ CI 输出指标：
 - `required_source_full_match_rate >= 0.6`
 
 满足以上条件且无脚本错误即 PASS。
+
+若启用 `--allow-missing-docs` 且未找到文档源，脚本返回 `phase4_ragas=SKIP`（退出码 0），并在 summary 的 `preconditions` 字段中给出缺失信息。此模式适合 PR 门禁；Nightly 建议提供完整 docs 后再做真实质量比较。
 
 `scripts/verify_phase4_overall.py` 的默认 gate：
 
