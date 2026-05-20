@@ -2,7 +2,7 @@
   "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-run-manager-events.sqlite",
   "run_manager_compat": true,
   "completed": {
-    "run_id": "1e23c47c-d374-4be8-b7ad-53c9210d2a35",
+    "run_id": "49c7de6c-e5a4-4f2c-b51e-5bcd8a39f372",
     "status": "completed",
     "cancel_after_terminal_status": "completed",
     "cancel_after_terminal_added_events": 0,
@@ -18,7 +18,7 @@
     "tool_start_has_metadata": true
   },
   "cancelled": {
-    "run_id": "7686426d-e4a5-4bef-9c4f-ed0facb91b84",
+    "run_id": "a9cbeae2-e579-4350-9323-fe417f593086",
     "status": "cancelled",
     "concurrent_blocked": true,
     "event_types": [
@@ -29,13 +29,14 @@
     ]
   },
   "approved": {
-    "run_id": "a9c41151-d8c5-49ae-88b2-7b503e574694",
+    "run_id": "79eb6f4c-ba0f-4484-adbc-c95821422653",
     "waiting_status_seen": true,
     "status": "completed",
     "event_types": [
       "run_created",
       "run_started",
       "approval_required",
+      "run_checkpoint_meta",
       "approval_resolved",
       "run_started",
       "token",
@@ -45,12 +46,13 @@
     ]
   },
   "rejected": {
-    "run_id": "ec28e36f-a940-45d2-9a1f-29d70ef416f8",
+    "run_id": "4fde6d17-0318-4dae-8c76-cd0dac887214",
     "status": "completed",
     "event_types": [
       "run_created",
       "run_started",
       "approval_required",
+      "run_checkpoint_meta",
       "approval_resolved",
       "token",
       "done"

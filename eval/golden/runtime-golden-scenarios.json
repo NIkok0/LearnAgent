@@ -1,0 +1,235 @@
+{
+  "version": "v1",
+  "description": "Golden scenarios for LearnAgent runtime contract regression.",
+  "owner": "runtime-eval",
+  "cases": [
+    {
+      "id": "runtime_normal_search_docs",
+      "input": {
+        "thread_id": "golden-normal-search",
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is the default Redis Stream key?"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "run_created",
+        "run_started",
+        "token",
+        "tool_start",
+        "tool_end",
+        "done"
+      ],
+      "must_not_have_events": [
+        "approval_required",
+        "error"
+      ],
+      "expected_run_status": "completed",
+      "notes": "Baseline docs retrieval path should complete and include tool audit."
+    },
+    {
+      "id": "runtime_dangerous_post_requires_approval",
+      "input": {
+        "thread_id": "golden-approval-required",
+        "messages": [
+          {
+            "role": "user",
+            "content": "enqueue a watermark job"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "run_created",
+        "run_started",
+        "approval_required",
+        "run_checkpoint_meta"
+      ],
+      "must_not_have_events": [
+        "tool_start",
+        "tool_end"
+      ],
+      "expected_run_status": "waiting_approval",
+      "notes": "Dangerous POST must pause run before tool node executes."
+    },
+    {
+      "id": "runtime_approval_approved_executes_tool_once",
+      "input": {
+        "thread_id": "golden-approval-approved",
+        "messages": [
+          {
+            "role": "user",
+            "content": "enqueue a watermark job and approve it"
+          }
+        ],
+        "confirm_dangerous": false,
+        "resume": true
+      },
+      "must_have_events": [
+        "approval_required",
+        "approval_resolved",
+        "tool_start",
+        "tool_end",
+        "run_completed_meta",
+        "done"
+      ],
+      "must_not_have_events": [
+        "error"
+      ],
+      "expected_run_status": "completed",
+      "notes": "After approval, tool should execute exactly once and complete."
+    },
+    {
+      "id": "runtime_approval_rejected_no_tool",
+      "input": {
+        "thread_id": "golden-approval-rejected",
+        "messages": [
+          {
+            "role": "user",
+            "content": "enqueue a watermark job but reject"
+          }
+        ],
+        "confirm_dangerous": false,
+        "resume": false
+      },
+      "must_have_events": [
+        "approval_required",
+        "approval_resolved",
+        "token",
+        "done"
+      ],
+      "must_not_have_events": [
+        "tool_start",
+        "tool_end"
+      ],
+      "expected_run_status": "completed",
+      "notes": "Reject branch should resolve approval without running dangerous tool."
+    },
+    {
+      "id": "runtime_cancel_lifecycle",
+      "input": {
+        "thread_id": "golden-cancel",
+        "messages": [
+          {
+            "role": "user",
+            "content": "slow"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "run_created",
+        "run_started",
+        "cancel_requested",
+        "cancelled"
+      ],
+      "must_not_have_events": [
+        "approval_required"
+      ],
+      "expected_run_status": "cancelled",
+      "notes": "Cancellation path must produce cancel_requested + cancelled events."
+    },
+    {
+      "id": "runtime_timeline_contains_checkpoint",
+      "input": {
+        "thread_id": "golden-checkpoint-timeline",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello agent"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "run_completed_meta",
+        "done"
+      ],
+      "must_not_have_events": [],
+      "expected_run_status": "completed",
+      "notes": "Timeline projection should expose checkpoint summary from meta events."
+    },
+    {
+      "id": "runtime_event_schema_version_v1",
+      "input": {
+        "thread_id": "golden-schema-version",
+        "messages": [
+          {
+            "role": "user",
+            "content": "schema version check"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "token",
+        "done"
+      ],
+      "must_not_have_events": [],
+      "expected_run_status": "completed",
+      "notes": "All newly written payloads should include schema_version=1."
+    },
+    {
+      "id": "runtime_event_pagination_after_id_limit",
+      "input": {
+        "thread_id": "golden-pagination",
+        "messages": [
+          {
+            "role": "user",
+            "content": "pagination check"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "token",
+        "done"
+      ],
+      "must_not_have_events": [],
+      "expected_run_status": "completed",
+      "notes": "Events API with after_id + limit should return has_more and next_after_id."
+    },
+    {
+      "id": "memory_inject_budget_guard",
+      "input": {
+        "thread_id": "golden-memory-budget",
+        "messages": [
+          {
+            "role": "user",
+            "content": "normal second"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "memory_run_summary",
+        "memory_thread_summary"
+      ],
+      "must_not_have_events": [],
+      "expected_run_status": "completed",
+      "notes": "Inject preview should stay within memory policy budget and avoid failed run pollution."
+    },
+    {
+      "id": "thread_lifecycle_end_archive_purge",
+      "input": {
+        "thread_id": "golden-thread-lifecycle",
+        "messages": [
+          {
+            "role": "user",
+            "content": "lifecycle check"
+          }
+        ],
+        "confirm_dangerous": false
+      },
+      "must_have_events": [
+        "thread_checkpoint_purged"
+      ],
+      "must_not_have_events": [],
+      "expected_run_status": "completed",
+      "notes": "After end/archive lifecycle, checkpoint rows for thread should be purged."
+    }
+  ]
+}

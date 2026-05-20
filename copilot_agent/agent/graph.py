@@ -47,7 +47,9 @@ def _build_checkpointer(checkpoint_path: str, *, async_checkpoint: bool = False)
         conn = aiosqlite.connect(str(p))
         if not hasattr(conn, "is_alive"):
             conn.is_alive = lambda: bool(getattr(conn, "_connection", None))  # type: ignore[attr-defined]
-        return AsyncSqliteSaver(conn)
+        saver = AsyncSqliteSaver(conn)
+        saver._learnagent_conn = conn  # type: ignore[attr-defined]
+        return saver
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
     except Exception:

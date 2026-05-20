@@ -54,7 +54,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 
 | 方案 | 支持能力 | 优势 | 限制 | LearnAgent 仍需设计 | 结论 |
 |---|---|---|---|---|---|
-| 当前 `ExecutionEngine` | 本地 `asyncio.Task`、queued/running/waiting/cancelled/completed/failed、SSE queue | 与 EventStore、REST、SSE 完全匹配，`RunManager` 作为兼容别名保留 | 仅单进程；缺 timeout、retry、并发限制、恢复 | run 状态机、事件语义、幂等、重启恢复 | 短期继续深化 |
+| 当前 `ExecutionEngine` | 本地 `asyncio.Task`、queued/running/waiting/cancelled/completed/failed、SSE queue、`run_timeout_seconds`、全局限流、`waiting_approval` rehydrate | 与 EventStore、REST、SSE 完全匹配，`RunManager` 作为兼容别名保留 | 仅单进程；缺 retry、幂等；`running` 态重启仍 failed | run 状态机、事件语义、幂等、全量 durable resume | 短期继续深化 |
 | LangGraph durable execution | checkpoint、resume、持久化执行 | 与 LangGraph 原生一致 | 不直接提供 LearnAgent REST run API 和 timeline schema | 事件落库、SSE 兼容、cancel/approval 对外协议 | 逐步接入 |
 | LangGraph Platform | threads/runs、托管 runtime | 产品化能力强 | 引入托管平台和部署模型，偏离当前本地目标 | 本地模式下仍需 runtime contract | 后续评估 |
 | Temporal | durable workflow、重试、长任务、恢复 | 任务编排成熟 | 引入 worker/server，复杂度高；不是 Agent 事件模型 | Agent event、tool audit、LLM stream 映射 | 生产化后备选 |
@@ -174,7 +174,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | 优先级 | 方向 | 下一步动作 | 验收标准 |
 |---|---|---|---|
 | 高 | Runtime / Timeline 闭环 | 做端到端 MVP 验收：创建 thread/run、观察 SSE/UI projected timeline、cancel、approve/reject、查询 raw events | 不依赖外部队列；EventStore 中 run lifecycle、tool audit、memory summary 都可回放；`TimelineProjector` 能输出聚合 timeline 和一致性 warnings |
-| 高 | Memory v1 迭代 | 在现有 deterministic run/thread summary 基础上，优先验证 episodic recall、summary 压缩、冲突处理和上下文预算；暂不接外部 memory 服务 | MVP 不受影响；新 run 能稳定读取 thread summary；summary 不污染 RAG；新增优化有独立验证脚本 |
+| 高 | Memory v1 迭代 | v1.1 landed: policy recall/budget/conflict, failed/cancelled exclusion, memory preview API/UI | 向量 episodic、working memory compression；暂不接外部 memory 服务 |
 | 高 | Tool audit / result consistency | 固化 `tool_start/tool_end` 字段检查，补充失败工具调用的审计验证 | 每次工具调用都有 call id、category、risk、sanitized args/result、success/error |
 | 中 | Approval/cancel 语义 | 保持当前重新执行式 approval，补充文档和回归；LangGraph node-level resume 放到后续 PoC | 当前 approve/reject/cancel 行为稳定、可解释、timeline 可复盘 |
 | 中 | Observability correlation | 继续以 EventStore 为事实源，设计 `thread_id/run_id/tool_call_id` 到 trace/span 的映射 | 同一 run 可从 timeline 定位工具调用和错误；完整 metrics dashboard 后置 |
@@ -184,6 +184,8 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | 低 | 外部任务队列 | 对比 Temporal/Celery 与当前 `ExecutionEngine` 的替换成本 | 保留现有 REST/SSE/event API 的前提下可迁移 |
 | 低 | Sandbox | 验证 Docker/E2B 对文件/终端工具的隔离和审计 | 能限制路径、网络、时间、输出大小，并写入 tool audit |
 
+Eval 落地实施与文件级任务分解见：[docs/eval-implementation-plan.md](./eval-implementation-plan.md)。
+
 ## 7. Completed Module Gaps And Optimization Directions
 
 Current MVP direction is still local single-user runtime first. The following table records what has already landed, what is still insufficient, and what should be optimized later.
@@ -191,9 +193,9 @@ Current MVP direction is still local single-user runtime first. The following ta
 | Module | Landed | Current gap / risk | Later optimization |
 |---|---|---|---|
 | EventStore | SQLite thread/run/event source of truth and raw event replay | Payload schema is still convention-based; no schema version or pagination | Add event schema/version, pagination, migration rules, and optional projection cache |
-| ExecutionEngine | Local `asyncio.Task` run lifecycle, cancel, approval, SSE compatibility | Active runs are in-process only; no restart recovery, timeout, retry, or concurrency limit | Add local timeout/concurrency first, then evaluate Temporal/Celery/LangGraph durable execution |
+| ExecutionEngine | Local `asyncio.Task` run lifecycle, cancel, approval, SSE compatibility, run timeout, global concurrency cap, selective `waiting_approval` rehydrate on restart | Active runs are in-process only; `running`/`queued` runs fail on restart; no retry/idempotency yet | Add retry/idempotency, then evaluate Temporal/Celery/LangGraph full durable execution |
 | TimelineProjector | CQRS read model projecting raw events into UI timeline and warnings | Projection is computed on read; warning rules are still minimal | Add read model cache, pagination, richer consistency checks, and UI filters |
-| MemoryManager v1 | LangGraph checkpoint + RAG + EventStore deterministic run/thread summary | No episodic vector recall, no compression policy, no conflict handling | Keep MVP stable first, then add episodic recall, summary compression, conflict handling, and context budget tests |
+| MemoryManager v1.1 | LangGraph checkpoint + RAG + EventStore summary + keyword episodic recall + inject budget/conflict policy + preview API | No vector episodic recall; no working-memory compression; deterministic keyword recall only | Add vector episodic index, working memory compression, and LLM long-term extraction PoC |
 | ToolRegistry / Tool Audit v1 | `ToolSpec`, `ToolResult` audit envelope, sanitizer, `tool_start/tool_end` contract | `timeout_seconds` is metadata only; retry/timeout enforcement, tool versioning, MCP mapping, and LLM-facing result envelope are not complete | Add execution policy, timeout/retry enforcement, tool versioning, MCP adapter PoC, and stronger audit schema checks |
 | PolicyRegistry | Dangerous tool approval and HTTP whitelist checks | Policy scope is narrow; no input/output/PII/secret policy versioning | Design policy schema and decision audit, then evaluate Presidio/OPA/Guardrails integration |
 | LLMProvider | OpenAI-compatible `ChatOpenAI` thin adapter | No fallback, routing, token/cost accounting | Add provider events and metrics; evaluate LiteLLM PoC |

@@ -1,0 +1,144 @@
+name: LearnAgent Eval CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      run_full:
+        description: "Run full profile (core + rag)"
+        required: false
+        type: boolean
+        default: true
+      enable_ragas:
+        description: "Try RAGAS in auto mode"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: learnagent-eval-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval_core:
+    if: ${{ github.event_name != 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run eval core profile
+        run: python scripts/verify_eval_suite.py --profile core
+
+      - name: Build eval job summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("artifacts/eval/eval-suite-summary.json")
+          if not p.exists():
+              print("No eval summary found.")
+              raise SystemExit(0)
+          payload = json.loads(p.read_text(encoding="utf-8"))
+          lines = [
+              "## Eval Core Summary",
+              f"- overall_pass: {payload.get('overall_pass')}",
+              f"- suites_total: {payload.get('suites_total')}",
+              f"- suites_failed: {payload.get('suites_failed')}",
+              f"- failed_suites: {', '.join(payload.get('failed_suites', [])) or '(none)'}",
+          ]
+          summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
+          summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-core-artifacts
+          path: artifacts/eval/eval-suite-summary.json
+          if-no-files-found: warn
+
+  eval_full_nightly:
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_full == true) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run eval full profile
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            python scripts/verify_eval_suite.py --profile full --enable-ragas
+          elif [ "${{ inputs.enable_ragas }}" = "true" ]; then
+            python scripts/verify_eval_suite.py --profile full --enable-ragas
+          else
+            python scripts/verify_eval_suite.py --profile full
+          fi
+
+      - name: Build nightly summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("artifacts/eval/eval-suite-summary.json")
+          if not p.exists():
+              print("No eval summary found.")
+              raise SystemExit(0)
+          payload = json.loads(p.read_text(encoding="utf-8"))
+          failed = payload.get("failed_suites", [])
+          lines = [
+              "## Eval Full Summary",
+              f"- overall_pass: {payload.get('overall_pass')}",
+              f"- suites_total: {payload.get('suites_total')}",
+              f"- suites_failed: {payload.get('suites_failed')}",
+              f"- failed_scenarios: {', '.join(failed) if failed else '(none)'}",
+              "- runtime_contract_breaks: see failed_suites and suite checks in artifact",
+              "- rag_metrics: see artifacts/runtime and artifacts/phase4 summaries",
+          ]
+          summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
+          summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload full eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-full-artifacts
+          path: |
+            artifacts/eval/eval-suite-summary.json
+            artifacts/runtime/*.json
+            artifacts/phase4/*.json
+          if-no-files-found: warn

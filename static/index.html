@@ -155,6 +155,34 @@
       color: var(--danger);
     }
 
+    button.icon-button {
+      width: 38px;
+      min-width: 38px;
+      height: 38px;
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border-radius: 999px;
+    }
+
+    button.icon-button svg {
+      width: 18px;
+      height: 18px;
+      pointer-events: none;
+    }
+
+    button.icon-button.cancel-mode {
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #fff;
+    }
+
+    button.icon-button.cancel-mode:hover:not(:disabled) {
+      background: #8f1d15;
+    }
+
     button:disabled {
       cursor: not-allowed;
       opacity: 0.55;
@@ -403,6 +431,22 @@
       background: #fbfcfe;
     }
 
+    .memory-preview {
+      margin: 0;
+      padding: 10px;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-soft);
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     @media (max-width: 1180px) {
       main {
         grid-template-columns: 1fr;
@@ -434,7 +478,7 @@
         <div class="session-box">
           <label>Current thread</label>
           <div id="threadSummary" class="hint">No active thread. First Send creates one.</div>
-          <div id="idleSummary" class="hint">Idle archive timeout: 10 minutes.</div>
+          <div id="idleSummary" class="hint">Idle timeout: 3 minutes.</div>
         </div>
 
         <div>
@@ -442,6 +486,11 @@
           <div id="runList" class="run-list">
             <div class="empty">Runs appear after you send a message.</div>
           </div>
+        </div>
+
+        <div>
+          <label>Memory preview (episodic inject)</label>
+          <pre id="memoryPreview" class="memory-preview">No thread yet.</pre>
         </div>
 
         <div>
@@ -478,7 +527,11 @@
             </label>
             <div class="row">
               <button id="clearChat" type="button">Clear</button>
-              <button id="sendMessage" class="primary" type="button">Send</button>
+              <button id="sendMessage" class="primary icon-button" type="button" aria-label="Send message" title="Send message">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -491,7 +544,6 @@
         <div class="row">
           <button id="approveRun" type="button" disabled>Approve</button>
           <button id="rejectRun" type="button" disabled>Reject</button>
-          <button id="cancelRun" class="danger" type="button" disabled>Cancel</button>
         </div>
       </div>
       <div class="section-body">
@@ -506,7 +558,9 @@
 
   <script>
     const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
-    const THREAD_IDLE_MS = 10 * 60 * 1000;
+    const THREAD_IDLE_MS = 3 * 60 * 1000;
+    const SESSION_STORAGE_KEY = "learnagent.chat.session.v1";
+    const THREAD_STATUS_POLL_MS = 15000;
 
     const state = {
       threadId: "",
@@ -517,11 +571,13 @@
       ws: null,
       timelineRefreshTimer: null,
       idleTimer: null,
+      threadStatusTimer: null,
       lastInteractionAt: 0,
       messages: [],
       activeAssistantMessage: null,
       activeRequest: null,
       runFailed: false,
+      threadStatus: "",
     };
 
     const els = {
@@ -540,7 +596,7 @@
       assistantOutput: document.getElementById("assistantOutput"),
       approveRun: document.getElementById("approveRun"),
       rejectRun: document.getElementById("rejectRun"),
-      cancelRun: document.getElementById("cancelRun"),
+      memoryPreview: document.getElementById("memoryPreview"),
     };
 
     document.querySelectorAll(".example").forEach((button) => {
@@ -555,11 +611,15 @@
       document.addEventListener(eventName, recordInteraction, { passive: true });
     });
 
-    els.sendMessage.addEventListener("click", sendMessage);
+    els.sendMessage.addEventListener("click", handlePrimaryAction);
     els.clearChat.addEventListener("click", clearChat);
-    els.cancelRun.addEventListener("click", () => controlRun("cancel"));
     els.approveRun.addEventListener("click", () => controlRun("approve"));
     els.rejectRun.addEventListener("click", () => controlRun("reject"));
+    els.message.addEventListener("input", () => {
+      recordInteraction();
+      scheduleMemoryPreview();
+      renderControls();
+    });
     els.message.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
@@ -567,6 +627,50 @@
       }
     });
     window.addEventListener("pagehide", markThreadEndedOnClose);
+
+    let memoryPreviewTimer = null;
+    function scheduleMemoryPreview() {
+      if (memoryPreviewTimer) window.clearTimeout(memoryPreviewTimer);
+      memoryPreviewTimer = window.setTimeout(refreshMemoryPreview, 250);
+    }
+
+    function activeRun() {
+      if (!state.selectedRunId) return null;
+      const run = state.runs.find((item) => item.id === state.selectedRunId);
+      if (!run || TERMINAL_STATUSES.includes(run.status)) return null;
+      return run;
+    }
+
+    function isRunActive() {
+      return Boolean(state.activeRequest || activeRun());
+    }
+
+    async function handlePrimaryAction() {
+      if (isRunActive()) {
+        await cancelCurrentRun();
+        return;
+      }
+      await sendMessage();
+    }
+
+    async function refreshMemoryPreview() {
+      if (!state.threadId) {
+        els.memoryPreview.textContent = "No thread yet.";
+        return;
+      }
+      const goal = els.message.value.trim();
+      const params = goal ? `?goal=${encodeURIComponent(goal)}` : "";
+      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}/memory${params}`);
+      if (!res.ok) {
+        els.memoryPreview.textContent = `Memory preview unavailable: HTTP ${res.status}`;
+        return;
+      }
+      const data = await res.json();
+      const preview = data.inject_preview || "(empty — no episodic memory to inject)";
+      const budget = data.budget || {};
+      const header = `[enabled=${data.enabled}] chars=${budget.used_chars || 0}/${budget.max_chars || "?"} truncated=${budget.truncated || false}\n\n`;
+      els.memoryPreview.textContent = header + preview;
+    }
 
     async function createThread() {
       const res = await fetch("/v1/threads", {
@@ -577,47 +681,41 @@
       if (!res.ok) return showError(`Create thread failed: HTTP ${res.status} ${await responseDetail(res)}`);
       const thread = await res.json();
       setThread(thread.id);
+      state.threadStatus = thread.status || "active";
+      persistSession();
       await refreshRuns();
       setChatStatus("Thread created");
       return thread.id;
     }
 
     async function ensureThread() {
-      if (state.threadId) return state.threadId;
+      if (state.threadId && state.threadStatus === "active") return state.threadId;
+      if (state.threadId && state.threadStatus !== "active") {
+        appendSystemMessage(`Previous thread ${shortId(state.threadId)} is ${state.threadStatus}. Next Send creates a new thread.`);
+        resetSession({ keepMessages: false });
+      }
       return await createThread();
-    }
-
-    async function archiveCurrentThread(reason = "idle_archive_timeout") {
-      if (!state.threadId) return;
-      if (state.activeRequest) {
-        scheduleIdleCheck(10000);
-        return;
-      }
-      const threadId = state.threadId;
-      try {
-        await fetch(`/v1/threads/${encodeURIComponent(threadId)}/archive`, { method: "POST" });
-      } catch {
-        // The UI still expires the local session even if the lifecycle marker fails.
-      }
-      closeWs();
-      resetSession();
-      appendSystemMessage(`Thread ${shortId(threadId)} archived: ${reason}. Next Send creates a new thread.`);
-      setChatStatus("Thread archived");
     }
 
     function markThreadEndedOnClose() {
       if (!state.threadId) return;
       const url = `/v1/threads/${encodeURIComponent(state.threadId)}/end`;
+      const payload = JSON.stringify({ reason: "browser_close" });
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(url);
+        navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
         return;
       }
-      fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
     }
 
     async function sendMessage() {
       const content = els.message.value.trim();
-      if (!content || state.activeRequest) return;
+      if (!content || isRunActive()) return;
 
       recordInteraction();
       els.message.value = "";
@@ -634,9 +732,16 @@
 
       try {
         const threadId = await ensureThread();
+        await refreshMemoryPreview();
         const history = state.messages
           .filter((message) => (message.role === "user" || message.role === "assistant") && !message.streaming)
-          .map((message) => ({ role: message.role, content: message.content }));
+          .map((message) => {
+            const item = { role: message.role, content: message.content };
+            if (message.role === "assistant" && message.reasoning_content) {
+              item.reasoning_content = message.reasoning_content;
+            }
+            return item;
+          });
 
         const res = await fetch("/v1/chat", {
           method: "POST",
@@ -657,6 +762,7 @@
         await readSse(res.body, handleSseEvent);
         finishAssistantMessage();
         await refreshRuns();
+        await refreshMemoryPreview();
         if (state.selectedRunId) await loadTimeline(state.selectedRunId);
       } catch (error) {
         if (error.name !== "AbortError") {
@@ -670,7 +776,9 @@
         state.activeRequest = null;
         setChatBusy(false, "Ready");
         renderMessages();
+        renderControls();
         scheduleIdleCheck();
+        persistSession();
       }
     }
 
@@ -744,7 +852,24 @@
         return;
       }
 
+      if (eventName === "assistant_state") {
+        if (state.activeAssistantMessage) {
+          if (typeof data.reasoning_content_delta === "string") {
+            state.activeAssistantMessage.reasoning_content =
+              (state.activeAssistantMessage.reasoning_content || "") + data.reasoning_content_delta;
+          }
+          if (typeof data.reasoning_content === "string") {
+            state.activeAssistantMessage.reasoning_content = data.reasoning_content;
+          }
+        }
+        return;
+      }
+
       if (eventName === "done") {
+        const assistant = data.assistant_message || {};
+        if (state.activeAssistantMessage && assistant && typeof assistant.reasoning_content === "string") {
+          state.activeAssistantMessage.reasoning_content = assistant.reasoning_content;
+        }
         finishAssistantMessage();
         setChatStatus("Done");
         scheduleTimelineRefresh();
@@ -776,6 +901,37 @@
       state.runs = data.runs || [];
       renderRuns();
       renderControls();
+    }
+
+    async function refreshThreadStatus() {
+      if (!state.threadId) return;
+      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const thread = data.thread || {};
+      state.threadStatus = thread.status || "";
+      if (Array.isArray(data.runs)) {
+        state.runs = data.runs;
+        renderRuns();
+        renderControls();
+      }
+      if (state.threadStatus && state.threadStatus !== "active" && !state.activeRequest) {
+        setChatStatus(`Thread ${state.threadStatus}`);
+        appendSystemMessage(`Thread ${shortId(state.threadId)} is ${state.threadStatus}. Next Send creates a new thread.`);
+        state.threadId = "";
+        state.threadStatus = "";
+        closeWs();
+        persistSession();
+        renderSession();
+      }
+    }
+
+    function scheduleThreadStatusPoll() {
+      if (state.threadStatusTimer) window.clearTimeout(state.threadStatusTimer);
+      state.threadStatusTimer = window.setTimeout(async () => {
+        await refreshThreadStatus();
+        scheduleThreadStatusPoll();
+      }, THREAD_STATUS_POLL_MS);
     }
 
     async function selectRun(runId) {
@@ -829,6 +985,31 @@
       renderRuns();
       renderControls();
       await loadTimeline(state.selectedRunId);
+    }
+
+    async function cancelCurrentRun() {
+      const run = activeRun();
+      if (!run) {
+        if (state.activeRequest) state.activeRequest.abort();
+        return;
+      }
+      recordInteraction();
+      setChatStatus("Cancelling");
+      els.sendMessage.disabled = true;
+      const res = await fetch(`/v1/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST" });
+      if (!res.ok) {
+        els.sendMessage.disabled = false;
+        renderControls();
+        return showError(`cancel failed: HTTP ${res.status} ${await responseDetail(res)}`);
+      }
+      const data = await res.json();
+      upsertRun(data.run);
+      if (state.activeRequest) state.activeRequest.abort();
+      finishAssistantMessage();
+      renderMessages();
+      renderRuns();
+      renderControls();
+      await loadTimeline(run.id);
     }
 
     function openWs(runId) {
@@ -889,7 +1070,10 @@
       const remaining = Math.max(0, THREAD_IDLE_MS - elapsed);
       state.idleTimer = window.setTimeout(() => {
         const idleFor = Date.now() - state.lastInteractionAt;
-        if (idleFor >= THREAD_IDLE_MS) archiveCurrentThread("idle_archive_timeout");
+        if (idleFor >= THREAD_IDLE_MS) {
+          setChatStatus("Idle timeout pending");
+          scheduleIdleCheck(10000);
+        }
         else scheduleIdleCheck();
       }, Math.min(delay, remaining || 1));
       renderSession();
@@ -898,23 +1082,28 @@
     function setThread(threadId) {
       if (!state.threadId) state.lastInteractionAt = Date.now();
       state.threadId = threadId;
+      if (!state.threadStatus) state.threadStatus = "active";
       renderSession();
       scheduleIdleCheck();
+      refreshMemoryPreview();
+      persistSession();
     }
 
-    function resetSession() {
+    function resetSession(options = {}) {
       state.threadId = "";
+      state.threadStatus = "";
       state.selectedRunId = "";
       state.runs = [];
       state.events = [];
       state.timeline = null;
-      state.messages = [];
+      if (!options.keepMessages) state.messages = [];
       state.activeAssistantMessage = null;
       state.runFailed = false;
       renderSession();
       renderMessages();
       renderRuns();
       renderTimeline();
+      persistSession();
     }
 
     function clearChat() {
@@ -923,6 +1112,7 @@
       state.activeAssistantMessage = null;
       renderMessages();
       setChatStatus("Chat cleared");
+      persistSession();
     }
 
     function finishAssistantMessage() {
@@ -940,13 +1130,14 @@
     function appendSystemMessage(content) {
       state.messages.push({ role: "system", content });
       renderMessages();
+      persistSession();
     }
 
     function setChatBusy(busy, text) {
-      els.sendMessage.disabled = busy;
       els.message.disabled = busy;
       setChatStatus(text);
       setConnection(text.toLowerCase(), busy ? "busy" : "");
+      renderControls();
     }
 
     function setChatStatus(text) {
@@ -965,6 +1156,7 @@
       const index = state.runs.findIndex((item) => item.id === run.id);
       if (index >= 0) state.runs[index] = run;
       else state.runs.unshift(run);
+      persistSession();
     }
 
     function upsertEvent(event) {
@@ -977,12 +1169,12 @@
     function renderSession() {
       if (!state.threadId) {
         els.threadSummary.textContent = "No active thread. First Send creates one.";
-        els.idleSummary.textContent = "Idle archive timeout: 10 minutes.";
+        els.idleSummary.textContent = "Idle timeout: 3 minutes.";
         return;
       }
       const remaining = Math.max(0, THREAD_IDLE_MS - (Date.now() - state.lastInteractionAt));
       els.threadSummary.textContent = `Thread: ${shortId(state.threadId)}`;
-      els.idleSummary.textContent = `Archives after inactivity: ${Math.ceil(remaining / 1000)}s remaining.`;
+      els.idleSummary.textContent = `Backend ends after inactivity: ${Math.ceil(remaining / 1000)}s remaining.`;
     }
 
     function renderMessages() {
@@ -1027,10 +1219,37 @@
     function renderControls() {
       const run = state.runs.find((item) => item.id === state.selectedRunId);
       const status = run ? run.status : "";
-      const terminal = TERMINAL_STATUSES.includes(status);
-      els.cancelRun.disabled = !run || terminal;
       els.approveRun.disabled = status !== "waiting_approval";
       els.rejectRun.disabled = status !== "waiting_approval";
+      renderPrimaryAction();
+    }
+
+    function renderPrimaryAction() {
+      const runActive = isRunActive();
+      els.sendMessage.disabled = false;
+      if (runActive) {
+        els.sendMessage.classList.add("cancel-mode");
+        els.sendMessage.classList.remove("primary");
+        els.sendMessage.setAttribute("aria-label", "Cancel current run");
+        els.sendMessage.setAttribute("title", "Cancel current run");
+        els.sendMessage.innerHTML = `
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"></rect>
+          </svg>
+        `;
+        return;
+      }
+      const hasText = Boolean(els.message.value.trim());
+      els.sendMessage.disabled = !hasText;
+      els.sendMessage.classList.remove("cancel-mode");
+      els.sendMessage.classList.add("primary");
+      els.sendMessage.setAttribute("aria-label", "Send message");
+      els.sendMessage.setAttribute("title", "Send message");
+      els.sendMessage.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      `;
     }
 
     function renderTimeline() {
@@ -1138,10 +1357,50 @@
         .replaceAll("'", "&#039;");
     }
 
-    renderSession();
-    renderMessages();
-    renderRuns();
-    renderTimeline();
+    function persistSession() {
+      const payload = {
+        threadId: state.threadId,
+        selectedRunId: state.selectedRunId,
+        messages: state.messages.filter((message) => message.role !== "system"),
+        lastInteractionAt: state.lastInteractionAt,
+      };
+      try {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+      } catch {}
+    }
+
+    async function restoreSession() {
+      let payload = null;
+      try {
+        payload = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || "null");
+      } catch {
+        payload = null;
+      }
+      if (!payload || !payload.threadId) return;
+      state.threadId = String(payload.threadId);
+      state.selectedRunId = String(payload.selectedRunId || "");
+      state.messages = Array.isArray(payload.messages) ? payload.messages : [];
+      state.lastInteractionAt = Number(payload.lastInteractionAt || Date.now());
+      renderSession();
+      renderMessages();
+      await refreshThreadStatus();
+      if (state.threadId) {
+        await refreshRuns();
+        if (state.selectedRunId) {
+          await loadTimeline(state.selectedRunId);
+          openWs(state.selectedRunId);
+        }
+        await refreshMemoryPreview();
+      }
+    }
+
+    restoreSession().finally(() => {
+      renderSession();
+      renderMessages();
+      renderRuns();
+      renderTimeline();
+      scheduleThreadStatusPoll();
+    });
   </script>
 </body>
 </html>

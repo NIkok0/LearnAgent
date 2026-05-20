@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.runtime.event_store import ActiveRunExistsError, EventStore, ThreadNotActiveError  # noqa: E402
-from copilot_agent.runtime.execution_engine import ExecutionEngine  # noqa: E402
+from copilot_agent.runtime.execution_engine import ExecutionEngine, GraphInterrupted  # noqa: E402
 from copilot_agent.runtime.run_manager import RunManager  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 
@@ -33,16 +33,22 @@ class FakeRunner:
         run_id: str | None = None,
         messages: list[dict[str, Any]],
         confirm_dangerous: bool,
+        resume: bool | None = None,
     ) -> AsyncIterator[str]:
         thread_id = conversation_id
         scenario = str(messages[-1].get("content", "")) if messages else ""
-        if "slow" in scenario:
-            await asyncio.sleep(5)
+        if resume is False:
+            yield self._emit(thread_id, str(run_id), "token", {"text": "Dangerous tool call was rejected by the user."})
             yield self._emit(thread_id, str(run_id), "done", {})
             return
-        if "approval" in scenario and not confirm_dangerous:
-            yield self._emit(thread_id, str(run_id), "approval_required", {"required": True, "reason": "dangerous_tool"})
+        if "slow" in scenario:
+            await asyncio.sleep(30)
+            yield self._emit(thread_id, str(run_id), "done", {})
             return
+        if "approval" in scenario and not confirm_dangerous and resume is None:
+            payload = {"required": True, "reason": "dangerous_tool"}
+            yield self._emit(thread_id, str(run_id), "approval_required", payload)
+            raise GraphInterrupted(payload)
         yield self._emit(thread_id, str(run_id), "token", {"text": f"ok:{scenario}"})
         yield self._emit(
             thread_id,

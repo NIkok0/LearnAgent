@@ -1,44 +1,47 @@
 {
   "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
   "completed": {
-    "run_id": "7c89a396-0277-47d9-bba1-fd640338abaf",
+    "run_id": "afa5e79c-9f86-4d96-a681-81cfd57da7bd",
     "assistant_output": "hello world",
     "kinds": [
       "lifecycle",
       "lifecycle",
       "tool_call",
       "lifecycle",
+      "checkpoint",
       "assistant_output"
     ],
     "tool_merged": true,
     "tool_success": true,
-    "warnings": []
+    "warnings": [],
+    "checkpoint_message_count": 3
   },
   "missing_tool": {
-    "run_id": "783dd8ea-7f3d-4030-84a3-88ef2a7b18b0",
+    "run_id": "25b2faff-ca4e-430e-aae0-7c4091918702",
     "warnings": [
       "tool_missing_end"
     ]
   },
   "approval": {
-    "run_id": "8fee504e-a12c-4747-a683-33186d1a8125",
+    "run_id": "da8db016-80c9-43a2-9229-dad9db32661c",
     "status": "approved",
     "resolved": {
-      "approved": true
+      "approved": true,
+      "schema_version": 1
     }
   },
   "memory": {
-    "run_id": "10768cdd-60b2-4d8e-a9f3-b2d6329a2430",
+    "run_id": "2e6e77c9-8d28-469e-acac-f9172b6de7f9",
     "derived": true,
     "summary_type": "run"
   },
   "cancelled": {
-    "run_id": "2fe5011c-a4d5-4de0-94a1-24d1768e746f",
+    "run_id": "7fa73cfd-9c63-4469-b8df-8d7f946bbb08",
     "status": "cancelled",
     "warnings": []
   },
   "failed_without_error": {
-    "run_id": "042755c8-8068-4143-b06e-dc9255df0145",
+    "run_id": "5fd27c63-e7c9-4254-b077-409b5bc63ac9",
     "warnings": [
       "failed_without_error_event"
     ]

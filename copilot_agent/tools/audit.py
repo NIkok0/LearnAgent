@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from langchain_core.messages import BaseMessage
+
 
 SENSITIVE_KEY_PARTS = (
     "authorization",
@@ -33,6 +35,17 @@ class ToolResult:
 def sanitize_tool_payload(value: Any, *, max_string_length: int = MAX_STRING_LENGTH) -> Any:
     """Redact secrets and bound payload size before writing tool audit events."""
 
+    if isinstance(value, BaseMessage):
+        return sanitize_tool_payload(
+            {
+                "type": value.__class__.__name__,
+                "content": getattr(value, "content", ""),
+                "name": getattr(value, "name", None),
+                "tool_call_id": getattr(value, "tool_call_id", None),
+                "status": getattr(value, "status", None),
+            },
+            max_string_length=max_string_length,
+        )
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for key, item in value.items():
@@ -53,7 +66,9 @@ def sanitize_tool_payload(value: Any, *, max_string_length: int = MAX_STRING_LEN
         if len(value) <= max_string_length:
             return value
         return f"{value[:max_string_length]}...(truncated)"
-    return value
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
 
 
 def normalize_tool_result(result: Any, *, success: bool = True, error: str | None = None) -> ToolResult:

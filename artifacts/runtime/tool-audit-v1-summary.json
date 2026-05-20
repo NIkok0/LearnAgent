@@ -1,7 +1,7 @@
 {
   "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-tool-audit-events.sqlite",
-  "thread_id": "tool-audit-648f0f2a",
-  "run_id": "4a248af2-f781-43da-a182-fceaea2d8176",
+  "thread_id": "tool-audit-5e785263",
+  "run_id": "a646c293-c3e2-4d4b-8ff4-efadb693aa81",
   "start_contract": {
     "has_call_id": true,
     "has_metadata": true,

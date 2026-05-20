@@ -20,7 +20,7 @@ from copilot_agent.memory import MemoryManager  # noqa: E402
 from copilot_agent.rag.retriever import RagStore  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
-from copilot_agent.runtime.execution_engine import ExecutionEngine, ManagedRun  # noqa: E402
+from copilot_agent.runtime.execution_engine import ExecutionEngine, GraphInterrupted, ManagedRun  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.audit import (  # noqa: E402
@@ -42,28 +42,40 @@ class AcceptanceFakeRunner:
         run_id: str | None = None,
         messages: list[dict[str, Any]],
         confirm_dangerous: bool,
+        resume: bool | None = None,
     ) -> AsyncIterator[str]:
         thread_id = conversation_id
         actual_run_id = str(run_id)
         scenario = str(messages[-1].get("content", "")) if messages else ""
+
+        if resume is False:
+            yield self._emit(
+                thread_id,
+                actual_run_id,
+                "token",
+                {"text": "Dangerous tool call was rejected by the user."},
+            )
+            yield self._emit(thread_id, actual_run_id, "done", {})
+            return
 
         if "slow" in scenario:
             await asyncio.sleep(30)
             yield self._emit(thread_id, actual_run_id, "done", {})
             return
 
-        if "approval" in scenario and not confirm_dangerous:
+        if "approval" in scenario and not confirm_dangerous and resume is None:
+            payload = {
+                "required": True,
+                "reason": "dangerous_tool",
+                "message": "POST /api/v1/jobs/watermark requires approval.",
+            }
             yield self._emit(
                 thread_id,
                 actual_run_id,
                 "approval_required",
-                {
-                    "required": True,
-                    "reason": "dangerous_tool",
-                    "message": "POST /api/v1/jobs/watermark requires approval.",
-                },
+                payload,
             )
-            return
+            raise GraphInterrupted(payload)
 
         goal = "enqueue watermark job" if "approval" in scenario else "check mvp runtime"
         tool_name = "http_post" if "approval" in scenario else "search_docs"
@@ -180,6 +192,7 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_prefix: s
         messages=[{"role": "user", "content": "normal second"}],
         goal="normal second",
     )
+    cancel_thread_summary = memory.get_thread_summary(cancel_thread) or {}
 
     checks = {
         "normal_completed": runs["normal"]["run"].get("status") == "completed",
@@ -188,6 +201,8 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_prefix: s
             {"run_created", "run_started", "plan_created", "token", "tool_start", "tool_end", "done", "memory_run_summary", "memory_thread_summary"},
         ),
         "second_run_reads_thread_summary": bool((context.episodic.get("thread_summary") or {}).get("recent_goals")),
+        "memory_inject_budget_ok": len(str(context.episodic.get("inject_preview") or "")) <= memory.policy.thread_summary_max_chars,
+        "cancelled_goal_excluded": "slow" not in (cancel_thread_summary.get("recent_goals") or []),
         "cancelled_status": runs["cancelled"]["run"].get("status") == "cancelled",
         "cancelled_timeline": _has_types(runs["cancelled"]["events"], {"cancel_requested", "cancelled"}),
         "approval_waiting_seen": waiting.get("status") == "waiting_approval",

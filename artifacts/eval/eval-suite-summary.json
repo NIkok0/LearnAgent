@@ -1,0 +1,42 @@
+{
+  "profile": "rag",
+  "enable_ragas": false,
+  "overall_pass": false,
+  "suites_total": 1,
+  "suites_failed": 1,
+  "failed_suites": [
+    "phase4_ragas"
+  ],
+  "duration_total_ms": 318,
+  "results": [
+    {
+      "suite_name": "phase4_ragas",
+      "script": "scripts/verify_phase4_ragas.py",
+      "status": "FAIL",
+      "duration_ms": 318,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json"
+      ],
+      "errors": [
+        "exit_code=1",
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "dataset_path=E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
+        "eval_mode=proxy",
+        "docs_cases=6",
+        "retrieval_hit_rate=0.0",
+        "required_source_full_match_rate=0.0",
+        "avg_required_source_coverage=0.0",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
+        "phase4_ragas=FAIL"
+      ],
+      "stderr_tail": [
+        "project docs not found (set WATERMARK_DOCS_PATH or add Markdown files under docs/source). RAG disabled."
+      ]
+    }
+  ],
+  "eval_suite": "FAIL"
+}

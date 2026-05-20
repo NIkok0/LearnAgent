@@ -17,8 +17,17 @@ from copilot_agent.agent.runner import ChatRunner
 from copilot_agent.conversation_store import ConversationCookieStore
 from copilot_agent.observability import flush_langfuse
 from copilot_agent.rag import build_rag_store
-from copilot_agent.runtime.event_store import ActiveRunExistsError, EventStore, ThreadNotActiveError
+from copilot_agent.runtime.checkpoint_store import CheckpointStore
+from copilot_agent.runtime.event_store import (
+    THREAD_END_REASON_BROWSER_CLOSE,
+    THREAD_END_REASON_EXPLICIT,
+    ActiveRunExistsError,
+    EventStore,
+    RunConcurrencyLimitError,
+    ThreadNotActiveError,
+)
 from copilot_agent.runtime.execution_engine import ExecutionEngine
+from copilot_agent.runtime.thread_checkpoint import archive_thread_and_purge_checkpoint
 from copilot_agent.runtime.thread_lifecycle import ThreadLifecycleCleaner
 from copilot_agent.runtime.timeline import TimelineProjector
 from copilot_agent.settings import settings
@@ -28,6 +37,7 @@ log = logging.getLogger(__name__)
 
 cookie_store = ConversationCookieStore(settings.conversation_cookie_ttl_seconds)
 event_store = EventStore(settings.agent_event_store_path)
+checkpoint_store = CheckpointStore(settings.agent_checkpoint_path)
 timeline_projector = TimelineProjector()
 runner: ChatRunner | None = None
 execution_engine: ExecutionEngine | None = None
@@ -48,6 +58,8 @@ async def lifespan(app: FastAPI):
     execution_engine = ExecutionEngine(event_store=event_store, runner=runner)
     thread_lifecycle_cleaner = ThreadLifecycleCleaner(
         event_store=event_store,
+        checkpoint_store=checkpoint_store,
+        active_idle_ttl_seconds=settings.thread_active_idle_ttl_seconds,
         ended_archive_ttl_seconds=settings.thread_ended_archive_ttl_seconds,
         interval_seconds=settings.thread_lifecycle_cleaner_interval_seconds,
     )
@@ -78,6 +90,7 @@ if static_dir.is_dir():
 class ChatMessage(BaseModel):
     role: str
     content: str
+    reasoning_content: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -132,8 +145,15 @@ def get_thread(thread_id: str) -> dict[str, object]:
 
 
 @app.post("/v1/threads/{thread_id}/end")
-def end_thread(thread_id: str) -> dict[str, object]:
-    thread = event_store.end_thread(thread_id)
+async def end_thread(thread_id: str, request: Request) -> dict[str, object]:
+    reason = THREAD_END_REASON_EXPLICIT
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if isinstance(body, dict) and body.get("reason") in {THREAD_END_REASON_EXPLICIT, THREAD_END_REASON_BROWSER_CLOSE, "idle"}:
+        reason = str(body["reason"])
+    thread = event_store.end_thread(thread_id, reason=reason)
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return {"thread": thread}
@@ -141,7 +161,9 @@ def end_thread(thread_id: str) -> dict[str, object]:
 
 @app.post("/v1/threads/{thread_id}/archive")
 def archive_thread(thread_id: str) -> dict[str, object]:
-    thread = event_store.archive_thread(thread_id)
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    thread = archive_thread_and_purge_checkpoint(event_store, checkpoint_store, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return {"thread": thread}
@@ -159,6 +181,7 @@ async def create_run(thread_id: str, req: CreateRunRequest) -> dict[str, object]
     if not settings.openai_api_key:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set")
     _reject_inactive_thread(thread_id)
+    event_store.touch_thread(thread_id)
     manager = _require_execution_engine()
     msgs = [m.model_dump() for m in req.messages]
     try:
@@ -172,14 +195,42 @@ async def create_run(thread_id: str, req: CreateRunRequest) -> dict[str, object]
         raise HTTPException(status_code=409, detail="thread is not active") from exc
     except ActiveRunExistsError as exc:
         raise HTTPException(status_code=409, detail="thread already has an active run") from exc
+    except RunConcurrencyLimitError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"run": event_store.get_run(managed.run_id)}
 
 
 @app.get("/v1/threads/{thread_id}/events")
-def get_thread_events(thread_id: str, run_id: str | None = None) -> dict[str, object]:
+def get_thread_events(
+    thread_id: str,
+    run_id: str | None = None,
+    after_id: int | None = None,
+    limit: int | None = None,
+) -> dict[str, object]:
     if event_store.get_thread(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
+    if after_id is not None or limit is not None:
+        return event_store.list_events_page(thread_id, run_id=run_id, after_id=after_id, limit=limit)
     return {"events": event_store.list_events(thread_id, run_id=run_id)}
+
+
+@app.get("/v1/threads/{thread_id}/memory")
+def get_thread_memory(thread_id: str, goal: str | None = None) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    bundle = runner.memory.get_memory_preview(thread_id, goal=goal)
+    return {
+        "thread_id": thread_id,
+        "enabled": runner.memory.policy.enabled,
+        "thread_summary": bundle.thread_summary,
+        "recalled_runs": bundle.recalled_runs,
+        "dropped_conflicts": bundle.dropped_conflicts,
+        "inject_preview": bundle.inject_preview,
+        "budget": bundle.budget_applied,
+        "sources": bundle.sources,
+    }
 
 
 @app.get("/v1/runs/{run_id}")
@@ -191,9 +242,11 @@ def get_run(run_id: str) -> dict[str, object]:
 
 
 @app.get("/v1/runs/{run_id}/events")
-def get_run_events(run_id: str) -> dict[str, object]:
+def get_run_events(run_id: str, after_id: int | None = None, limit: int | None = None) -> dict[str, object]:
     if event_store.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="run not found")
+    if after_id is not None or limit is not None:
+        return event_store.list_run_events_page(run_id, after_id=after_id, limit=limit)
     return {"events": event_store.list_run_events(run_id)}
 
 
@@ -283,6 +336,8 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set")
     conv = req.thread_id or req.conversation_id or str(uuid.uuid4())
     _reject_inactive_thread(conv)
+    event_store.ensure_thread(conv)
+    event_store.touch_thread(conv)
     manager = _require_execution_engine()
     msgs = [m.model_dump() for m in req.messages]
 
@@ -297,6 +352,8 @@ async def chat(req: ChatRequest):
         return JSONResponse(status_code=409, content={"detail": "thread is not active"})
     except ActiveRunExistsError:
         return JSONResponse(status_code=409, content={"detail": "thread already has an active run"})
+    except RunConcurrencyLimitError as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     async def gen():
         run_id = managed.run_id

@@ -1,0 +1,22 @@
+{
+  "thread_id": "checkpoint-link-ce7b51e4-checkpoint",
+  "run_id": "4e4c5610-e57f-4973-9e3e-1376e398ea00",
+  "snapshot_message_count": 0,
+  "meta_message_count": 0,
+  "meta_has_interrupt": false,
+  "event_types": [
+    "run_completed_meta",
+    "done"
+  ],
+  "had_checkpoint_before_archive": true,
+  "archived_status": "archived",
+  "checkpoint_purged": true,
+  "checks": {
+    "meta_written": true,
+    "message_count_matches": true,
+    "meta_schema_version": true,
+    "had_checkpoint_before_archive": true,
+    "archive_purged_checkpoint": true
+  },
+  "runtime_checkpoint_link": "PASS"
+}

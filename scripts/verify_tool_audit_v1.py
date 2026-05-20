@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.event_store import EventStore, RUN_STATUS_RUNNING  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.audit import (  # noqa: E402
@@ -30,6 +30,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
     store = EventStore(str(event_store_path))
     run = store.create_run(thread_id)
     run_id = str(run["id"])
+    store.update_run_status(run_id, RUN_STATUS_RUNNING)
 
     raw_arguments = {
         "path": "/api/v1/auth/login",

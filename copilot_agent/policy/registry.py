@@ -48,11 +48,10 @@ class PolicyRegistry:
                     )
                 if not confirm_dangerous:
                     return PolicyDecision(
-                        allowed=False,
+                        allowed=True,
                         requires_approval=spec.requires_approval_for(args) if spec is not None else True,
                         message=(
-                            "This action is gated. Re-send chat request with confirm_dangerous=true "
-                            "if you want to enqueue a watermark job."
+                            "This action is gated. Approve this run if you want to enqueue a watermark job."
                         ),
                         reason="dangerous_tool_requires_approval",
                     )

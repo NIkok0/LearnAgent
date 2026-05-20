@@ -184,7 +184,11 @@ def main() -> int:
             and registry.get_spec("http_post").requires_approval_for({"path": "/api/v1/jobs/watermark"})
         ),
         "llm_metadata": llm_metadata.get("model_name") == settings.openai_model,
-        "policy_dangerous_requires_approval": dangerous_decision.requires_approval and not dangerous_decision.allowed,
+        "policy_dangerous_requires_approval": (
+            dangerous_decision.allowed
+            and dangerous_decision.requires_approval
+            and dangerous_decision.reason == "dangerous_tool_requires_approval"
+        ),
         "policy_safe_allowed": safe_decision.allowed,
         "memory_facade": bool(memory_events and memory_hits),
         "memory_summary": bool(

@@ -1,0 +1,23 @@
+{
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-thread-lifecycle.sqlite",
+  "ended_ids": [
+    "active-idle-1a207d6c"
+  ],
+  "archived_ids": [
+    "active-idle-50c51969",
+    "ended-fresh-58d7b6ae",
+    "ended-old-62334496"
+  ],
+  "idle_thread_status": "ended",
+  "idle_thread_end_reason": "idle",
+  "idle_thread_ended_at": "2026-05-19T15:43:14.038891+00:00",
+  "old_thread_status": "archived",
+  "old_thread_archived_at": "2026-05-19T15:43:14.038891+00:00",
+  "fresh_thread_status": "ended",
+  "retained_run_count": 1,
+  "retained_event_types": [
+    "token"
+  ],
+  "blocked_new_run": true,
+  "thread_lifecycle_cleaner": "PASS"
+}

@@ -32,7 +32,7 @@ async def verify(event_store_path: Path) -> dict[str, object]:
         end_thread_res = await client.post("/v1/threads", json={"title": "end api verification"})
         end_thread_res.raise_for_status()
         end_thread_id = str(end_thread_res.json()["id"])
-        end_res = await client.post(f"/v1/threads/{end_thread_id}/end")
+        end_res = await client.post(f"/v1/threads/{end_thread_id}/end", json={"reason": "explicit"})
         end_read_res = await client.get(f"/v1/threads/{end_thread_id}")
 
         archive_res = await client.post(f"/v1/threads/{thread_id}/archive")
@@ -55,10 +55,13 @@ async def verify(event_store_path: Path) -> dict[str, object]:
         "end_thread_id": end_thread_id,
         "end_status_code": end_res.status_code,
         "end_status": ended.get("status"),
+        "end_ended_at": ended.get("ended_at"),
+        "end_reason": ended.get("end_reason"),
         "end_read_status_code": end_read_res.status_code,
         "end_read_status": ended_readable.get("status"),
         "archive_status_code": archive_res.status_code,
         "archive_status": archived.get("status"),
+        "archive_archived_at": archived.get("archived_at"),
         "read_status_code": read_res.status_code,
         "read_status": readable.get("status"),
         "run_status_code": run_res.status_code,
@@ -90,10 +93,13 @@ def main() -> int:
     passed = (
         summary["end_status_code"] == 200
         and summary["end_status"] == "ended"
+        and bool(summary["end_ended_at"])
+        and summary["end_reason"] == "explicit"
         and summary["end_read_status_code"] == 200
         and summary["end_read_status"] == "ended"
         and summary["archive_status_code"] == 200
         and summary["archive_status"] == "archived"
+        and bool(summary["archive_archived_at"])
         and summary["read_status_code"] == 200
         and summary["read_status"] == "archived"
         and summary["run_status_code"] == 409

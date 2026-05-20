@@ -17,7 +17,10 @@ if str(ROOT) not in sys.path:
 from copilot_agent.runtime.event_store import (  # noqa: E402
     EventStore,
     RUN_STATUS_CANCELLED,
+    RUN_STATUS_CANCELLING,
     RUN_STATUS_FAILED,
+    RUN_STATUS_RUNNING,
+    RUN_STATUS_WAITING_APPROVAL,
 )
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
@@ -40,6 +43,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     completed_run = _make_run(store, completed_thread)
     completed_run_id = str(completed_run["id"])
     _append(store, completed_thread, completed_run_id, "run_created", {"status": "queued"})
+    store.update_run_status(completed_run_id, RUN_STATUS_RUNNING)
     _append(store, completed_thread, completed_run_id, "run_started", {"status": "running"})
     _append(store, completed_thread, completed_run_id, "token", {"text": "hello "})
     _append(store, completed_thread, completed_run_id, "token", {"text": "world"})
@@ -71,6 +75,13 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
         },
     )
     _append(store, completed_thread, completed_run_id, "done", {})
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "run_completed_meta",
+        {"checkpoint_thread_id": completed_thread, "message_count": 3, "has_interrupt": False},
+    )
     completed = store.complete_run(completed_run_id)
     completed_timeline = projector.project_run(completed, store.list_run_events(completed_run_id))
 
@@ -78,6 +89,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     missing_tool_run = _make_run(store, missing_tool_thread)
     missing_tool_run_id = str(missing_tool_run["id"])
     _append(store, missing_tool_thread, missing_tool_run_id, "run_created", {})
+    store.update_run_status(missing_tool_run_id, RUN_STATUS_RUNNING)
     _append(store, missing_tool_thread, missing_tool_run_id, "run_started", {})
     _append(
         store,
@@ -94,9 +106,12 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     approval_run = _make_run(store, approval_thread)
     approval_run_id = str(approval_run["id"])
     _append(store, approval_thread, approval_run_id, "run_created", {})
+    store.update_run_status(approval_run_id, RUN_STATUS_RUNNING)
     _append(store, approval_thread, approval_run_id, "run_started", {})
     _append(store, approval_thread, approval_run_id, "approval_required", {"reason": "dangerous_tool"})
+    store.update_run_status(approval_run_id, RUN_STATUS_WAITING_APPROVAL)
     _append(store, approval_thread, approval_run_id, "approval_resolved", {"approved": True})
+    store.update_run_status(approval_run_id, RUN_STATUS_RUNNING)
     _append(store, approval_thread, approval_run_id, "done", {})
     approval_completed = store.complete_run(approval_run_id)
     approval_timeline = projector.project_run(approval_completed, store.list_run_events(approval_run_id))
@@ -105,6 +120,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     memory_run = _make_run(store, memory_thread)
     memory_run_id = str(memory_run["id"])
     _append(store, memory_thread, memory_run_id, "run_created", {})
+    store.update_run_status(memory_run_id, RUN_STATUS_RUNNING)
     _append(
         store,
         memory_thread,
@@ -125,8 +141,10 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     cancelled_run = _make_run(store, cancelled_thread)
     cancelled_run_id = str(cancelled_run["id"])
     _append(store, cancelled_thread, cancelled_run_id, "run_created", {})
+    store.update_run_status(cancelled_run_id, RUN_STATUS_RUNNING)
     _append(store, cancelled_thread, cancelled_run_id, "run_started", {})
     _append(store, cancelled_thread, cancelled_run_id, "cancel_requested", {})
+    store.update_run_status(cancelled_run_id, RUN_STATUS_CANCELLING)
     _append(store, cancelled_thread, cancelled_run_id, "cancelled", {})
     cancelled = store.update_run_status(cancelled_run_id, RUN_STATUS_CANCELLED, completed=True)
     cancelled_timeline = projector.project_run(cancelled, store.list_run_events(cancelled_run_id))
@@ -135,6 +153,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     failed_run = _make_run(store, failed_thread)
     failed_run_id = str(failed_run["id"])
     _append(store, failed_thread, failed_run_id, "run_created", {})
+    store.update_run_status(failed_run_id, RUN_STATUS_RUNNING)
     failed = store.update_run_status(failed_run_id, RUN_STATUS_FAILED, error="boom", completed=True)
     failed_timeline = projector.project_run(failed, store.list_run_events(failed_run_id))
 
@@ -149,9 +168,13 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "run_id": completed_run_id,
             "assistant_output": completed_timeline["assistant_output"],
             "kinds": completed_kinds,
+            "kinds": completed_kinds,
             "tool_merged": completed_tool.get("start_event_id") is not None and completed_tool.get("end_event_id") is not None,
             "tool_success": completed_tool.get("success"),
             "warnings": [warning["code"] for warning in completed_timeline["warnings"]],
+            "checkpoint_message_count": (completed_timeline.get("checkpoint") or {}).get("completed", {}).get(
+                "message_count"
+            ),
         },
         "missing_tool": {
             "run_id": missing_tool_run_id,
@@ -208,6 +231,7 @@ def main() -> int:
         and summary["completed"]["tool_merged"]
         and summary["completed"]["tool_success"] is True
         and not summary["completed"]["warnings"]
+        and "checkpoint" in summary["completed"]["kinds"]
     )
     ok_missing_tool = "tool_missing_end" in summary["missing_tool"]["warnings"]
     ok_approval = summary["approval"]["status"] == "approved" and summary["approval"]["resolved"].get("approved") is True

@@ -1,6 +1,6 @@
 {
-  "thread_id": "memory-v1-e5ffc756",
-  "run_id": "5fc99cce-2003-42f9-928c-8120ad593d6d",
+  "thread_id": "memory-v1-4fc03127",
+  "run_id": "3586eea5-3f57-4c8e-bb2e-c15cb7e98da1",
   "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-memory-v1-events.sqlite",
   "event_types": [
     "plan_created",
@@ -30,12 +30,14 @@
     ],
     "errors": [],
     "source_event_ids": [
-      22,
-      23,
-      24,
-      25,
-      26
-    ]
+      62,
+      63,
+      64,
+      65,
+      66
+    ],
+    "eligible_for_thread": true,
+    "char_count": 371
   },
   "thread_summary": {
     "summary_type": "thread",
@@ -50,12 +52,13 @@
     ],
     "open_items": [],
     "source_run_ids": [
-      "5fc99cce-2003-42f9-928c-8120ad593d6d"
+      "3586eea5-3f57-4c8e-bb2e-c15cb7e98da1"
     ],
     "source_event_ids": [
-      27
+      67
     ]
   },
+  "inject_preview_len": 271,
   "checks": {
     "run_summary_event": true,
     "thread_summary_event": true,
@@ -64,7 +67,12 @@
     "latest_thread_summary": true,
     "context_working": true,
     "context_semantic": true,
-    "context_episodic": true
+    "context_episodic": true,
+    "run_summary_eligible": true,
+    "run_summary_outcome": true,
+    "inject_preview_present": true,
+    "inject_budget_ok": true,
+    "failed_run_excluded": true
   },
   "memory_v1": "PASS"
 }

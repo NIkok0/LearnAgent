@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from copilot_agent.memory import MemoryManager  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.rag.retriever import RagStore  # noqa: E402
-from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.event_store import EventStore, RUN_STATUS_RUNNING  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 
 
@@ -43,6 +43,7 @@ def main() -> int:
 
     run = store.create_run(args.thread_id)
     run_id = str(run["id"])
+    store.update_run_status(run_id, RUN_STATUS_RUNNING)
     memory.append_event(args.thread_id, run_id, "plan_created", {"goal": "check redis stream status"})
     memory.append_event(args.thread_id, run_id, "token", {"text": "Redis stream status should be checked with docs and health APIs."})
     memory.append_event(
@@ -69,7 +70,18 @@ def main() -> int:
         messages=[{"role": "user", "content": "check redis stream status"}],
         goal="check redis stream status",
     )
+    preview = memory.get_memory_preview(args.thread_id, goal="check redis stream status", current_run_id=run_id)
     events = store.list_run_events(run_id)
+
+    failed_run = store.create_run(args.thread_id)
+    failed_run_id = str(failed_run["id"])
+    store.update_run_status(failed_run_id, RUN_STATUS_RUNNING)
+    memory.append_event(args.thread_id, failed_run_id, "plan_created", {"goal": "failed goal"})
+    memory.append_event(args.thread_id, failed_run_id, "error", {"error": "boom"})
+    store.complete_run(failed_run_id, error="boom")
+    memory.summarize_run(args.thread_id, failed_run_id, fallback_goal="failed goal")
+    memory.update_thread_summary(args.thread_id, failed_run_id)
+    thread_after_failed = memory.get_thread_summary(args.thread_id) or {}
 
     checks = {
         "run_summary_event": any(event["type"] == "memory_run_summary" for event in events),
@@ -80,6 +92,11 @@ def main() -> int:
         "context_working": context.working.get("thread_id") == args.thread_id,
         "context_semantic": context.semantic.get("rag_chunks") == 1,
         "context_episodic": bool(context.episodic.get("thread_summary")),
+        "run_summary_eligible": run_summary.get("eligible_for_thread") is True,
+        "run_summary_outcome": run_summary.get("outcome") == "completed",
+        "inject_preview_present": bool(context.episodic.get("inject_preview")),
+        "inject_budget_ok": len(str(context.episodic.get("inject_preview") or "")) <= memory.policy.thread_summary_max_chars,
+        "failed_run_excluded": "failed goal" not in (thread_after_failed.get("recent_goals") or []),
     }
     passed = all(checks.values())
     summary = {
@@ -89,6 +106,7 @@ def main() -> int:
         "event_types": [event["type"] for event in events],
         "run_summary": run_summary,
         "thread_summary": thread_summary,
+        "inject_preview_len": len(preview.inject_preview or ""),
         "checks": checks,
         "memory_v1": "PASS" if passed else "FAIL",
     }

@@ -13,6 +13,7 @@ LIFECYCLE_EVENTS = {
     "cancel_requested",
     "cancelled",
 }
+CHECKPOINT_EVENTS = {"run_checkpoint_meta", "run_completed_meta", "thread_checkpoint_purged"}
 MEMORY_EVENTS = {"memory_run_summary", "memory_thread_summary"}
 
 
@@ -28,6 +29,7 @@ class TimelineProjector:
         tools: OrderedDict[str, dict[str, Any]] = OrderedDict()
         approval_pending: dict[str, Any] | None = None
         approval_index = 0
+        checkpoint_items: list[dict[str, Any]] = []
 
         def flush_tokens() -> None:
             if not token_buffer:
@@ -173,6 +175,30 @@ class TimelineProjector:
                     items[approval_index] = approval_pending
                 continue
 
+            if event_type in CHECKPOINT_EVENTS:
+                checkpoint_items.append(
+                    {
+                        "kind": "checkpoint",
+                        "title": event_type,
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "payload": payload,
+                    }
+                )
+                continue
+
+            if event_type in {"plan_created", "assistant_state"}:
+                items.append(
+                    {
+                        "kind": event_type,
+                        "title": event_type,
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "payload": payload,
+                    }
+                )
+                continue
+
             if event_type in MEMORY_EVENTS:
                 items.append(
                     {
@@ -197,6 +223,9 @@ class TimelineProjector:
             )
 
         flush_tokens()
+
+        for checkpoint_item in checkpoint_items:
+            items.append(checkpoint_item)
 
         for tool in tools.values():
             if tool.get("end_event_id") is None:
@@ -231,6 +260,7 @@ class TimelineProjector:
                 if event.get("type") == "token"
             ),
             "event_count": len(ordered_events),
+            "checkpoint": _checkpoint_summary(checkpoint_items),
         }
 
 
@@ -301,6 +331,20 @@ def _sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return int(event_id)
 
     return sorted(items, key=item_order)
+
+
+def _checkpoint_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for item in items:
+        payload = item.get("payload") or {}
+        event_type = str(item.get("title", ""))
+        if event_type == "run_completed_meta":
+            summary["completed"] = payload
+        elif event_type == "run_checkpoint_meta":
+            summary["interrupt"] = payload
+        elif event_type == "thread_checkpoint_purged":
+            summary["purged"] = payload
+    return summary
 
 
 def _preview(text: str, limit: int) -> str:

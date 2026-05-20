@@ -14,8 +14,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
+    openai_provider: str = "openai-compatible"
     openai_reasoning_effort: Optional[str] = None
     openai_thinking_type: Optional[str] = None
+    openai_extra_body_json: Optional[str] = None
+    openai_disable_thinking_for_tools: bool = False
+    openai_proxy_url: Optional[str] = None
+    openai_auto_proxy: bool = True
+    openai_proxy_probe_hosts: str = "127.0.0.1:7890,127.0.0.1:7897,127.0.0.1:1080"
 
     copilot_host: str = "0.0.0.0"
     copilot_port: int = 8090
@@ -45,8 +51,28 @@ class Settings(BaseSettings):
     agent_event_store_path: str = "storage/learnagent-events.sqlite"
 
     # Thread lifecycle cleanup.
+    thread_active_idle_ttl_seconds: int = 180
     thread_ended_archive_ttl_seconds: int = 3600
     thread_lifecycle_cleaner_interval_seconds: int = 60
+
+    # Run execution limits.
+    run_timeout_seconds: int = 120
+    max_concurrent_runs: int = 4
+    max_llm_inflight: int = 4
+
+    # EventStore pagination defaults.
+    event_page_default_limit: int = 100
+    event_page_max_limit: int = 500
+    event_page_legacy_max: int = 1000
+
+    # Memory orchestration policy (episodic summary inject).
+    memory_enabled: bool = True
+    memory_thread_summary_max_runs: int = 5
+    memory_thread_summary_max_chars: int = 1200
+    memory_episodic_recall_top_k: int = 2
+    memory_include_failed_runs: bool = False
+    memory_include_cancelled_runs: bool = False
+    memory_key_output_max_chars: int = 800
 
     # HuggingFace model cache root (hub/ lives under this directory).
     hf_home: str = r"F:\model"

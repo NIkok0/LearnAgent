@@ -3,13 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from copilot_agent.memory.policy import (
+    EpisodicInjectBundle,
+    MemoryPolicyConfig,
+    build_episodic_inject_bundle,
+    is_run_eligible_for_thread,
+    memory_policy_from_settings,
+    recall_episodic_runs,
+)
 from copilot_agent.rag import RagStore
 from copilot_agent.runtime.event_store import EventStore
+from copilot_agent.settings import settings
 
 MEMORY_RUN_SUMMARY_EVENT = "memory_run_summary"
 MEMORY_THREAD_SUMMARY_EVENT = "memory_thread_summary"
-MAX_KEY_OUTPUT_CHARS = 800
-MAX_THREAD_SUMMARY_RUNS = 5
 
 
 @dataclass(frozen=True)
@@ -35,10 +42,16 @@ class MemoryManager:
         rag_store: RagStore,
         event_store: EventStore | None,
         checkpoint_path: str,
+        policy: MemoryPolicyConfig | None = None,
     ) -> None:
         self._rag = rag_store
         self._events = event_store
         self.checkpoint_path = checkpoint_path
+        self._policy = policy or memory_policy_from_settings(settings)
+
+    @property
+    def policy(self) -> MemoryPolicyConfig:
+        return self._policy
 
     @property
     def rag_store(self) -> RagStore:
@@ -59,7 +72,7 @@ class MemoryManager:
         messages: list[dict[str, Any]],
         goal: str,
     ) -> MemoryContext:
-        thread_summary = self.get_thread_summary(thread_id)
+        bundle = self.get_memory_preview(thread_id, goal=goal, current_run_id=run_id)
         return MemoryContext(
             working={
                 "thread_id": thread_id,
@@ -73,8 +86,36 @@ class MemoryManager:
                 "rag_chunks": len(getattr(self._rag, "chunks", []) or []),
             },
             episodic={
-                "thread_summary": thread_summary,
+                "enabled": self._policy.enabled,
+                "thread_summary": bundle.thread_summary,
+                "recalled_runs": bundle.recalled_runs,
+                "dropped_conflicts": bundle.dropped_conflicts,
+                "inject_preview": bundle.inject_preview,
+                "budget_applied": bundle.budget_applied,
+                "sources": bundle.sources,
             },
+        )
+
+    def get_memory_preview(
+        self,
+        thread_id: str,
+        *,
+        goal: str | None = None,
+        current_run_id: str | None = None,
+    ) -> EpisodicInjectBundle:
+        thread_summary = self.get_thread_summary(thread_id) if self._policy.enabled else None
+        eligible = self.get_eligible_run_summaries(thread_id)
+        recalled, dropped = recall_episodic_runs(
+            run_summaries=eligible,
+            goal=goal or "",
+            current_run_id=current_run_id,
+            config=self._policy,
+        )
+        return build_episodic_inject_bundle(
+            thread_summary=thread_summary,
+            recalled_runs=recalled,
+            dropped_conflicts=dropped,
+            config=self._policy,
         )
 
     def append_event(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
@@ -86,6 +127,30 @@ class MemoryManager:
             return []
         return self._events.list_events(thread_id, run_id=run_id)
 
+    def get_eligible_run_summaries(self, thread_id: str) -> list[dict[str, Any]]:
+        if self._events is None:
+            return []
+        latest_by_run: dict[str, dict[str, Any]] = {}
+        for event in self._events.list_events(thread_id):
+            if event.get("type") != MEMORY_RUN_SUMMARY_EVENT:
+                continue
+            run_id = str(event.get("run_id", ""))
+            if not run_id:
+                continue
+            latest_by_run[run_id] = {
+                "run_id": run_id,
+                "event_id": event.get("id"),
+                "payload": event.get("payload", {}),
+            }
+        eligible = [
+            item
+            for item in latest_by_run.values()
+            if isinstance(item.get("payload"), dict)
+            and is_run_eligible_for_thread(item["payload"], self._policy)
+        ]
+        eligible.sort(key=lambda item: int(item.get("event_id") or 0))
+        return eligible[-self._policy.thread_summary_max_runs :]
+
     def summarize_run(self, thread_id: str, run_id: str, *, fallback_goal: str = "") -> dict[str, Any]:
         if self._events is None:
             return {}
@@ -96,29 +161,23 @@ class MemoryManager:
         ]
         if not events:
             return {}
-        summary = _summarize_run_events(events, fallback_goal=fallback_goal)
+        summary = _summarize_run_events(events, fallback_goal=fallback_goal, policy=self._policy)
         self._events.append_event(thread_id, run_id, MEMORY_RUN_SUMMARY_EVENT, summary)
         return summary
 
     def update_thread_summary(self, thread_id: str, run_id: str | None = None) -> dict[str, Any]:
         if self._events is None:
             return {}
-        summary_events = [
-            event
-            for event in self._events.list_events(thread_id)
-            if event.get("type") == MEMORY_RUN_SUMMARY_EVENT
-        ]
-        if not summary_events:
+        eligible = self.get_eligible_run_summaries(thread_id)
+        if not eligible:
             return {}
-        latest_by_run: dict[str, dict[str, Any]] = {}
-        for event in summary_events:
-            latest_by_run[str(event.get("run_id", ""))] = event
-        latest_events = list(latest_by_run.values())[-MAX_THREAD_SUMMARY_RUNS:]
-        payloads = [event.get("payload", {}) for event in latest_events]
+        payloads = [item["payload"] for item in eligible if isinstance(item.get("payload"), dict)]
         summary = {
             "summary_type": "thread",
             "recent_goals": [_non_empty(payload.get("goal")) for payload in payloads if _non_empty(payload.get("goal"))],
-            "recent_outcomes": [_non_empty(payload.get("outcome")) for payload in payloads if _non_empty(payload.get("outcome"))],
+            "recent_outcomes": [
+                _non_empty(payload.get("outcome")) for payload in payloads if _non_empty(payload.get("outcome"))
+            ],
             "tools_used": sorted(
                 {
                     str(tool)
@@ -128,10 +187,10 @@ class MemoryManager:
                 }
             ),
             "open_items": [],
-            "source_run_ids": [str(event.get("run_id", "")) for event in latest_events if str(event.get("run_id", ""))],
-            "source_event_ids": [int(event["id"]) for event in latest_events if event.get("id") is not None],
+            "source_run_ids": [str(item.get("run_id", "")) for item in eligible if str(item.get("run_id", ""))],
+            "source_event_ids": [int(item["event_id"]) for item in eligible if item.get("event_id") is not None],
         }
-        target_run_id = run_id or str(latest_events[-1].get("run_id", ""))
+        target_run_id = run_id or str(eligible[-1].get("run_id", ""))
         if target_run_id:
             self._events.append_event(thread_id, target_run_id, MEMORY_THREAD_SUMMARY_EVENT, summary)
         return summary
@@ -146,7 +205,12 @@ class MemoryManager:
         return None
 
 
-def _summarize_run_events(events: list[dict[str, Any]], *, fallback_goal: str = "") -> dict[str, Any]:
+def _summarize_run_events(
+    events: list[dict[str, Any]],
+    *,
+    fallback_goal: str = "",
+    policy: MemoryPolicyConfig,
+) -> dict[str, Any]:
     goal = _goal_from_events(events) or fallback_goal
     outcome = _outcome_from_events(events)
     tools: dict[str, dict[str, str]] = {}
@@ -174,8 +238,9 @@ def _summarize_run_events(events: list[dict[str, Any]], *, fallback_goal: str = 
             error = str(payload.get("error", ""))
             if error:
                 errors.append(error)
-    output = _truncate("".join(token_parts).strip(), MAX_KEY_OUTPUT_CHARS)
-    return {
+    output = _truncate("".join(token_parts).strip(), policy.key_output_max_chars)
+    eligible_for_thread = is_run_eligible_for_thread({"outcome": outcome}, policy)
+    summary = {
         "summary_type": "run",
         "goal": goal,
         "outcome": outcome,
@@ -184,7 +249,10 @@ def _summarize_run_events(events: list[dict[str, Any]], *, fallback_goal: str = 
         "key_outputs": [output] if output else [],
         "errors": errors,
         "source_event_ids": source_event_ids,
+        "eligible_for_thread": eligible_for_thread,
     }
+    summary["char_count"] = len(str(summary))
+    return summary
 
 
 def _goal_from_events(events: list[dict[str, Any]]) -> str:
