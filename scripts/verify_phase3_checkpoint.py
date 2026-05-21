@@ -67,6 +67,10 @@ def _safety_gate_node(state: dict[str, Any], _config: dict[str, Any] | None = No
     return {}
 
 
+def _planner_node(_state: dict[str, Any], _config: dict[str, Any] | None = None) -> dict[str, list[AIMessage]]:
+    return {}
+
+
 def _echo_tool(text: str) -> dict[str, Any]:
     return {"ok": True, "text": text}
 
@@ -107,6 +111,7 @@ def main() -> int:
         args_schema=EchoArgs,
     )
     graph = build_agent_graph(
+        _planner_node,
         _assistant_node,
         _safety_gate_node,
         [tool],

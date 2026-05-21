@@ -6,8 +6,9 @@ from typing import Any
 
 import httpx
 
-from copilot_agent.conversation_store import redact_cookie_header
-from copilot_agent.settings import settings
+from copilot_agent.scenario.runtime_bindings import SESSION_COOKIE_NAME
+from copilot_agent.scenario.http_paths import HttpPathPolicy
+from copilot_agent.tools.sanitize import redact_cookie_header
 from copilot_agent.tools.whitelist import validate_get_path, validate_post_path
 
 log = logging.getLogger(__name__)
@@ -19,16 +20,26 @@ def _merge_cookie(stored: str | None, override: str | None) -> str | None:
     return stored
 
 
-class WatermarkHttpTools:
-    """httpx calls to WATERMARK_API_BASE_URL only; paths validated by whitelist."""
+class ScenarioHttpClient:
+    """HTTP client for Scenario-bound API base URL; paths validated by Scenario allowlist."""
 
-    def __init__(self) -> None:
-        self._base = settings.watermark_api_base_url.rstrip("/")
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        dangerous_paths: tuple[str, ...] = (),
+        session_cookie_name: str = "",
+        path_policy: HttpPathPolicy | None = None,
+    ) -> None:
+        self._base = base_url.rstrip("/")
+        self._dangerous_paths = tuple(path.split("?", 1)[0] for path in dangerous_paths if path.strip())
+        self._session_cookie_name = session_cookie_name.strip()
+        self._path_policy = path_policy
 
     async def http_get(
         self, path: str, cookie_header: str | None = None, stored_cookie: str | None = None
     ) -> dict[str, Any]:
-        err = validate_get_path(path)
+        err = self._validate_get(path)
         if err:
             return {"ok": False, "error": err}
         cookie = _merge_cookie(stored_cookie, cookie_header)
@@ -48,15 +59,15 @@ class WatermarkHttpTools:
         allow_job_post: bool,
         user_confirmed_dangerous: bool,
     ) -> dict[str, Any]:
-        err = validate_post_path(path)
+        err = self._validate_post(path)
         if err:
             return {"ok": False, "error": err}
         base = path.split("?", 1)[0]
-        if base == "/api/v1/jobs/watermark":
+        if base in self._dangerous_paths:
             if not allow_job_post:
                 return {
                     "ok": False,
-                    "error": "POST /api/v1/jobs/watermark disabled (set COPILOT_ALLOW_JOB_POST=true and confirm_dangerous on chat request).",
+                    "error": f"POST {base} disabled (set COPILOT_ALLOW_JOB_POST=true and confirm_dangerous on chat request).",
                 }
             if not user_confirmed_dangerous:
                 return {
@@ -75,9 +86,22 @@ class WatermarkHttpTools:
             set_cookies = _collect_set_cookie_headers(r)
             if set_cookies:
                 joined = ", ".join(set_cookies)
-                body["set_cookie_redacted"] = _redact_set_cookie_for_tool_result(joined)
+                body["set_cookie_redacted"] = _redact_set_cookie_for_tool_result(
+                    joined,
+                    cookie_name=self._session_cookie_name or SESSION_COOKIE_NAME,
+                )
                 body["_raw_set_cookie_for_store_only"] = set_cookies
         return body
+
+    def _validate_get(self, path: str) -> str | None:
+        if self._path_policy is not None:
+            return self._path_policy.validate_get(path)
+        return validate_get_path(path)
+
+    def _validate_post(self, path: str) -> str | None:
+        if self._path_policy is not None:
+            return self._path_policy.validate_post(path)
+        return validate_post_path(path)
 
     def _headers_get(self, cookie: str | None) -> dict[str, str]:
         h: dict[str, str] = {"Accept": "application/json"}
@@ -119,23 +143,34 @@ def _collect_set_cookie_headers(r: httpx.Response) -> list[str]:
     return [sc] if sc else []
 
 
-def _redact_set_cookie_for_tool_result(raw: str) -> str:
+def _redact_set_cookie_for_tool_result(raw: str, *, cookie_name: str = "") -> str:
+    name = (cookie_name or SESSION_COOKIE_NAME or "").strip()
     out = []
     for part in raw.split(","):
         p = part.strip()
         pl = p.lower()
-        if pl.startswith("wmsessionid=") or "wmsessionid=" in pl:
+        if name and pl.startswith(f"{name.lower()}="):
+            out.append(f"{name.upper()}=***; ...")
+        elif name and f"{name.lower()}=" in pl:
+            out.append(f"{name.upper()}=***; ...")
+        elif "wmsessionid=" in pl:
             out.append("WMSESSIONID=***; ...")
         else:
             out.append("(other Set-Cookie omitted)")
     return "; ".join(out) if out else "***"
 
 
-def extract_session_cookie_from_set_cookie_headers(headers: list[str]) -> str | None:
-    """Return `WMSESSIONID=value` for Cookie header from one or more Set-Cookie header lines."""
+def extract_session_cookie_from_set_cookie_headers(
+    headers: list[str],
+    *,
+    cookie_name: str = "",
+) -> str | None:
+    """Return `CookieName=value` for Cookie header from Set-Cookie header lines."""
+    name = (cookie_name or SESSION_COOKIE_NAME or "WMSESSIONID").strip()
+    needle = f"{name.lower()}="
     for hdr in headers:
         lower = hdr.lower()
-        idx = lower.find("wmsessionid=")
+        idx = lower.find(needle)
         if idx < 0:
             continue
         rest = hdr[idx:]

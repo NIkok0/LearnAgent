@@ -1,0 +1,65 @@
+name: watermark
+description: Watermark platform docs + API agent
+
+policy:
+  tool_allowlist:
+    - search_docs
+    - http_get
+    - http_post
+    - mcp_watermark_ops_check_api_health
+    - mcp_watermark_ops_search_platform_docs
+  tool_denylist: []
+  dangerous_paths:
+    - /api/v1/jobs/watermark
+  require_approval_tools:
+    - http_post
+  mcp_server_allowlist:
+    - watermark_ops
+  mcp_tool_allowlist:
+    - check_api_health
+    - search_platform_docs
+
+prompt_file: config/watermark-prompt.md
+router: config/watermark-router.yaml
+mcp: config/watermark-mcp.yaml
+docs_dir: scenarios/watermark/docs
+memory_policy: config/watermark-memory.yaml
+
+eval:
+  golden: eval/golden/runtime-golden-scenarios.json
+  rag_cases: eval/phase4-eval-cases.json
+
+budgets:
+  max_context_tokens: 24000
+  max_context_chars: 14000
+  max_tool_calls: 8
+  max_run_seconds: 120
+  max_graph_rounds: 12
+
+resources:
+  api_base_url_env: WATERMARK_API_BASE_URL
+  default_api_base_url: http://127.0.0.1:8080
+  docs_path_env: COPILOT_DOCS_PATH
+  credential_binding: wmsession
+  credential_cookie_name: WMSESSIONID
+  credential_provider: watermark_java_api
+  credential_scopes:
+    - http:read
+    - http:write
+  docs_fallback: scenarios/watermark/docs
+  rag_rules: config/watermark-rag.yaml
+  diagnosis: config/watermark-diagnosis.yaml
+  http_get_actuator_paths:
+    - /actuator/health
+  http_get_patterns:
+    - ^/api/v1/stats/dashboard/?$
+    - ^/api/v1/jobs/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$
+    - ^/api/v1/files/?$
+    - ^/api/v1/files/\d+/?$
+    - ^/api/v1/admin/users/?$
+    - ^/api/v1/admin/users/\d+/?$
+    - ^/api/v1/admin/groups/?$
+    - ^/api/v1/admin/stats/?$
+  http_post_paths:
+    - /api/v1/auth/login
+    - /api/v1/jobs/watermark

@@ -26,12 +26,12 @@ class RuntimeEvent(BaseModel):
 
     @property
     def type(self) -> str:
-        """Legacy alias matching former DomainEvent['type']."""
+        """Event type name for callers that expect flat event rows."""
         return self.kind
 
     @property
     def payload(self) -> dict[str, Any]:
-        """Legacy flat payload for callers still using DomainEvent shape."""
+        """Flat payload matching EventStore/SSE rows."""
         return self.to_store_payload()
 
     def to_store_payload(self) -> dict[str, Any]:

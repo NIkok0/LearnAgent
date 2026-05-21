@@ -13,9 +13,12 @@ if str(ROOT) not in sys.path:
 
 from copilot_agent.rag.api_paths import extract_api_paths, merge_path_strings  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
+from copilot_agent.scenario.bootstrap import apply_scenario_environment  # noqa: E402
 
 
 def main() -> int:
+    apply_scenario_environment(load_scenario("watermark"))
     job_id = str(uuid.uuid4())
     chunks = [
         DocChunk(

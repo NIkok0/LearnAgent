@@ -1,0 +1,25 @@
+name: minimal
+description: Kernel smoke — policy denies all tools; capabilities from COPILOT_CAPABILITIES env
+
+policy:
+  tool_allowlist: []
+  tool_denylist:
+    - search_docs
+    - http_get
+    - http_post
+  dangerous_paths: []
+  require_approval_tools: []
+
+prompt: You are a minimal LearnAgent kernel smoke assistant. Answer briefly without calling tools.
+
+docs_dir: scenarios/minimal/docs
+
+budgets:
+  max_context_tokens: 8000
+  max_context_chars: 4000
+  max_tool_calls: 0
+  max_run_seconds: 60
+  max_graph_rounds: 4
+
+resources:
+  docs_fallback: scenarios/minimal/docs

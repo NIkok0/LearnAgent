@@ -17,8 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from copilot_agent.agent.runner import ChatRunner
+from copilot_agent.scenario.bootstrap import apply_scenario_environment
+from copilot_agent.scenario.loader import LoadedScenario, load_scenario, scenario_status
 from copilot_agent.contracts.validate import ContractValidationError, enrich_event_row
-from copilot_agent.conversation_store import ConversationCookieStore
+from copilot_agent.credentials import CredentialManager
 from copilot_agent.observability import flush_langfuse
 from copilot_agent.rag import RagStoreManager
 from copilot_agent.rag.docs_manifest import register_uploaded_file
@@ -37,11 +39,12 @@ from copilot_agent.runtime.thread_checkpoint import archive_thread_and_purge_che
 from copilot_agent.runtime.thread_lifecycle import ThreadLifecycleCleaner
 from copilot_agent.runtime.timeline import TimelineProjector
 from copilot_agent.settings import settings
+from copilot_agent.tools.extensions.mcp import McpRuntime
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-cookie_store = ConversationCookieStore(settings.conversation_cookie_ttl_seconds)
+credential_manager: CredentialManager | None = None
 event_store = EventStore(settings.agent_event_store_path)
 checkpoint_store = CheckpointStore(settings.agent_checkpoint_path)
 timeline_projector = TimelineProjector()
@@ -50,6 +53,8 @@ execution_engine: ExecutionEngine | None = None
 thread_lifecycle_cleaner: ThreadLifecycleCleaner | None = None
 rag_manager: RagStoreManager | None = None
 rag_watch_task: asyncio.Task | None = None
+loaded_scenario: LoadedScenario | None = None
+mcp_runtime: McpRuntime | None = None
 
 
 async def _rag_hot_reload_loop(manager: RagStoreManager) -> None:
@@ -72,7 +77,27 @@ async def _rag_hot_reload_loop(manager: RagStoreManager) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global runner, execution_engine, thread_lifecycle_cleaner, rag_manager, rag_watch_task
+    global runner, execution_engine, thread_lifecycle_cleaner, rag_manager, rag_watch_task, loaded_scenario, mcp_runtime, credential_manager
+    loaded_scenario = load_scenario(
+        settings.scenario,
+        scenarios_root_path=settings.scenarios_root or None,
+    )
+    credential_manager = CredentialManager.from_scenario_resources(
+        loaded_scenario.resources,
+        ttl_seconds=settings.conversation_cookie_ttl_seconds,
+    )
+    apply_scenario_environment(loaded_scenario)
+    if loaded_scenario.budgets.max_context_chars:
+        settings.rag_context_budget_chars = loaded_scenario.budgets.max_context_chars
+    if loaded_scenario.budgets.max_run_seconds:
+        settings.run_timeout_seconds = loaded_scenario.budgets.max_run_seconds
+    log.info(
+        "Scenario loaded: name=%s config=%s deployment_capabilities=%s docs=%s",
+        loaded_scenario.name,
+        loaded_scenario.config_path,
+        list(settings.enabled_capabilities()),
+        loaded_scenario.docs_dir(),
+    )
     rag_manager = RagStoreManager(trigger="startup")
     log.info(
         "RAG ready: chunks=%d hybrid_vector=%s hot_reload=%s",
@@ -81,7 +106,21 @@ async def lifespan(app: FastAPI):
         settings.rag_hot_reload_enabled,
     )
     log.info("Langfuse configured=%s", settings.langfuse_configured)
-    runner = ChatRunner(rag_store=rag_manager.store, cookie_store=cookie_store, event_store=event_store)
+    mcp_runtime = await McpRuntime.start(loaded_scenario.mcp, scenario_root=loaded_scenario.root)
+    if mcp_runtime is not None:
+        mcp_tools = [
+            tool.name
+            for server in mcp_runtime.config.enabled_servers()
+            for tool in server.tools
+        ]
+        log.info("MCP runtime ready: servers=%s tools=%s", list(mcp_runtime.clients.keys()), mcp_tools)
+    runner = ChatRunner(
+        rag_store=rag_manager.store,
+        credential_manager=credential_manager,
+        event_store=event_store,
+        scenario=loaded_scenario,
+        mcp_runtime=mcp_runtime,
+    )
     rag_manager.attach_memory(runner.memory)
     execution_engine = ExecutionEngine(event_store=event_store, runner=runner)
 
@@ -108,15 +147,19 @@ async def lifespan(app: FastAPI):
             pass
     if thread_lifecycle_cleaner is not None:
         await thread_lifecycle_cleaner.stop()
+    if runner is not None:
+        await runner.aclose()
     flush_langfuse()
     thread_lifecycle_cleaner = None
     execution_engine = None
     runner = None
+    mcp_runtime = None
     rag_manager = None
     rag_watch_task = None
+    loaded_scenario = None
 
 
-app = FastAPI(title="Watermark Copilot Agent", lifespan=lifespan)
+app = FastAPI(title="LearnAgent", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -148,7 +191,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     thread_id: str | None = None
     messages: list[ChatMessage]
-    confirm_dangerous: bool = Field(default=False, description="Required with COPILOT_ALLOW_JOB_POST for watermark enqueue")
+    confirm_dangerous: bool = Field(default=False, description="Auto-approve scenario-declared dangerous tool calls")
 
 
 class CreateRunRequest(BaseModel):
@@ -165,6 +208,13 @@ def _require_rag_manager() -> RagStoreManager:
     if rag_manager is None:
         raise HTTPException(status_code=503, detail="RAG not initialized")
     return rag_manager
+
+
+@app.get("/v1/scenario")
+def get_scenario() -> dict[str, object]:
+    if loaded_scenario is None:
+        raise HTTPException(status_code=503, detail="Scenario not initialized")
+    return {"scenario": scenario_status(loaded_scenario)}
 
 
 @app.get("/v1/rag/status")
@@ -191,7 +241,7 @@ async def rag_upload(file: UploadFile = File(...)) -> dict[str, object]:
     manager = _require_rag_manager()
     base = repo_docs_dir()
     if base is None:
-        raise HTTPException(status_code=503, detail="docs dir not configured (set WATERMARK_DOCS_PATH)")
+        raise HTTPException(status_code=503, detail="docs dir not configured (set COPILOT_DOCS_PATH)")
     filename = Path(file.filename or "").name
     if not _UPLOAD_FILENAME.match(filename):
         raise HTTPException(status_code=400, detail="only safe *.md filenames are allowed")

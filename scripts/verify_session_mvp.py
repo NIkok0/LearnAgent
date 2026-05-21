@@ -26,11 +26,21 @@ from copilot_agent.runtime.event_store import (  # noqa: E402
     RunConcurrencyLimitError,
 )
 from copilot_agent.runtime.execution_engine import ExecutionEngine, GraphInterrupted  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 
 
 class ApprovalState(TypedDict):
     value: str
+
+
+def _watermark_dangerous_path() -> str:
+    scenario = load_scenario("watermark")
+    if scenario.policy.dangerous_paths:
+        return str(scenario.policy.dangerous_paths[0])
+    if scenario.router_rules and scenario.router_rules.dangerous_job_path:
+        return scenario.router_rules.dangerous_job_path
+    raise RuntimeError("watermark scenario must declare a dangerous path")
 
 
 class CheckpointApprovalRunner:
@@ -102,7 +112,7 @@ class FakeToolBoundModel:
                         "id": "call_post_1",
                         "name": "http_post",
                         "args": {
-                            "path": "/api/v1/jobs/watermark",
+                            "path": _watermark_dangerous_path(),
                             "json_body": {"image_url": "https://example.invalid/a.png"},
                         },
                         "type": "tool_call",
@@ -170,13 +180,26 @@ async def _wait_for_status(store: EventStore, run_id: str, statuses: set[str], t
     return store.get_run(run_id) or {}
 
 
+async def _shutdown_engine(engine: ExecutionEngine) -> None:
+    async with engine._lock:  # noqa: SLF001
+        tasks = [managed.task for managed in engine._runs.values() if managed.task and not managed.task.done()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     previous_timeout = settings.run_timeout_seconds
     previous_allow_job_post = settings.copilot_allow_job_post
     previous_max_concurrent = settings.max_concurrent_runs
+    previous_capabilities = settings.copilot_capabilities
+    previous_route_enforce = settings.agent_tool_route_enforce
+    engines: list[ExecutionEngine] = []
     try:
         store = EventStore(str(event_store_path))
         approval_engine = ExecutionEngine(event_store=store, runner=CheckpointApprovalRunner(store))  # type: ignore[arg-type]
+        engines.append(approval_engine)
         approval = await approval_engine.create_run(
             thread_id=f"{thread_prefix}-approval",
             messages=[{"role": "user", "content": "approval"}],
@@ -189,6 +212,7 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
         settings.run_timeout_seconds = 1
         timeout_store = EventStore(str(event_store_path))
         timeout_engine = ExecutionEngine(event_store=timeout_store, runner=SlowRunner())  # type: ignore[arg-type]
+        engines.append(timeout_engine)
         timed = await timeout_engine.create_run(
             thread_id=f"{thread_prefix}-timeout",
             messages=[{"role": "user", "content": "slow"}],
@@ -197,11 +221,15 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
         timeout_events = timeout_store.list_run_events(timed.run_id)
 
         from copilot_agent.agent.runner import ChatRunner
-        from copilot_agent.conversation_store import ConversationCookieStore
+        from copilot_agent.credentials import CredentialManager
+        from copilot_agent.kernel import KernelDeps
         from copilot_agent.memory import MemoryManager
         from copilot_agent.rag.retriever import RagStore
+        from copilot_agent.scenario import load_scenario
 
         settings.copilot_allow_job_post = True
+        settings.copilot_capabilities = "rag,http"
+        settings.agent_tool_route_enforce = False
         chat_store = EventStore(str(event_store_path))
         fake_http = FakeHttpTools()
         fake_llm = FakeLLMProvider()
@@ -210,15 +238,27 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             event_store=chat_store,
             checkpoint_path=str(event_store_path.with_name(f"{event_store_path.stem}-chat-checkpoints.sqlite")),
         )
+        scenario = load_scenario("watermark")
+        cred = CredentialManager.from_scenario_resources(
+            scenario.resources,
+            ttl_seconds=60,
+        )
         chat_runner = ChatRunner(
             rag_store=RagStore([]),
-            cookie_store=ConversationCookieStore(ttl_seconds=60),
+            credential_manager=cred,
             event_store=chat_store,
-            http=fake_http,  # type: ignore[arg-type]
-            memory=chat_memory,
-            llm_provider=fake_llm,  # type: ignore[arg-type]
+            kernel_deps=KernelDeps(
+                rag_store=RagStore([]),
+                credential_manager=cred,
+                event_store=chat_store,
+                http=fake_http,  # type: ignore[arg-type]
+                memory=chat_memory,
+                llm_provider=fake_llm,  # type: ignore[arg-type]
+            ),
+            scenario=scenario,
         )
         chat_engine = ExecutionEngine(event_store=chat_store, runner=chat_runner)
+        engines.append(chat_engine)
         try:
             chat = await chat_engine.create_run(
                 thread_id=f"{thread_prefix}-chatrunner",
@@ -254,6 +294,7 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             event_store=concurrency_store,
             runner=SlowRunner(delay=2.0),
         )  # type: ignore[arg-type]
+        engines.append(concurrency_engine)
         concurrent_runs = []
         concurrency_blocked = False
         for index in range(3):
@@ -294,6 +335,7 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             event_store=rehydrate_store,
             runner=rehydrate_runner,
         )  # type: ignore[arg-type]
+        engines.append(rehydrate_engine)
         rehydrate_run = await rehydrate_engine.create_run(
             thread_id=rehydrate_thread,
             messages=[{"role": "user", "content": "rehydrate approval"}],
@@ -303,6 +345,7 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             event_store=rehydrate_store,
             runner=rehydrate_runner,
         )  # type: ignore[arg-type]
+        engines.append(restarted_engine)
         await restarted_engine.approve(rehydrate_run.run_id)
         rehydrated = await _wait_for_status(rehydrate_store, rehydrate_run.run_id, {"completed"}, timeout=5.0)
         rehydrated_events = rehydrate_store.list_run_events(rehydrate_run.run_id)
@@ -350,9 +393,13 @@ async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             },
         }
     finally:
+        for engine in engines:
+            await _shutdown_engine(engine)
         settings.run_timeout_seconds = previous_timeout
         settings.copilot_allow_job_post = previous_allow_job_post
         settings.max_concurrent_runs = previous_max_concurrent
+        settings.copilot_capabilities = previous_capabilities
+        settings.agent_tool_route_enforce = previous_route_enforce
 
 
 def main() -> int:

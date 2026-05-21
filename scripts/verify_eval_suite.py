@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -37,12 +38,120 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         args=("--event-store-path", "storage/verify-tool-audit-eval.sqlite"),
     ),
     SuiteSpec(
+        suite_name="tool_execution_reliability",
+        script="scripts/verify_tool_execution_reliability.py",
+    ),
+    SuiteSpec(
         suite_name="eval_cases_contract",
         script="scripts/verify_eval_cases_contract.py",
     ),
     SuiteSpec(
+        suite_name="scenario_loader",
+        script="scripts/verify_scenario_loader.py",
+    ),
+    SuiteSpec(
+        suite_name="mcp_capability",
+        script="scripts/verify_mcp_capability.py",
+    ),
+    SuiteSpec(
+        suite_name="context_manager",
+        script="scripts/verify_context_manager.py",
+    ),
+    SuiteSpec(
+        suite_name="policy_credentials",
+        script="scripts/verify_policy_credentials.py",
+    ),
+    SuiteSpec(
+        suite_name="policy_docs_contract",
+        script="scripts/verify_policy_docs_contract.py",
+    ),
+    SuiteSpec(
         suite_name="events_validated",
         script="scripts/verify_events_validated.py",
+    ),
+)
+
+LEGACY_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="phase3_checkpoint",
+        script="scripts/verify_phase3_checkpoint.py",
+    ),
+    SuiteSpec(
+        suite_name="phase3_safety_gate",
+        script="scripts/verify_phase3_safety_gate.py",
+    ),
+    SuiteSpec(
+        suite_name="phase4_dataset",
+        script="scripts/verify_phase4_dataset.py",
+    ),
+)
+
+CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="contract_events",
+        script="scripts/verify_contract_events.py",
+        args=("--event-store-path", "storage/verify-contract-events-eval.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="tool_audit_v1",
+        script="scripts/verify_tool_audit_v1.py",
+        args=("--event-store-path", "storage/verify-tool-audit-eval.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="tool_execution_reliability",
+        script="scripts/verify_tool_execution_reliability.py",
+    ),
+    SuiteSpec(
+        suite_name="eval_cases_contract",
+        script="scripts/verify_eval_cases_contract.py",
+    ),
+    SuiteSpec(
+        suite_name="scenario_loader",
+        script="scripts/verify_scenario_loader.py",
+    ),
+    SuiteSpec(
+        suite_name="context_manager",
+        script="scripts/verify_context_manager.py",
+    ),
+    SuiteSpec(
+        suite_name="policy_credentials",
+        script="scripts/verify_policy_credentials.py",
+    ),
+    SuiteSpec(
+        suite_name="policy_docs_contract",
+        script="scripts/verify_policy_docs_contract.py",
+    ),
+    SuiteSpec(
+        suite_name="events_validated",
+        script="scripts/verify_events_validated.py",
+    ),
+    SuiteSpec(
+        suite_name="runtime_event_store",
+        script="scripts/verify_runtime_event_store.py",
+        args=("--event-store-path", "storage/verify-runtime-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="runtime_timeline",
+        script="scripts/verify_runtime_timeline.py",
+        args=("--event-store-path", "storage/verify-runtime-timeline-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="runtime_execution_engine",
+        script="scripts/verify_runtime_execution_engine.py",
+        args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="hitl_checkpoint_resume",
+        script="scripts/verify_hitl_checkpoint_resume.py",
+        args=("--event-store-path", "storage/verify-hitl-checkpoint-resume.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="phase3_safety_gate",
+        script="scripts/verify_phase3_safety_gate.py",
+    ),
+    SuiteSpec(
+        suite_name="phase4_dataset",
+        script="scripts/verify_phase4_dataset.py",
     ),
 )
 
@@ -73,9 +182,14 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         ),
     ),
     SuiteSpec(
-        suite_name="runtime_run_manager",
-        script="scripts/verify_runtime_run_manager.py",
-        args=("--event-store-path", "storage/verify-run-manager-events.sqlite"),
+        suite_name="runtime_execution_engine",
+        script="scripts/verify_runtime_execution_engine.py",
+        args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="hitl_checkpoint_resume",
+        script="scripts/verify_hitl_checkpoint_resume.py",
+        args=("--event-store-path", "storage/verify-hitl-checkpoint-resume.sqlite"),
     ),
     SuiteSpec(
         suite_name="session_mvp",
@@ -112,9 +226,24 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
             "storage/verify-memory-production-v2-checkpoints.sqlite",
         ),
     ),
-)
+) + LEGACY_SUITES
 
 RAG_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="policy_aware_rag_v1",
+        script="scripts/verify_policy_aware_rag_v1.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="private_rag_context_guard_v1",
+        script="scripts/verify_private_rag_context_guard_v1.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="private_rag_output_guard_v1",
+        script="scripts/verify_private_rag_output_guard_v1.py",
+        rag_related=True,
+    ),
     SuiteSpec(
         suite_name="phase4_ragas",
         script="scripts/verify_phase4_ragas.py",
@@ -156,6 +285,21 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_diagnosis_template.py",
         rag_related=True,
     ),
+    SuiteSpec(
+        suite_name="tool_router",
+        script="scripts/verify_tool_router.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_hot_reload",
+        script="scripts/verify_rag_hot_reload.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_rerank",
+        script="scripts/verify_rag_rerank.py",
+        rag_related=True,
+    ),
 )
 
 E2E_SUITES: tuple[SuiteSpec, ...] = (
@@ -179,6 +323,7 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
         for spec in RAG_SUITES
     )
     return {
+        "core-fast": CORE_FAST_SUITES,
         "core": CORE_SUITES,
         "rag": rag,
         "e2e": E2E_SUITES,
@@ -260,7 +405,20 @@ def _suite_status(return_code: int, kv: dict[str, str]) -> str:
         or key.lower().endswith("_scenarios")
         or key.lower().endswith("_ragas")
         or key.lower().endswith("_contract")
-        or key in {"contract_events", "eval_cases_contract", "tool_audit_v1", "phase4_tool_trajectory"}
+        or key in {
+            "contract_events",
+            "eval_cases_contract",
+            "tool_audit_v1",
+            "phase4_tool_trajectory",
+            "verify_policy_credentials",
+            "verify_context_manager",
+            "verify_tool_router",
+            "verify_rag_rerank",
+            "phase3_step4",
+            "phase3_safety_gate",
+            "phase4_dataset",
+            "rag_hot_reload",
+        }
     ]
     if not pass_like:
         return "PASS"
@@ -274,7 +432,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run aggregated eval suite profiles.")
     parser.add_argument(
         "--profile",
-        choices=["core", "rag", "e2e", "full"],
+        choices=["core-fast", "core", "rag", "e2e", "full"],
         default="core",
         help="Which suite profile to execute.",
     )
@@ -304,13 +462,18 @@ def main() -> int:
     for spec in suites:
         start = time.perf_counter()
         cmd = [sys.executable, str((ROOT / spec.script).resolve()), *spec.args]
+        env = dict(os.environ)
+        if spec.rag_related:
+            env.setdefault("SCENARIO", "watermark")
         try:
             proc = subprocess.run(
                 cmd,
                 cwd=str(ROOT),
+                env=env,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                errors="replace",
                 timeout=args.suite_timeout_seconds,
             )
             elapsed = int((time.perf_counter() - start) * 1000)
@@ -373,6 +536,18 @@ def main() -> int:
             )
     failed = [item for item in results if item["status"] == "FAIL"]
     skipped = [item for item in results if item["status"] == "SKIP"]
+    slow_suites = sorted(
+        (
+            {
+                "suite_name": str(item["suite_name"]),
+                "duration_ms": int(item["duration_ms"]),
+                "status": str(item["status"]),
+            }
+            for item in results
+        ),
+        key=lambda item: item["duration_ms"],
+        reverse=True,
+    )[:5]
     overall_pass = not failed
     duration_total_ms = sum(int(item["duration_ms"]) for item in results)
     failed_scenarios = [
@@ -427,6 +602,7 @@ def main() -> int:
         "contract_schema_ok": contract_schema_ok,
         "contract_metrics": contract_metrics,
         "duration_total_ms": duration_total_ms,
+        "slow_suites": slow_suites,
         "results": results,
         "eval_suite": "PASS" if overall_pass else "FAIL",
     }
@@ -444,6 +620,7 @@ def main() -> int:
     print(f"contract_metrics={json.dumps(out['contract_metrics'], ensure_ascii=False)}")
     print(f"rag_metrics={json.dumps(out['rag_metrics'], ensure_ascii=False)}")
     print(f"duration_total_ms={out['duration_total_ms']}")
+    print(f"slow_suites={json.dumps(out['slow_suites'], ensure_ascii=False)}")
     print(f"summary_json={summary_path}")
     print(f"eval_suite={out['eval_suite']}")
     return 0 if overall_pass else 1

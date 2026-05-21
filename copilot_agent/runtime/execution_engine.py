@@ -15,6 +15,7 @@ from copilot_agent.runtime.event_store import (
     RunConcurrencyLimitError,
     TERMINAL_RUN_STATUSES,
 )
+from copilot_agent.runtime.event_schema import EVENT_RUN_CONSISTENCY_CHECKED, EVENT_RUN_FAILED_META
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
@@ -51,10 +52,6 @@ class GraphInterrupted(Exception):
     def __init__(self, interrupt_payload: dict[str, Any] | None = None) -> None:
         self.interrupt_payload = interrupt_payload or {}
         super().__init__("graph interrupted for approval")
-
-
-class ApprovalRequired(GraphInterrupted):
-    """Backward-compatible alias for GraphInterrupted."""
 
 
 class ExecutionEngine:
@@ -134,7 +131,17 @@ class ExecutionEngine:
         if str(current.get("status", "")) != RUN_STATUS_WAITING_APPROVAL:
             return current
         managed.approved = True
-        self._events.append_event(managed.thread_id, run_id, "approval_resolved", {"approved": True})
+        self._events.append_event(
+            managed.thread_id,
+            run_id,
+            "approval_resolved",
+            {
+                "approved": True,
+                "resume_value": True,
+                "checkpoint_thread_id": managed.thread_id,
+                "checkpoint_resume": True,
+            },
+        )
         if managed.rehydrated or managed.task is None or managed.task.done():
             await self._start_approval_continuation(managed)
         else:
@@ -149,7 +156,17 @@ class ExecutionEngine:
         if str(current.get("status", "")) != RUN_STATUS_WAITING_APPROVAL:
             return current
         managed.rejected = True
-        self._events.append_event(managed.thread_id, run_id, "approval_resolved", {"approved": False})
+        self._events.append_event(
+            managed.thread_id,
+            run_id,
+            "approval_resolved",
+            {
+                "approved": False,
+                "resume_value": False,
+                "checkpoint_thread_id": managed.thread_id,
+                "checkpoint_resume": True,
+            },
+        )
         if managed.rehydrated or managed.task is None or managed.task.done():
             await self._start_approval_continuation(managed)
         else:
@@ -217,7 +234,17 @@ class ExecutionEngine:
                 self._events.complete_run(run_id)
                 return
             self._events.update_run_status(run_id, RUN_STATUS_RUNNING)
-            self._events.append_event(thread_id, run_id, "run_started", {"status": RUN_STATUS_RUNNING, "resumed": True})
+            self._events.append_event(
+                thread_id,
+                run_id,
+                "run_started",
+                {
+                    "status": RUN_STATUS_RUNNING,
+                    "resumed": True,
+                    "resume_from_checkpoint": True,
+                    "checkpoint_thread_id": thread_id,
+                },
+            )
             await self._run_with_timeout(managed, confirm_dangerous=True, resume=True)
             self._events.complete_run(run_id)
         except TimeoutError:
@@ -231,20 +258,23 @@ class ExecutionEngine:
                     run_id=managed.run_id,
                 ),
             )
+            self._append_failed_meta(managed, error=message, reason="run_timeout", phase="execute")
             self._events.complete_run(run_id, error=message)
         except asyncio.CancelledError:
             self._mark_cancelled(managed)
         except Exception as e:
+            message = str(e)
             await self._emit_runtime(
                 managed,
                 RuntimeEvent.from_payload(
                     "error",
-                    {"error": str(e)},
+                    {"error": message},
                     thread_id=managed.thread_id,
                     run_id=managed.run_id,
                 ),
             )
-            self._events.complete_run(run_id, error=str(e))
+            self._append_failed_meta(managed, error=message, reason="runtime_exception", phase="execute")
+            self._events.complete_run(run_id, error=message)
         finally:
             if managed.stream_queue is not None:
                 await managed.stream_queue.put(FINAL_STREAM_MARKER)
@@ -268,7 +298,17 @@ class ExecutionEngine:
                 self._events.complete_run(run_id)
                 return
             self._events.update_run_status(run_id, RUN_STATUS_RUNNING)
-            self._events.append_event(thread_id, run_id, "run_started", {"status": RUN_STATUS_RUNNING, "resumed": True})
+            self._events.append_event(
+                thread_id,
+                run_id,
+                "run_started",
+                {
+                    "status": RUN_STATUS_RUNNING,
+                    "resumed": True,
+                    "resume_from_checkpoint": True,
+                    "checkpoint_thread_id": thread_id,
+                },
+            )
             await self._run_with_timeout(managed, confirm_dangerous=True, resume=True)
             self._events.complete_run(run_id)
         except GraphInterrupted:
@@ -286,20 +326,23 @@ class ExecutionEngine:
                     run_id=managed.run_id,
                 ),
             )
+            self._append_failed_meta(managed, error=message, reason="run_timeout", phase="approval_resume")
             self._events.complete_run(run_id, error=message)
         except asyncio.CancelledError:
             self._mark_cancelled(managed)
         except Exception as e:
+            message = str(e)
             await self._emit_runtime(
                 managed,
                 RuntimeEvent.from_payload(
                     "error",
-                    {"error": str(e)},
+                    {"error": message},
                     thread_id=managed.thread_id,
                     run_id=managed.run_id,
                 ),
             )
-            self._events.complete_run(run_id, error=str(e))
+            self._append_failed_meta(managed, error=message, reason="runtime_exception", phase="approval_resume")
+            self._events.complete_run(run_id, error=message)
         finally:
             if managed.stream_queue is not None:
                 await managed.stream_queue.put(FINAL_STREAM_MARKER)
@@ -354,7 +397,27 @@ class ExecutionEngine:
             "run_checkpoint_meta",
             {
                 "checkpoint_thread_id": managed.thread_id,
+                "checkpoint_pending": True,
+                "resume_supported": True,
+                "resume_command": "Command(resume=<approval_value>)",
                 "interrupt_summary": summary,
+            },
+        )
+
+    def _append_failed_meta(self, managed: ManagedRun, *, error: str, reason: str, phase: str) -> None:
+        self._events.append_event(
+            managed.thread_id,
+            managed.run_id,
+            EVENT_RUN_FAILED_META,
+            {
+                "status": "failed",
+                "reason": reason,
+                "phase": phase,
+                "error": error,
+                "last_successful_event_id": self._events.latest_run_event_id(managed.run_id),
+                "checkpoint_thread_id": managed.thread_id,
+                "checkpoint_pending": bool(managed.checkpoint_pending),
+                "resume_supported": bool(managed.checkpoint_pending),
             },
         )
 
@@ -367,6 +430,7 @@ class ExecutionEngine:
         return str(run.get("status", "")) in TERMINAL_RUN_STATUSES
 
     async def _finalize_memory(self, managed: ManagedRun) -> None:
+        self._append_consistency_checked(managed)
         finalize = getattr(self._runner, "finalize_memory", None)
         if callable(finalize):
             try:
@@ -380,6 +444,34 @@ class ExecutionEngine:
             await compact(managed.thread_id, run_id=managed.run_id)
         except Exception:
             return
+
+    def _append_consistency_checked(self, managed: ManagedRun) -> None:
+        run = self._events.get_run(managed.run_id) or {}
+        status = str(run.get("status") or "")
+        events = self._events.list_run_events(managed.run_id)
+        event_types = [str(event.get("type") or "") for event in events]
+        missing: list[str] = []
+        if status == "completed" and "done" not in event_types:
+            missing.append("done")
+        if status == "failed" and "error" not in event_types:
+            missing.append("error")
+        if status == "failed" and EVENT_RUN_FAILED_META not in event_types:
+            missing.append(EVENT_RUN_FAILED_META)
+        if status == "cancelled" and "cancelled" not in event_types:
+            missing.append("cancelled")
+        self._events.append_event(
+            managed.thread_id,
+            managed.run_id,
+            EVENT_RUN_CONSISTENCY_CHECKED,
+            {
+                "status": status,
+                "ok": not missing,
+                "missing_events": missing,
+                "event_count": len(events),
+                "last_event_id": self._events.latest_run_event_id(managed.run_id),
+                "checkpoint_pending": bool(managed.checkpoint_pending),
+            },
+        )
 
     def _cleanup_orphan_runs(self) -> None:
         self._events.fail_non_terminal_runs(
@@ -425,4 +517,3 @@ class ExecutionEngine:
                 if isinstance(summary, dict):
                     return summary
         return {}
-

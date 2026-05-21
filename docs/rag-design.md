@@ -1,8 +1,10 @@
 # LearnAgent RAG 设计
 
 > 说明水印平台文档的加载、分块、混合检索，以及 `search_docs` 与 EventStore / Eval 的衔接；不重复 Run FSM 与 Tool 审计通用契约。  
-> 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[demo-requirements-design.md](./demo-requirements-design.md) §3、[tool-grounded-design.md](./tool-grounded-design.md)、[data-flow-design.md](./data-flow-design.md) §2.4、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)  
+> 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[demo-requirements-design.md](./demo-requirements-design.md) §3、[tool-design.md](./tool-design.md)、[data-flow-design.md](./data-flow-design.md) §2.4、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)  
 > **文档定位**：本项目 M10 的**实现设计**（代码锚点 + 边界 + 评测）。通用 RAG 全链路概念（BM25、rerank、GraphRAG 等）在 §1.2、§2.1、§5.5、§9.4 以「现状 vs 目标」对照呈现，便于与面试/知识体系对齐。
+
+**K/C/S 位置**：Capability **M10 RAG**（ingest + 检索）；编排层 Tool-grounded → [tool-design.md](./tool-design.md)。详见 [guide §2.4](./agent-learning-guide.md)。
 
 ---
 
@@ -12,9 +14,9 @@
 
 | 能力 | 状态 | 代码 / 数据锚点 |
 |------|------|-----------------|
-| 文档目录解析（env / `docs/source` / monorepo fallback） | ✅ 已实现 | `rag/ingest.py` → `repo_docs_dir()` |
+| 文档目录解析（env / Scenario `docs_dir` / manifest） | ✅ 已实现 | `rag/ingest.py` → `repo_docs_dir()`；`scenarios/<name>/docs/docs_manifest.json` |
 | `IngestSource` 抽象（File / Url / Api 占位） | ✅ 已实现 | `rag/ingest_source.py` |
-| 9 份首批知识源 + `docs_manifest.json` glob 扩面 | ✅ 已实现 | `docs/source/docs_manifest.json`，`rag/docs_manifest.py` |
+| 9 份 Demo 语料 + **manifest glob**（无 Kernel 硬编码文件名） | ✅ 已实现 | `scenarios/watermark/docs/docs_manifest.json`；Kernel 无 `DOC_FILENAMES` |
 | Markdown 按标题分块 + 超长滑动窗口 | ✅ 已实现 | `load_chunks()` |
 | Chunk 元数据 `section_title` / `heading_path` / `doc_type` / `chunk_index` / `updated_at` | ✅ 已实现 | `rag/schema.py`，`ingest.py` |
 | API 契约结构化 ingest（endpoint / 字段表 / Error Model） | ✅ 已实现 | `rag/api_parse.py`，`API-CONTRACT.md` |
@@ -35,16 +37,16 @@
 | 检索 → API path / 字段 hints 注入 tool 结果 | ✅ 已实现 | `rag/api_paths.py`，`suggested_api_paths` / `api_field_hints` |
 | Timeline `kind: retrieval` 投影 | ✅ 已实现 | `runtime/timeline.py` |
 | 离线 proxy 检索评测（20 docs case） | ✅ 已实现 | `eval/phase4-eval-cases.json`，`verify_phase4_ragas.py` |
-| 测试知识库（虚构 Demo 内容） | ✅ 已实现 | `docs/source/`（非真实生产文档） |
+| 测试知识库（虚构 Demo 内容） | ✅ 已实现 | `scenarios/watermark/docs/`（Scenario 语料；非 Kernel 源码） |
 | 热更新（watch + `POST /v1/rag/reload`） | ✅ 已实现 | `rag/reload.py`，两阶段 reload |
 | 向量增量 upsert（按文件 manifest） | ✅ 已实现 | `rag/manifest.py`，`sync_vector_index` |
 | Rerank / Cross-encoder 精排 | ⚠️ 可选 | `rag/rerank.py`，`RAG_RERANK_ENABLED=false` 默认关 |
 | 分层评测（Recall@k / faithfulness / E2E） | ⚠️ 部分 | L1 proxy ✅；L4-lite ✅；L5 proxy ✅；L3 RAGAS 可选 |
-| Tool-grounded 编排（先 RAG 再 API） | ✅ 已实现 | [tool-grounded-design.md](./tool-grounded-design.md) |
+| Tool-grounded 编排（先 RAG 再 API） | ✅ 已实现 | [tool-design.md](./tool-design.md) |
 | 上传新 md / 多租户 collection | ⚠️ 部分 | upload ✅；多租户 collection 仍 ❌ |
 | RAGAS 作为 PR 硬门禁 | ❌ 未实现 | proxy 为主，RAGAS 可选 |
 
-**成熟度**：**高** — Wave1 数据前段（ingest/manifest/response JSON/budget/ExtractedRecord）已闭环；**真实 LLM E2E** 仍待第 2 波。
+**成熟度**：**高** — ingest/manifest/response JSON/budget/ExtractedRecord 已闭环；**真实 LLM E2E** 仍待 [guide §2.8](./agent-learning-guide.md) / [tool-design §5](./tool-design.md)。
 
 ---
 
@@ -63,7 +65,7 @@
 
 - **RAG 层**：文档 ingest、检索、混合打分、prompt 摘录格式化
 - **Tool 层**：`search_docs` handler、HTTP 工具 → 通用契约见 [data-flow-design.md](./data-flow-design.md)
-- **编排层**：LLM 是否调用 `search_docs`、是否与 `http_get` 组合 → 规则路由 + Tool-grounded 编排，见 [tool-grounded-design.md](./tool-grounded-design.md)
+- **编排层**：LLM 是否调用 `search_docs`、是否与 `http_get` 组合 → 规则路由 + Tool-grounded 编排，见 [tool-design.md](./tool-design.md)
 - **Eval 层**：离线 proxy / 可选 RAGAS → 见 [eval-design.md](./eval-design.md)
 
 **边界（M10 禁止）**：RAG **不**写入 Run FSM、**不**替代 LangGraph checkpoint 作为对话真相源；检索结果仅通过 tool 返回值与 `retrieval_completed` 事件进入产品轨。
@@ -160,7 +162,7 @@
 | `ToolHandlers.search_docs` | `agent/tool_handlers.py` | 编排检索、落库、可观测 span | 检索算法本身 |
 | `MemoryManager.search_docs` | `memory/manager.py` | 对 runner 暴露统一检索 | 文档版权/多租户隔离 |
 
-对外兼容：`rag/markdown_rag.py` 保留 `load_and_chunk`、`search_docs`（仅关键词）别名。
+对外入口：`copilot_agent.rag` 导出 `build_rag_store`、`load_chunks`、`format_chunks_for_prompt`；旧 `rag/markdown_rag.py` 兼容 facade 已删除。
 
 ---
 
@@ -170,17 +172,20 @@
 
 `repo_docs_dir()` 按优先级：
 
-1. 环境变量 `WATERMARK_DOCS_PATH`（须为已存在目录）
-2. 仓库内 `docs/source/`（向上遍历父目录查找）
+1. 环境变量 `COPILOT_DOCS_PATH`，或 Scenario `resources.docs_path_env` 指向的环境变量（须为已存在目录）
+2. Scenario `docs_dir` / `resources.docs_fallback`（如 `scenarios/watermark/docs`）
 3. 父级 monorepo 的 `backend-java/docs/`
 
 未找到目录时 `load_chunks()` 返回空列表，日志 warning，**RAG 处于禁用态**（`search_docs` 仍可调但无命中）。
 
-### 4.2 当前纳入的文件白名单
+### 4.2 语料与 manifest（Scenario 驱动）
 
-`ingest.DOC_FILENAMES`（下列 9 份会被加载，与 [demo-requirements-design.md](./demo-requirements-design.md) §3.1 对齐）：
+**不再**在 Kernel `ingest.py` 硬编码 `DOC_FILENAMES`。文件发现由 Scenario 目录内 **`docs_manifest.json`** 驱动：
 
-| 文件 | `doc_type` | 知识类型 |
+- 默认：`include_glob: "*.md"` + 可选 `load_order` / `doc_types` 映射
+- watermark Demo：`scenarios/watermark/docs/docs_manifest.json`（9 篇 md，与 [demo-requirements-design.md](./demo-requirements-design.md) §3.1 对齐）
+
+| 文件（watermark Demo） | `doc_type` | 知识类型 |
 |------|------------|----------|
 | `REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md` | `requirements` | 需求检查、已知偏差 |
 | `API-CONTRACT.md` | `api_contract` | REST 契约 |
@@ -192,11 +197,9 @@
 | `README.md` | `overview` | 平台总览 |
 | `README_ALGORITHM.md` | `algorithm` | 水印算法 |
 
-**加载顺序说明**：`REQUIREMENTS-CHECKLIST` 排在首位，作为融合分数相同时的排序 tie-break（历史原因保留）。
+**换业务**：在新 Scenario 的 `docs/` 下放置 `docs_manifest.json` + markdown，**不改** `rag/ingest.py`。
 
-**测试知识库**：仓库内 `docs/source/` 为 **LearnAgent 虚构 Demo 文档**，用于本地开发与 proxy 评测，**不代表**真实 `backend-java/docs` 生产内容。接入真实文档时复制到 `docs/source/` 或设置 `WATERMARK_DOCS_PATH`。
-
-目录索引见 `docs/source/README.md`。
+**测试知识库**：`scenarios/watermark/docs/` 为 LearnAgent 虚构 Demo 文档。接入生产语料时设置 `COPILOT_DOCS_PATH` 或 Scenario `docs_dir`。
 
 ### 4.3 分块策略
 
@@ -251,14 +254,12 @@ API endpoint 存在时，块头追加 `| {method} {path}`，便于 LLM 与 Tool-
 | 能力 | 现状 | 目标 / 缺口 |
 |------|------|-------------|
 | 输入格式 | 仅 Markdown（`.md`） | PDF / HTML / OpenAPI YAML（远期） |
-| 文件发现 | `DOC_FILENAMES` 硬编码白名单 | glob + manifest / 上传 API |
-| 分块 | 标题栈 + 滑动窗口 | API 文档按 endpoint 块；表格行级块 |
-| 元数据 | `section_title` / `heading_path` / `doc_type` / `chunk_index` / `updated_at` | 版本号、authority |
-| 结构化字段 | ✅ endpoint / request_fields / error_codes（`api_contract`） | `response_fields` 从 JSON 块解析 |
-| 增量 ingest | 热 reload 按文件 fingerprint | 同上 + 白名单外新文件自动纳入 |
+| 文件发现 | ✅ Scenario `docs_manifest.json` + glob | 多租户 collection |
+| 结构化字段 | ✅ endpoint / request / response / error_codes | 版本号、authority |
+| 增量 ingest | ✅ 热 reload + upload API | — |
 | 多租户 | 单 collection `wm_docs` | 按 tenant / env 隔离 collection |
 
-**当前约束**：新增 md 须同时改 `DOC_FILENAMES` 与 `DOC_TYPE_BY_FILE`；manifest 仅跟踪白名单内已加载文件。
+**当前约束**：新增 md 优先改 Scenario **`docs_manifest.json`** 或 `POST /v1/rag/upload`；Kernel 无固定文件名列表。
 
 ### 4.7 知识冲突与优先级（规划）
 
@@ -347,7 +348,7 @@ doc_type boost（RAG_DOC_TYPE_BOOST_ENABLED）:
 
 `RagStore.search_detailed()` 返回 `RagSearchResult(route=...)`；`search_docs` 将 `retrieval_mode` / `retrieval_route` 写入 `retrieval_completed` 事件。
 
-验收：`python scripts/verify_rag_query_router.py`。
+验收：`python scripts/verify_rag_retrieval_quality.py`（含 sparse/dense/hybrid 路由权重）。
 
 ### 5.5 向量检索（可选）
 
@@ -358,7 +359,7 @@ doc_type boost（RAG_DOC_TYPE_BOOST_ENABLED）:
 | Embedding | `HuggingFaceEmbedding(model_name=settings.rag_embedding_model)`，默认 `BAAI/bge-small-en-v1.5` |
 | 存储 | `storage/chroma`（或 `RAG_CHROMA_PATH`）集合 `wm_docs` |
 | 增量 sync | `sync_vector_index()` + `rag_manifest.json`：仅 changed/removed 文件 upsert/delete（§7） |
-| 全量重建 | `RAG_REBUILD_INDEX=true` 或 manifest 缺失时的 legacy 迁移 |
+| 全量重建 | `RAG_REBUILD_INDEX=true`；旧索引不自动迁移，MVP 策略是显式重建 |
 | Top-K | retriever `similarity_top_k` ≥ `max(rag_vector_top_k, 12)` |
 
 向量节点 metadata：`source`、`start_line`、`section_title`、`heading_path`、`doc_type`，与稀疏键对齐便于 RRF。
@@ -438,7 +439,7 @@ Timeline 投影为 `kind: "retrieval"`；`call_id` 与 `kind: tool` 可关联（
 
 `agent/prompts.py` 要求：部署/队列/已知问题用 `search_docs` 并**引用文件名**；实时状态用 `http_get`；文档与 API 均无依据时明确说明。
 
-**Tool-grounded 编排**（planner 规则路由、检索 path 注入、排障模板、双层闸门）见 **[tool-grounded-design.md](./tool-grounded-design.md)**；M10 负责证据检索与结构化 metadata，M06 负责工具顺序与 enforcement。
+**Tool-grounded 编排**（planner 规则路由、检索 path 注入、排障模板、双层闸门）见 **[tool-design.md](./tool-design.md)**；M10 负责证据检索与结构化 metadata，M06 负责工具顺序与 enforcement。
 
 ### 6.3 MemoryManager 中的 RAG
 
@@ -448,7 +449,7 @@ Timeline 投影为 `kind: "retrieval"`；`call_id` 与 `kind: tool` 可关联（
 
 ## 7. 热更新与增量向量索引
 
-改 `docs/source/`（或 `WATERMARK_DOCS_PATH`）下 **白名单内** Markdown 后，无需重启 Agent 进程即可更新检索。
+改 Scenario `docs_dir`（或 `COPILOT_DOCS_PATH`）下 Markdown 后，无需重启 Agent 进程即可更新检索。
 
 ### 7.1 两阶段 reload（关键词即时 + 向量增量/异步）
 
@@ -493,13 +494,11 @@ docs_source_fingerprint()          # 全局 mtime+size，触发 reload
 
 ```bash
 python scripts/verify_rag_hot_reload.py
-python scripts/verify_rag_incremental_index.py
 python scripts/verify_rag_retrieval_quality.py
-python scripts/verify_rag_query_router.py
 python scripts/verify_rag_rerank.py
 ```
 
-**范围**：仍仅 `DOC_FILENAMES` 白名单；manifest 不跟踪白名单外文件。
+**范围**：manifest 跟踪 Scenario 目录内 glob 匹配文件；上传 API 可注册新文件。
 
 ---
 
@@ -507,7 +506,7 @@ python scripts/verify_rag_rerank.py
 
 | 变量 / Settings | 默认 | 作用 |
 |-----------------|------|------|
-| `WATERMARK_DOCS_PATH` | — | 覆盖文档根目录 |
+| `COPILOT_DOCS_PATH` | — | 覆盖文档根目录 |
 | `RAG_USE_VECTOR` / `rag_use_vector` | `false` | 是否构建 Chroma 向量索引 |
 | `RAG_REBUILD_INDEX` / `rag_rebuild_index` | `false` | 强制重建向量集合 |
 | `RAG_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace 嵌入模型 |
@@ -534,7 +533,7 @@ python scripts/verify_rag_rerank.py
 | `RAG_VECTOR_ASYNC_RELOAD` | `true` | 热更新向量异步增量 sync |
 | `HF_HOME` | — | 嵌入模型缓存（`apply_hf_home`） |
 
-CI（`agent-ci.yml`）对 RAG 门禁使用 `verify_phase4_ragas.py --mode proxy --disable-vector`，保证无 GPU/大模型下载也可 deterministic 通过或 SKIP。
+CI 行为见 [ci-design.md](./ci-design.md)；RAG 代理指标见 `phase4_ragas`（`--mode proxy --disable-vector --allow-missing-docs`）。
 
 ---
 
@@ -562,14 +561,14 @@ CI（`agent-ci.yml`）对 RAG 门禁使用 `verify_phase4_ragas.py --mode proxy 
 
 **CI 通过阈值**（proxy）：`docs_cases >= 3` 且 `retrieval_hit_rate >= 0.9` 且 `required_source_full_match_rate >= 0.6`。
 
-**当前本地基线**（`docs/source` 测试库 + `--disable-vector`）：20 case 通常可达 `full_match_rate = 1.0`；结果写入 `artifacts/phase4/phase4-ragas-summary.json`。
+**当前本地基线**（`scenarios/watermark/docs` + `--disable-vector`）：20 case 通常可达 `full_match_rate = 1.0`；结果写入 `artifacts/phase4/phase4-ragas-summary.json`。
 
-文档缺失时：`--allow-missing-docs` → `phase4_ragas=SKIP`（agent-ci 使用，避免无 `docs/source` 的环境硬失败）。
+文档缺失时：`--allow-missing-docs` → `phase4_ragas=SKIP`；`rag_hot_reload` 在无 Scenario docs 时也可 SKIP。
 
 ### 9.3 RAGAS 轨道
 
 `--mode auto|ragas` 在具备 `OPENAI_API_KEY` 且 ragas 可 import 时尝试 `faithfulness` / `answer_relevancy`；否则仅 proxy。  
-聚合入口：`verify_eval_suite.py --profile rag|full`（见 [eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)）。
+聚合 profile 见 [ci-design §5](./ci-design.md)；分层语义见 [eval-design §4](./eval-design.md)。
 
 **proxy 测的是检索是否命中预期文档**，不测 LLM 最终回答质量或 Agent 是否选对 tool。
 
@@ -585,21 +584,7 @@ CI（`agent-ci.yml`）对 RAG 门禁使用 `verify_phase4_ragas.py --mode proxy 
 
 **原则**：L1 + L4-lite + L5 proxy 已纳入 `--profile rag|e2e`；L3 RAGAS 仍非 PR 硬门禁。
 
-### 9.4.1 L5 工具轨迹与 Demo golden
-
-| 脚本 | 范围 |
-|------|------|
-| `verify_phase4_tool_trajectory.py` | 28 case，mock LLM 按 `tool_route` |
-| `verify_demo_golden_e2e.py` | Demo 1–6，`eval/golden/demo-golden-scenarios.json` |
-| `verify_tool_router.py` | 路由分类 |
-| `verify_rag_api_ingest.py` | API 结构化 ingest |
-| `verify_citation_l4.py` | L4 文件名 citation |
-| `verify_diagnosis_template.py` | 排障模板注入 |
-
-```bash
-python scripts/verify_eval_suite.py --profile rag   # 6 套件
-python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
-```
+L5 工具轨迹、Demo golden 脚本分工见 [tool-design §3.9](./tool-design.md) 与 [eval-design §4.4](./eval-design.md)。聚合命令见 [README §6](../README.md)。
 
 ### 9.5 数据集规范（扩展方向）
 
@@ -641,26 +626,17 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
    ├─ 检索对但回答错 → L3 RAGAS / prompt / 模型
    └─ 未调 search_docs → L5 E2E / Tool-grounded 节点
 
-4. 改 ingest 或 reload 后：verify_rag_hot_reload + verify_rag_incremental_index
+4. 改 ingest 或 reload 后：verify_rag_hot_reload + verify_rag_retrieval_quality
 5. 向量变更后：对比 --disable-vector vs --enable-vector 同一 case 集
 ```
 
 ---
 
-## 10. 与相关文档的衔接
+## 10. 文档关系
 
-| 主题 | 本文档 | 详见 |
-|------|--------|------|
-| 产品验收（Tool-grounded、引用溯源） | §6.2、§11.3 | [demo-requirements-design.md](./demo-requirements-design.md) §3 |
-| Ingest 能力 / 知识冲突 | §4.6、§4.7 | 本文 |
-| 检索现状 vs 目标 / 上下文打包 | §5.5、§5.6 | 本文 |
-| `ToolResultModel` / Adapter | §6 | [data-flow-design.md](./data-flow-design.md) |
-| 分层评测 / 诊断流程 | §9.4～§9.6 | [eval-design.md](./eval-design.md) |
-| PR 门禁命令 | §9.2 | [ci-design.md](./ci-design.md) |
-| 模块地图 M10 | §0 | [agent-learning-guide.md](./agent-learning-guide.md) §3 |
-| Langfuse tool span | §2.2 | [observability-design.md](./observability-design.md) |
-| 热更新 / 增量向量 | §7 | 本文 |
-| 测试知识库 Markdown 正文 | §4.2 | [docs/source/](./source/) |
+- **上游**：[data-flow-design.md](./data-flow-design.md)（`ToolResultModel`）、[tool-design.md](./tool-design.md)（编排）
+- **下游**：Demo 验收、[eval-design §4.4](./eval-design.md)（RAG/L5 分层）
+- **全量索引**：[agent-learning-guide §6](./agent-learning-guide.md)
 
 ---
 
@@ -668,25 +644,19 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
 
 路线图波次见 [agent-learning-guide.md](./agent-learning-guide.md) §7。本节保留技术细节；**按层任务清单**见下方 **§11.0**。
 
-### 11.0 八层栈改造分配
+### 11.0 八层栈改造分配（待办）
 
-| 波次 | 层 | 任务 | 状态 | 验收 |
-|------|-----|------|------|------|
-| **1** | L1 Ingestion | `IngestSource` 接口（file/url/api）；`WATERMARK_DOCS_PATH` 接生产 `backend-java/docs` | ✅ | `verify_rag_api_ingest` |
-| **1** | L1 | `POST /v1/rag/upload` + reload 纳入白名单（可选） | ✅ | `server.py` + reload |
-| **1** | L2 Preprocess | `response_fields` JSON 块解析进 `DocChunk` | ✅ | `verify_rag_api_ingest.py` |
-| **1** | L2 | 动态 top-k（context 预算截断，§5.8） | ✅ | `verify_rag_retrieval_quality.py` |
-| **1** | L2 | `DOC_FILENAMES` → glob + manifest JSON | ✅ | `docs/source/docs_manifest.json` |
-| **1** | L3 Schema | 与 Memory 共用 `ExtractedRecord` → Pydantic（见 data-flow §8.1） | ✅ | `verify_extract_validate.py` |
+Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./agent-learning-guide.md)。
+
+| 波次 | 层 | 任务 | 验收 |
+|------|-----|------|------|
 | **2** | L2 | 向量默认 profile 分离；RAGAS 夜跑 `rag_metrics` 趋势 | `--profile full --enable-ragas` |
 | **4** | L1 | 网页 crawl / DB 同步 ingest | 立项后单独立项 |
 | **4** | L2 | PDF/HTML/OCR preprocess 插件 | 非 MVP |
 
-以下按优先级排列；§0 中已 ✅ 的条目不再重复。
-
 ### 11.1 Ingest 与知识库运维
 
-- ~~`DOC_FILENAMES` 改为 **glob + manifest**~~ ✅ `docs/source/docs_manifest.json`
+- ~~Kernel 硬编码文件名 → **glob + manifest**~~ ✅ Scenario `docs_manifest.json`
 - 补充 `updated_at`；API 文档专用解析（method / path / 字段表 / **response JSON**）提升契约类问答。
 - ~~上传新 md 自动纳入索引~~ ✅ `POST /v1/rag/upload`；多租户 collection 隔离（远期）。
 
@@ -702,25 +672,11 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
 
 ### 11.3 Tool-grounded 编排
 
-详见 **[tool-grounded-design.md](./tool-grounded-design.md)**。摘要：
-
-- `agent/tool_router.py`：五类意图 + `suggested_paths`；**排障意图优先于** 带 UUID 的 `live_status`
-- `rag/api_paths.py` + ingest 结构化字段 → `suggested_api_paths` / `api_field_hints`
-- `agent/diagnosis.py`：troubleshooting 排障模板 SystemMessage
-- `agent/tool_call_context.py`：`retrieval_completed.call_id`
-
-验收：`verify_tool_router.py`、`verify_demo_golden_e2e.py`（`--profile e2e`）。
-
-**仍待做**：真实 LLM E2E（`--mode live`）；检索 path merge 进 `tool_route` 硬更新。
+编排细节（路由、path 注入、排障模板、L5 评测）见 **[tool-design.md](./tool-design.md)**；本文档只覆盖检索与 ingest 侧。
 
 ### 11.4 评测与可观测
 
-与 §9.4 分层模型对齐：
-
-- L1：`gold_chunk_ids`、Recall@k / MRR 写入 eval 文件。
-- L3：RAGAS 夜跑稳定入库。
-- L4：L4-lite ✅；章节级 + LLM judge 仍待做。
-- L5：proxy ✅；真实 LLM 轨迹待 `--mode live`。
+与 §9.4 分层模型对齐；L5/L4 脚本分工见 [eval-design §4.4](./eval-design.md)。全局缺口见 [guide §2.8](./agent-learning-guide.md)。
 
 ---
 
@@ -728,15 +684,13 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
 
 | 问题 | 影响 | 说明 |
 |------|------|------|
-| 真实 LLM E2E 未默认启用 | Demo proxy 通过但 LLM 轨迹未测 | `verify_demo_golden_e2e.py --mode live` 待接 |
 | 无 Cross-encoder rerank 默认开启 | 多路召回噪声仍可能存在 | `RAG_RERANK_ENABLED=false` |
 | 向量默认关闭 | 语义召回弱 | `rag_use_vector=false` |
-| `response_fields` 未解析 | ~~Response JSON 块未结构化~~ | ✅ Wave1 已解析进 `DocChunk.response_fields` |
 | 规则改写覆盖有限 | 新口语/新术语需补规则 | `query_rewrite.py` |
-| 测试库非生产文档 | 接入真实平台需替换内容 | `docs/source` 为虚构 Demo |
-| RAGAS 非 PR 硬门禁 | 语义质量漂移难早发现 | proxy + L4-lite 为主 |
-| 硬编码 `DOC_FILENAMES` | 新增 md 需改代码 | 见 §11.1 glob manifest |
-| 热更新仅覆盖白名单已有文件 | 无 upload API | 无 glob manifest |
+
+跨模块缺口（真实 LLM E2E、RAGAS PR 门禁等）见 [guide §2.8](./agent-learning-guide.md)。
+
+| 测试库非生产文档 | 接入真实平台需替换内容 | `scenarios/watermark/docs` 为虚构 Demo |
 
 ---
 
@@ -746,7 +700,7 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
 
 | 非目标 | 归属 / 说明 |
 |--------|-------------|
-| HTTP 白名单与审批 | M11/M12 → [guardrail-policy-design.md](./guardrail-policy-design.md) |
+| HTTP 白名单与审批 | M11/M12 → [guardrail-policy-design.md](./guardrail-policy-design.md)（Scenario `HttpPathPolicy`） |
 | Run 状态机、cancel、SSE | M03 → [runtime-design.md](./runtime-design.md) |
 | Episodic / checkpoint 压缩 | M09 → [memory-checkpoint-design.md](./memory-checkpoint-design.md) |
 | 通用 Trace、token 账单 | M13 → [observability-design.md](./observability-design.md) |
@@ -763,7 +717,7 @@ python scripts/verify_eval_suite.py --profile e2e  # Demo golden proxy
 ### 14.1 一键评测
 
 ```bash
-# 默认读 docs/source（9 份测试 md）
+# 默认读 active Scenario docs；watermark Demo 请显式设置 SCENARIO=watermark
 python scripts/verify_phase4_ragas.py --mode proxy --disable-vector
 
 # 查看逐 case 命中
@@ -773,21 +727,19 @@ python scripts/verify_rag_hot_reload.py
 python scripts/verify_rag_api_ingest.py
 python scripts/verify_rag_api_path_extraction.py
 
-# 聚合（RAG 6 套件 + Tool-grounded 相关）
-python scripts/verify_eval_suite.py --profile rag
-python scripts/verify_eval_suite.py --profile e2e   # Demo 1–6 golden proxy
+# 聚合 profile 见 README §6 / ci-design §7
 ```
 
 ### 14.2 建议阅读顺序
 
 1. **§0 状态表** → 已实现 vs 缺口一览  
 2. **§2.1 + §5.5** → 通用 RAG 链路在本项目的映射  
-3. **`docs/source/`** → 测试知识库内容与 `doc_type`  
-4. **`rag/ingest.py` + `rag/api_parse.py`** → 白名单、分块、API 结构化元数据
+3. **`scenarios/watermark/docs/`** → Demo 语料与 `docs_manifest.json`
+4. **`rag/ingest.py` + `rag/docs_manifest.py` + `rag/api_parse.py`** → manifest、分块、API 结构化元数据
 5. **`rag/reload.py` + §7** → 热更新与增量向量
 6. **`rag/retriever.py` + `rag/api_paths.py` + §5.6** → 混合检索、path 注入、上下文打包
 7. **`agent/tool_handlers.py` + §6** → tool、事件、prompt 边界
-8. **[tool-grounded-design.md](./tool-grounded-design.md)** → 编排层 Tool-grounded
+8. **[tool-design.md](./tool-design.md)** → 编排层 Tool-grounded
 9. **`eval/phase4-eval-cases.json` + §9.4～§9.6** → proxy 与分层评测
 
 ### 14.3 可选：启用向量

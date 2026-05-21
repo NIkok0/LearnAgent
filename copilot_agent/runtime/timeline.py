@@ -13,7 +13,13 @@ LIFECYCLE_EVENTS = {
     "cancel_requested",
     "cancelled",
 }
-CHECKPOINT_EVENTS = {"run_checkpoint_meta", "run_completed_meta", "thread_checkpoint_purged"}
+CHECKPOINT_EVENTS = {
+    "run_checkpoint_meta",
+    "run_completed_meta",
+    "run_failed_meta",
+    "run_consistency_checked",
+    "thread_checkpoint_purged",
+}
 MEMORY_EVENTS = {"memory_run_summary", "memory_thread_summary", "checkpoint_compacted"}
 
 
@@ -187,11 +193,12 @@ class TimelineProjector:
                 )
                 continue
 
-            if event_type in {"plan_created", "assistant_state"}:
+            if event_type in {"plan_created", "assistant_state", "context_built"}:
+                title = "Context assembled" if event_type == "context_built" else event_type
                 items.append(
                     {
                         "kind": event_type,
-                        "title": event_type,
+                        "title": title,
                         "event_id": event_id,
                         "created_at": event.get("created_at"),
                         "payload": payload,
@@ -271,9 +278,10 @@ class TimelineProjector:
             for warning in warnings
         ]
 
+        projected_items = _sort_items(items + warning_items)
         return {
             "status": run.get("status"),
-            "items": _sort_items(items + warning_items),
+            "items": projected_items,
             "warnings": warnings,
             "assistant_output": "".join(
                 str(_payload(event).get("text", ""))
@@ -282,6 +290,7 @@ class TimelineProjector:
             ),
             "event_count": len(ordered_events),
             "checkpoint": _checkpoint_summary(checkpoint_items),
+            "debugger": _debugger_summary(run, ordered_events, projected_items, warnings),
         }
 
 
@@ -363,9 +372,56 @@ def _checkpoint_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
             summary["completed"] = payload
         elif event_type == "run_checkpoint_meta":
             summary["interrupt"] = payload
+        elif event_type == "run_failed_meta":
+            summary["failed"] = payload
+        elif event_type == "run_consistency_checked":
+            summary["consistency"] = payload
         elif event_type == "thread_checkpoint_purged":
             summary["purged"] = payload
     return summary
+
+
+def _debugger_summary(
+    run: dict[str, Any],
+    events: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    event_types = [str(event.get("type", "")) for event in events]
+    tool_items = [item for item in items if item.get("kind") == "tool_call"]
+    approval_items = [item for item in items if item.get("kind") == "approval"]
+    checkpoint = _checkpoint_summary(
+        [
+            item
+            for item in items
+            if item.get("kind") == "checkpoint"
+        ]
+    )
+    last_event_id = int(events[-1].get("id", 0) or 0) if events else None
+    failed_meta = checkpoint.get("failed") if isinstance(checkpoint.get("failed"), dict) else {}
+    consistency = checkpoint.get("consistency") if isinstance(checkpoint.get("consistency"), dict) else {}
+    return {
+        "run_id": run.get("id"),
+        "thread_id": run.get("thread_id"),
+        "status": run.get("status"),
+        "event_count": len(events),
+        "last_event_id": last_event_id,
+        "last_successful_event_id": failed_meta.get("last_successful_event_id") or consistency.get("last_event_id"),
+        "event_types": event_types,
+        "tool_calls": {
+            "total": len(tool_items),
+            "failed": sum(1 for item in tool_items if item.get("success") is False),
+            "missing_end": sum(1 for item in tool_items if item.get("end_event_id") is None),
+        },
+        "approval": {
+            "count": len(approval_items),
+            "waiting": any(item.get("status") == "waiting" for item in approval_items),
+            "last_status": approval_items[-1].get("status") if approval_items else None,
+        },
+        "checkpoint": checkpoint,
+        "consistency": consistency,
+        "warnings": [warning.get("code") for warning in warnings],
+    }
 
 
 def _preview(text: str, limit: int) -> str:

@@ -1,5 +1,5 @@
 {
-  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-run-state.sqlite",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-run-state-events.sqlite",
   "checks": {
     "completed_status": true,
     "terminal_idempotent_status": true,
@@ -14,7 +14,8 @@
     "invalid_cancelled_to_failed": true,
     "invalid_queued_to_completed": true,
     "orphan_cleanup_failed": true,
-    "orphan_cleanup_error": true
+    "orphan_cleanup_error": true,
+    "waiting_approval_rehydrated": true
   },
   "run_state_machine": "PASS"
 }

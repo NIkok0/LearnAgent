@@ -100,15 +100,27 @@ def main() -> int:
     )
 
     orphan_run_ids = []
+    orphan_statuses: dict[str, str] = {}
     for status in [None, RUN_STATUS_RUNNING, RUN_STATUS_WAITING_APPROVAL, RUN_STATUS_CANCELLING]:
         _, orphan_run_id = _new_run(store, args.thread_prefix, f"orphan-{status or 'queued'}")
         orphan_run_ids.append(orphan_run_id)
+        orphan_statuses[orphan_run_id] = status or "queued"
         if status is not None:
             if status in {RUN_STATUS_WAITING_APPROVAL, RUN_STATUS_CANCELLING}:
                 store.update_run_status(orphan_run_id, RUN_STATUS_RUNNING)
             store.update_run_status(orphan_run_id, status)
     ExecutionEngine(event_store=store, runner=_NoopRunner())
     orphan_runs = [store.get_run(run_id) or {} for run_id in orphan_run_ids]
+    failed_orphan_runs = [
+        run
+        for run in orphan_runs
+        if orphan_statuses.get(str(run.get("id"))) != RUN_STATUS_WAITING_APPROVAL
+    ]
+    waiting_orphan_runs = [
+        run
+        for run in orphan_runs
+        if orphan_statuses.get(str(run.get("id"))) == RUN_STATUS_WAITING_APPROVAL
+    ]
 
     checks = {
         "completed_status": completed.get("status") == RUN_STATUS_COMPLETED,
@@ -126,8 +138,15 @@ def main() -> int:
         "invalid_failed_to_completed": invalid_failed_to_completed,
         "invalid_cancelled_to_failed": invalid_cancelled_to_failed,
         "invalid_queued_to_completed": invalid_queued_to_completed,
-        "orphan_cleanup_failed": all(run.get("status") == RUN_STATUS_FAILED for run in orphan_runs),
-        "orphan_cleanup_error": all(run.get("error") == "server restarted before run completed" for run in orphan_runs),
+        "orphan_cleanup_failed": all(run.get("status") == RUN_STATUS_FAILED for run in failed_orphan_runs),
+        "orphan_cleanup_error": all(
+            run.get("error") == "server restarted before run completed"
+            for run in failed_orphan_runs
+        ),
+        "waiting_approval_rehydrated": all(
+            run.get("status") == RUN_STATUS_WAITING_APPROVAL and not run.get("error")
+            for run in waiting_orphan_runs
+        ),
     }
     passed = all(checks.values())
     summary = {

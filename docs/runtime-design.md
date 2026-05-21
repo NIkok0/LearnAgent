@@ -3,6 +3,25 @@
 > 说明产品级 Runtime 语义：Thread/Run 生命周期、状态机、ExecutionEngine 与 EventStore/Timeline 的责权分界。  
 > 事件与 payload 形状见 [data-flow-design.md](./data-flow-design.md)；项目模块地图见 [agent-learning-guide.md](./agent-learning-guide.md)。
 
+**K/C/S 位置**：Kernel **M02–M04**（产品层 Run/Event 事实源）；与 LangGraph checkpoint 分界见 [memory-checkpoint-design.md](./memory-checkpoint-design.md)。详见 [guide §2.1·§3](./agent-learning-guide.md)。
+
+---
+
+## 0. 实现状态
+
+| 项 | 状态 | 验收脚本 |
+|---|---|---|
+| EventStore append / 分页 | ✅ | `verify_runtime_event_store.py` |
+| Timeline 投影 + SSE 同源 | ✅ | `verify_runtime_timeline.py` |
+| Checkpoint ↔ Run 关联 | ✅ | `verify_runtime_checkpoint_link.py` |
+| ExecutionEngine cancel / approve / 并发槽 | ✅ | `verify_runtime_execution_engine.py` |
+| Session MVP（REST + SSE 冒烟） | ✅ | `verify_session_mvp.py` |
+| Golden Run 事件契约 | ✅ | `verify_golden_scenarios.py` |
+| `running`/`queued` durable resume | ❌ | — |
+| 失败一致性（sequence / last_successful_event_id） | ⚠️ | 见 §7.3、[guide §2.8](./agent-learning-guide.md) |
+
+套件见 [ci-design.md](./ci-design.md)。
+
 ---
 
 ## 1. 设计动机
@@ -98,6 +117,7 @@ queued/running/waiting_approval --> cancelling --> cancelled
 | 危险工具 interrupt | Graph → Engine | `waiting_approval` + `approval_required` + checkpoint meta |
 | approve | ExecutionEngine | `running` + `approval_resolved` + `run_started{resumed}` |
 | reject | ExecutionEngine | `Command(resume=False)` 后 `completed` |
+| PolicyGate scope deny | Graph → safety_gate | 无 tool 执行；可选 `credential_binding_audit(scope_denied)` |
 | 正常结束 | ExecutionEngine | `completed` + `done` / `run_completed_meta` |
 | cancel | ExecutionEngine | `cancelling` → `cancelled` + `cancel_requested` |
 | 超时/异常 | ExecutionEngine | `failed` + `error` |
@@ -187,18 +207,51 @@ assistant 产出危险 tool_calls
 | `_emit` → EventStore + SSE 帧 | ChatRunner |
 | Run 何时算结束、是否 waiting_approval | ExecutionEngine |
 | checkpoint `message_count` 快照 | Engine `_append_checkpoint_meta` + CheckpointReader |
+| `credential_binding_audit`（scope / set cookie） | `nodes.safety_gate`、`tool_handlers` → MemoryManager.append_event |
 
 ---
 
-## 7. 与 data-flow-design 的衔接
+## 7. EventStore 与 Checkpoint 失败一致性（目标态）
+
+产品事实源（EventStore）与 working memory（LangGraph checkpoint）职责不同；同一次 Run 会交替写入，因此需定义失败语义。**完整策略表见 [agent-learning-guide.md](./agent-learning-guide.md) §2.6**；本节只列 Runtime 侧要点与当前差距。
+
+### 7.1 基本原则
+
+```text
+EventStore 记录产品事实：run_*、tool_*、approval_*、credential_binding_audit（无 secret）、memory_*。
+Checkpoint 记录模型续推所需的 messages。
+Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
+```
+
+### 7.2 建议写入顺序
+
+| 步骤 | 顺序 |
+|------|------|
+| Run 启动 | EventStore `run_started` → 启动 LangGraph |
+| Tool | EventStore `tool_start` → Handler → `tool_end` → 更新 checkpoint |
+| PolicyGate deny | `credential_binding_audit`（若有 scope 检查）→ 拦截 AIMessage，**不**执行 tool |
+| Run 完成 | 确认关键事件已落库 → `run_completed_meta` / `done` |
+
+### 7.3 最小 MVP 要求 vs 现状
+
+| 要求 | 现状 |
+|------|------|
+| `tool_call_id` 幂等 | 部分：mapper 生成 call_id；tool_end 重试幂等未完整 |
+| Run 内 `sequence` 单调递增 | ⚠️ 未全面 enforced |
+| `run_failed` + `last_successful_event_id` | ⚠️ 目标已定义，实现见 §8.1 L8 波 |
+| EventStore 写失败不静默继续 | 部分路径仍 best-effort |
+| checkpoint sync 失败可观测 | ⚠️ `checkpoint_sync_failed` 等待落地 |
+
+### 7.4 与 data-flow / guardrail 的衔接
 
 | 主题 | 本文档 | 详见 |
 |------|--------|------|
-| Run FSM、cancel、approval | 本节 | — |
-| `RuntimeEvent` 结构、`schema_version` | — | data-flow-design §2 |
-| EventStore 行、`kind` 列表 | — | data-flow-design §5.4、`event_schema.py` |
-| SSE 帧格式 | — | data-flow-design §5.5 |
-| Tool 审计字段 | — | data-flow-design §2.2 |
+| Run FSM、cancel、approval | §4–§5 | — |
+| `RuntimeEvent` 结构、`schema_version` | — | [data-flow-design.md](./data-flow-design.md) §2 |
+| EventStore 行、`kind` 列表 | — | data-flow §5.4、`event_schema.py` |
+| `credential_binding_audit` payload | §6.4 | data-flow §2.5、[guardrail-policy-design.md](./guardrail-policy-design.md) §8 |
+| SSE 帧格式 | — | data-flow §5.5 |
+| Tool 审计字段 | — | data-flow §2.2 |
 
 新增事件种类时：先改 `event_schema` + Contract，再在本 Runtime 流程中确认 **哪一步 append**。
 
@@ -206,13 +259,14 @@ assistant 产出危险 tool_calls
 
 ## 8. 未来优化方向
 
-路线图见 [agent-learning-guide.md](./agent-learning-guide.md) §7 第 3 波（L8）。
+路线图见 [agent-learning-guide.md](./agent-learning-guide.md) §7 L8、[guide §2.8](./agent-learning-guide.md)。
 
 ### 8.1 八层栈改造分配
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **3** | L8 Storage | `running`/`queued` durable resume 或外部队列 PoC | `verify_runtime_run_manager.py` 扩展 |
+| **3** | L8 | EventStore/checkpoint 失败一致性：`sequence`、`tool_call_id` 幂等、`last_successful_event_id` | **guide §2.6**、本节 §7.3 |
+| **3** | L8 Storage | `running`/`queued` durable resume 或外部队列 PoC | `verify_runtime_execution_engine.py` 扩展 |
 | **3** | L8 | Run 级幂等键 `client_run_id` | API + event_store |
 | **3** | L8 | orphan run 清理策略配置化 + 审计事件 | eval golden |
 | **3** | L8 | Timeline 读模型缓存 / UI 默认 cursor 分页 | `verify_runtime_timeline.py` |
@@ -233,6 +287,7 @@ assistant 产出危险 tool_calls
 |------|------|
 | 仅单进程 Engine | 多实例部署需重新设计 Run 锁与事件写入 |
 | `running` 重启即 failed | 长任务易被误杀 |
+| EventStore ↔ checkpoint 失败语义未闭环 | 见 guide §2.6、本文 §7.3 |
 | rehydrate 后无 SSE 自动恢复 | UI 需 polling timeline |
 | Timeline 每次全量投影 | 超长 Run 读延迟 |
 | `verify_*` 多夹具库 | 与生产同库路径需隔离 |

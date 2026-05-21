@@ -54,7 +54,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 
 | 方案 | 支持能力 | 优势 | 限制 | LearnAgent 仍需设计 | 结论 |
 |---|---|---|---|---|---|
-| 当前 `ExecutionEngine` | 本地 `asyncio.Task`、queued/running/waiting/cancelled/completed/failed、SSE queue、`run_timeout_seconds`、全局限流、`waiting_approval` rehydrate | 与 EventStore、REST、SSE 完全匹配，`RunManager` 作为兼容别名保留 | 仅单进程；缺 retry、幂等；`running` 态重启仍 failed | run 状态机、事件语义、幂等、全量 durable resume | 短期继续深化 |
+| 当前 `ExecutionEngine` | 本地 `asyncio.Task`、queued/running/waiting/cancelled/completed/failed、SSE queue、`run_timeout_seconds`、全局限流、`waiting_approval` rehydrate | 与 EventStore、REST、SSE 完全匹配，是唯一 runtime task 管理入口 | 仅单进程；缺 retry、幂等；`running` 态重启仍 failed | run 状态机、事件语义、幂等、全量 durable resume | 短期继续深化 |
 | LangGraph durable execution | checkpoint、resume、持久化执行 | 与 LangGraph 原生一致 | 不直接提供 LearnAgent REST run API 和 timeline schema | 事件落库、SSE 兼容、cancel/approval 对外协议 | 逐步接入 |
 | LangGraph Platform | threads/runs、托管 runtime | 产品化能力强 | 引入托管平台和部署模型，偏离当前本地目标 | 本地模式下仍需 runtime contract | 后续评估 |
 | Temporal | durable workflow、重试、长任务、恢复 | 任务编排成熟 | 引入 worker/server，复杂度高；不是 Agent 事件模型 | Agent event、tool audit、LLM stream 映射 | 生产化后备选 |
@@ -152,28 +152,28 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | Tool | `StructuredTool` + `ToolNode` + `ToolRegistry`；`tool_start/tool_end` 审计 v1、脱敏 | `timeout_seconds` 执行层强制；失败路径统一 envelope；MCP registry PoC |
 | Runtime | FastAPI + `ExecutionEngine` + SQLite EventStore；`run_state` FSM、`TimelineProjector`；超时/并发槽、`waiting_approval` rehydrate；`schema_version: 1`、事件分页、`run_*_meta` | `running`/`queued` 重启 durable resume；Run 幂等键；见 [runtime-design.md](./runtime-design.md) §8–9 |
 | Memory | LangGraph checkpoint + RAG + EventStore `memory_*` 摘要；v1.1 policy（keyword episodic、budget、conflict）；`current_turn_messages`；`CheckpointCompactor` | 向量 episodic；续轮去重 System/episodic 注入；可选 LLM 压缩摘要；见 [memory-checkpoint-design.md](./memory-checkpoint-design.md) §8 |
-| RAG | 9 篇 Demo 知识源 + BM25/RRF/可选向量；结构化 API ingest；`search_docs` + path 注入 + `retrieval_completed.call_id`；Tool-grounded 规则路由；proxy 20+8 case + L4-lite | RAGAS 夜跑趋势进 CI；`response_fields` JSON 解析；生产语料替换；见 [rag-design.md](./rag-design.md) §10 |
-| Policy | `PolicyRegistry` + HTTP 白名单 + `safety_gate` + Run 级 approve/reject | 策略表版本化与文档；输入/输出/PII/secret；Presidio 或 Guardrails 输出校验 PoC |
+| RAG | 9 篇 Demo 语料 + BM25/RRF/可选向量；Scenario `docs_manifest.json`；结构化 API ingest；Tool-grounded + proxy eval | RAGAS 夜跑；生产语料替换；见 [rag-design.md](./rag-design.md) §10 |
+| Policy | `PolicyRegistry` + Scenario HTTP 白名单 + **`required_scopes`** + `safety_gate` + credential audit | 策略表版本化；输入/输出 Guard；见 [guardrail-policy-design.md](./guardrail-policy-design.md) |
 | Observability | EventStore 为 timeline 事实源；Langfuse trace/span（LLM/tool） | `trace_id` 与 `run_id`/`tool_call_id` 写入事件；token/cost/latency 聚合；OpenTelemetry 生产阶段 |
 | UI / 控制通道 | REST + SSE（`/v1/chat` 兼容）；`/ui` timeline；`GET /timeline`；`WS /v1/runs/{id}/ws` 回放 | WS 重连与增量事件协议；长 Run 默认 cursor 拉取；完整产品 UI 后置 |
-| Eval（横切） | `verify_eval_suite --profile core`（contract、runtime、golden、memory-checkpoint 等）；本地 `--profile rag`（6 套件）、`--profile e2e`（Demo 1–6 golden proxy） | 真实 LLM E2E（`--mode live`）；RAGAS 夜跑趋势；见 [eval-design.md](./eval-design.md) §7–8 |
+| Eval（横切） | `verify_eval_suite`；profile 见 [ci-design](./ci-design.md) | 见 [guide §2.8](./agent-learning-guide.md) |
 
 ## 5. 需自建的产品语义与项目实现
 
-这些能力开源框架不会替 LearnAgent 定稿。下表四列对照：**为何要自建**、**最小设计目标（应达成什么）**、**仓库里现在做到哪一步**（细节见对应 `*-design.md`）。
+这些能力开源框架不会替 LearnAgent 定稿。下表：**为何要自建**、**最小设计目标**；**实现快照**见 [agent-learning-guide §3](./agent-learning-guide.md) 与各 `*-design.md` **§0**；**全局缺口**见 [guide §2.8](./agent-learning-guide.md)。
 
-| 需设计能力 | 为什么不能直接交给框架 | 最小设计目标 | 项目实现情况 |
+| 需设计能力 | 为什么不能直接交给框架 | 最小设计目标 | 实现快照 |
 |---|---|---|---|
-| Runtime 事件契约 | LangGraph/Temporal 有状态，但 REST/SSE/timeline 的事件类型与 payload 是本项目 API | 固定 Run/Event 状态机；payload schema 与版本；可回放、可分页查询 | **已实现**：`run_state.py` FSM；`event_store.py`；`event_schema.py`；`schema_version: 1`、`after_id` 分页；`RuntimeEvent` + `validate`；`TimelineProjector`；SSE 与落库同源。见 [runtime-design.md](./runtime-design.md)、[data-flow-design.md](./data-flow-design.md) |
-| Approval / cancel 语义 | 框架有 interrupt/revoke，但 approve/reject/cancel 与 Run 行、timeline 的映射需自建 | `approval_required`、`approval_resolved`、`cancel_requested`、`cancelled` 与 Run 状态一致落库并可复盘 | **已实现**：见 [guardrail-policy-design.md](./guardrail-policy-design.md) §5 + [runtime-design.md](./runtime-design.md)。**未实现**：`running`/`queued` 重启后续跑 |
-| Tool 治理 schema | 工具框架不管业务风险等级、审批规则、审计元数据 | `ToolSpec` 含 risk、category、approval 规则、timeout、audit 字段；与 Policy 联动 | **已实现**：见 [guardrail-policy-design.md](./guardrail-policy-design.md) §3–§7。**未实现**：`timeout_seconds` 执行层强制；策略版本；按租户裁剪 tool 集 |
-| Tool 结果协议 | 各工具返回结构不一，LangChain 不强制审计格式 | 统一 `success`/`error`、`duration_ms`、脱敏 args/result、`tool_call_id` 进 timeline | **已实现**：`ToolResultModel` + Adapter；`tool_start`/`tool_end` + `sanitize`；`verify_tool_audit_v1`。**未实现**：工具级 retry；MCP |
-| Memory 编排策略 | 框架不管何时写摘要、何时召回、如何压缩 working memory | thread/run 摘要；episodic 可控召回；working memory 单一真相源与压缩 | **已实现**：`memory_*` 事件；`policy.py` 召回/预算/冲突；`current_turn_messages`；`CheckpointCompactor`；memory preview API。**未实现**：向量 episodic；LLM 压缩；续轮去重 System 注入。见 [memory-checkpoint-design.md](./memory-checkpoint-design.md) |
-| RAG / 文档问答 | 框架不管业务文档集、引用溯源与检索评测 | 可配置知识源；混合检索；检索依据进 timeline；离线 required_source 指标 | **已实现（proxy 验收）**：9 篇 `docs/source/` ingest；BM25+RRF+可选向量；API 契约结构化 parse；`suggested_api_paths` 注入；20 docs + 8 api/safety eval；L4-lite citation。见 [rag-design.md](./rag-design.md)、[tool-grounded-design.md](./tool-grounded-design.md)。**未实现**：RAGAS PR 硬门禁；`response_fields` JSON 解析；生产语料 |
-| Trace 关联 | Langfuse 等与 EventStore 是两套 ID，需项目打通 | `thread_id`/`run_id`/`tool_call_id`/`trace_id`/`span_id` 可互查 | **部分实现**：见 [observability-design.md](./observability-design.md)。**未实现**：`trace_id` 落库、generation span 接线、token/cost 聚合 |
-| Sandbox 策略 | 容器只提供隔离，权限/挂载/审计语义仍要自建 | 文件/终端类工具的 permission、资源上限、审计事件 | **未实现**：无沙箱工具；仅有 HTTP 白名单、cookie 脱敏、危险 POST 闸门。Docker/E2B 为后续 PoC |
+| Runtime 事件契约 | LangGraph/Temporal 有状态，但 REST/SSE/timeline 的事件类型与 payload 是本项目 API | 固定 Run/Event 状态机；payload schema 与版本；可回放、可分页查询 | [runtime §0](./runtime-design.md)、[data-flow §0](./data-flow-design.md) |
+| Approval / cancel 语义 | 框架有 interrupt/revoke，但 approve/reject/cancel 与 Run 行、timeline 的映射需自建 | `approval_*` / `cancel_*` 与 Run 状态一致落库并可复盘 | [guardrail §0](./guardrail-policy-design.md)、[runtime §0](./runtime-design.md) |
+| Tool 治理 schema | 工具框架不管业务风险等级、审批规则、审计元数据 | `ToolSpec` 含 risk、**required_scopes**、approval、timeout、audit | [guardrail §0](./guardrail-policy-design.md) |
+| Tool 结果协议 | 各工具返回结构不一，LangChain 不强制审计格式 | 统一 `ToolResultModel`、脱敏、`tool_call_id` 进 timeline | [data-flow §0](./data-flow-design.md) |
+| Memory 编排策略 | 框架不管何时写摘要、何时召回、如何压缩 working memory | episodic 召回；checkpoint 为 working 真相源 | [memory-checkpoint §0](./memory-checkpoint-design.md)、[context-manager §0](./context-manager-design.md) |
+| RAG / 文档问答 | 框架不管业务文档集、引用溯源与检索评测 | 混合检索；required_source proxy 指标 | [rag §0](./rag-design.md)、[tool-design §0](./tool-design.md) |
+| Trace 关联 | Langfuse 与 EventStore 是两套 ID | `thread_id`/`run_id`/`tool_call_id`/`trace_id` 可互查 | [observability §0](./observability-design.md) |
+| Sandbox 策略 | 容器只提供隔离，权限/审计语义仍要自建 | shell/git 类工具 permission + 审计 | 未实现；HTTP 白名单见 [guardrail §0](./guardrail-policy-design.md) |
 
-| 模块边界与改造优先级见 [agent-learning-guide.md](./agent-learning-guide.md) §3、**§7（八层栈）**。分项设计见 [runtime-design.md](./runtime-design.md)、[rag-design.md](./rag-design.md)、[guardrail-policy-design.md](./guardrail-policy-design.md)、[observability-design.md](./observability-design.md)、[memory-checkpoint-design.md](./memory-checkpoint-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)。
+| 模块边界与改造优先级见 [agent-learning-guide.md](./agent-learning-guide.md) §3、**§7（八层栈）**。分项设计见 [runtime-design.md](./runtime-design.md)、[rag-design.md](./rag-design.md)、[guardrail-policy-design.md](./guardrail-policy-design.md)、[observability-design.md](./observability-design.md)、[memory-checkpoint-design.md](./memory-checkpoint-design.md)、[context-manager-design.md](./context-manager-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)。
 
 ## 6. 参考资料
 

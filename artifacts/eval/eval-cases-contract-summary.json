@@ -2,7 +2,7 @@
   "phase4_path": "E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
   "golden_path": "E:\\code\\LearnAgent\\eval\\golden\\runtime-golden-scenarios.json",
   "phase4": {
-    "case_count": 14,
+    "case_count": 28,
     "shape_errors": [],
     "shape_ok": true,
     "model_validate_ok": true

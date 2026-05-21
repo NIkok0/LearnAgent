@@ -26,21 +26,21 @@
   },
   "chatrunner_approval": {
     "waiting_status": "waiting_approval",
-    "final_status": "completed",
+    "final_status": "cancelling",
     "event_types": [
       "run_created",
       "run_started",
+      "context_built",
       "plan_created",
+      "credential_binding_audit",
       "approval_required",
       "run_checkpoint_meta",
       "approval_resolved",
       "run_started",
+      "credential_binding_audit",
       "tool_start",
       "tool_end",
-      "run_completed_meta",
-      "done",
-      "memory_run_summary",
-      "memory_thread_summary"
+      "cancel_requested"
     ],
     "run_started_count": 2,
     "token_text": "",
@@ -53,8 +53,8 @@
   "concurrency": {
     "max_concurrent_runs": 2,
     "started_run_ids": [
-      "e21e7637-c326-4c1b-9480-8193f3b4a77d",
-      "247dc43f-7862-4fae-aa12-b11a1808f976"
+      "395236cf-f730-4742-80b5-dcd3dd88dda3",
+      "59851301-b785-46d9-9a28-dd6f34a00357"
     ],
     "running_count": 2,
     "blocked": true

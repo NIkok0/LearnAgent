@@ -27,6 +27,9 @@ class ToolStartPayload(BaseModel):
     requires_approval: bool = False
     arguments: dict[str, Any] = Field(default_factory=dict)
     sanitized_args: dict[str, Any] | None = None
+    timeout_seconds: float | None = None
+    max_retries: int | None = None
+    idempotency_key: str | None = None
 
 
 class ToolEndPayload(BaseModel):
@@ -37,6 +40,9 @@ class ToolEndPayload(BaseModel):
     success: bool = True
     error: str | None = None
     sanitized_result: dict[str, Any] | None = None
+    retry_count: int | None = None
+    timeout_seconds: float | None = None
+    idempotency_key: str | None = None
 
 
 class RetrievalSourceItem(BaseModel):
@@ -62,6 +68,64 @@ class RetrievalCompletedPayload(BaseModel):
     error: str | None = None
     retrieval_mode: str | None = None
     retrieval_route: dict[str, Any] | None = None
+    tenant_id: str | None = None
+    user_id: str | None = None
+    purpose: str | None = None
+    query_hash: str | None = None
+    max_classification: str | None = None
+    retrieved_chunk_ids: list[str] = Field(default_factory=list)
+    allowed_chunk_ids: list[str] = Field(default_factory=list)
+    blocked_chunk_ids: list[str] = Field(default_factory=list)
+    blocked_count: int = 0
+    prefilter_blocked_chunk_ids: list[str] = Field(default_factory=list)
+    prefilter_blocked_count: int = 0
+    policy_trace_id: str | None = None
+    policy_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    context_guard: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ContextBuiltPayload(BaseModel):
+    user_message_chars: int = 0
+    assembled_message_count: int = 0
+    budget_max_chars: int = 0
+    used_chars: int = 0
+    truncated: bool = False
+    truncation_steps: list[str] = Field(default_factory=list)
+    router_injected: bool = False
+    preretrieval_enabled: bool = False
+    preretrieval_sources: list[str] = Field(default_factory=list)
+    preretrieval_excerpt_chars: int = 0
+    memory_inject_chars: int = 0
+    checkpoint_compacted: bool = False
+    checkpoint_chars: int = 0
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CredentialBindingAuditPayload(BaseModel):
+    action: Literal["scope_allowed", "scope_denied", "credential_set", "credential_read_denied"]
+    binding_id: str
+    provider: str = "scenario"
+    credential_type: str = "cookie"
+    granted_scopes: list[str] = Field(default_factory=list)
+    required_scopes: list[str] = Field(default_factory=list)
+    tool_name: str = ""
+    reason: str = ""
+    user_id: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OutputGuardCheckedPayload(BaseModel):
+    guard: str = "private_rag_output_v1"
+    safe: bool = True
+    action: str = "allow"
+    finding_count: int = 0
+    findings: list[str] = Field(default_factory=list)
+    original_chars: int = 0
+    emitted_chars: int = 0
 
     model_config = ConfigDict(extra="forbid")
 

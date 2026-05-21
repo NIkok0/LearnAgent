@@ -1,0 +1,65 @@
+# RAG query rewrite and doc_type boost rules for watermark scenario.
+rewrite_rules:
+  - pattern: "排队|队列|积压"
+    expansion: "Redis Stream WM_JOBS wm:jobs:stream queue"
+  - pattern: "卡住|不动|一直\\s*(QUEUED|PROCESSING)?|排查"
+    expansion: "QUEUED PROCESSING worker Redis Stream RUNBOOK"
+  - pattern: "环境变量|自检"
+    expansion: "verify-config DEPLOY environment WM_JOBS"
+  - pattern: "生产部署|部署步骤|部署"
+    expansion: "deploy DEPLOY-SERVER verify-config"
+  - pattern: "水印任务|任务状态|任务 JSON"
+    expansion: "watermark job WM_JOBS queue JSON"
+  - pattern: "Redis|Stream|stream"
+    expansion: "Redis Stream wm:jobs:stream WM_JOBS_GROUP"
+  - pattern: "消费者组|worker|Worker"
+    expansion: "WM_JOBS_GROUP wm-workers worker"
+  - pattern: "401|未登录|会话|UNAUTHORIZED"
+    expansion: "UNAUTHORIZED API-CONTRACT WMSESSIONID"
+  - pattern: "SLO|可用性|availability"
+    expansion: "OPERATIONS availability 99.5 SLA"
+  - pattern: "告警|pending|P2"
+    expansion: "OPERATIONS pending alert P2"
+  - pattern: "Runbook|巡检|Daily Checks"
+    expansion: "RUNBOOK Daily Checks"
+  - pattern: "需求|偏差|checklist|R-\\d+"
+    expansion: "REQUIREMENTS checklist R-001"
+  - pattern: "算法|DWT|PNG|PDF|algorithmType"
+    expansion: "README_ALGORITHM algorithmType DWT"
+  - pattern: "白名单|HTTPS|Cookie"
+    expansion: "SECURITY-BASELINE whitelist WMSESSIONID"
+  - pattern: "FAILED|errorCode|ALGORITHM_ERROR"
+    expansion: "RUNBOOK FAILED errorCode ALGORITHM_ERROR"
+  - pattern: "POST\\s+/api|GET\\s+/api|/actuator/"
+    expansion: "API-CONTRACT endpoint"
+  - pattern: "权限|管理员"
+    expansion: "admin API stats users groups"
+
+doc_type_hints:
+  - pattern: "/api/|POST\\s+|GET\\s+|401|UNAUTHORIZED|actuator"
+    doc_type: api_contract
+    boost: 1.18
+  - pattern: "部署|verify-config|环境变量|DEPLOY"
+    doc_type: deploy
+    boost: 1.12
+  - pattern: "Redis|WM_JOBS|Stream|queue|QUEUED|PROCESSING|worker"
+    doc_type: tech_selection
+    boost: 1.12
+  - pattern: "Runbook|FAILED|errorCode|巡检|排查"
+    doc_type: runbook
+    boost: 1.10
+  - pattern: "SLO|SLA|告警|pending|availability"
+    doc_type: operations
+    boost: 1.10
+  - pattern: "HTTPS|白名单|Cookie|SECURITY"
+    doc_type: security
+    boost: 1.10
+  - pattern: "需求|偏差|checklist|R-\\d+"
+    doc_type: requirements
+    boost: 1.12
+  - pattern: "algorithm|DWT|PNG|PDF|算法"
+    doc_type: algorithm
+    boost: 1.10
+  - pattern: "wm:jobs:stream|platform|总览"
+    doc_type: overview
+    boost: 1.05

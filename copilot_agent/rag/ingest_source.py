@@ -30,7 +30,7 @@ class IngestSource(ABC):
 
 
 class FileIngestSource(IngestSource):
-    """Load markdown from a local directory (env `WATERMARK_DOCS_PATH` or repo fallback)."""
+    """Load markdown from a local directory resolved by Scenario or COPILOT_DOCS_PATH."""
 
     def __init__(self, base: Path | None) -> None:
         self._base = base

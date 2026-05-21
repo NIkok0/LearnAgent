@@ -64,8 +64,10 @@ def rerank_chunks(query: str, chunks: list[DocChunk], *, top_k: int) -> list[Doc
 
     try:
         model = _get_cross_encoder()
-    except RuntimeError:
-        log.warning("Cross-encoder rerank unavailable; falling back to fusion order")
+    except Exception as exc:
+        global _cross_encoder_unavailable
+        _cross_encoder_unavailable = True
+        log.warning("Cross-encoder rerank unavailable; falling back to fusion order: %s", exc)
         return list(chunks[:top_k])
 
     q = query.strip() or " "

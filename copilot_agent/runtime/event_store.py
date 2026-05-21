@@ -542,6 +542,16 @@ class EventStore:
             limit=limit,
         )
 
+    def latest_run_event_id(self, run_id: str) -> int | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM events WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return int(row["id"])
+
     def list_events_page(
         self,
         thread_id: str,

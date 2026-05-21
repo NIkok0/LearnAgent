@@ -1,0 +1,30 @@
+name: mcp_demo
+description: Mock MCP smoke — policy allows mcp_demo_echo only
+
+policy:
+  tool_allowlist:
+    - mcp_demo_echo
+  tool_denylist: []
+  dangerous_paths: []
+  require_approval_tools: []
+  mcp_server_allowlist:
+    - demo
+  mcp_tool_allowlist:
+    - echo
+
+prompt: |
+  You are a LearnAgent MCP capability demo assistant.
+  Use the MCP echo tool when asked to echo or repeat text. Keep answers concise.
+
+mcp: config/mcp_demo-mcp.yaml
+docs_dir: scenarios/minimal/docs
+
+budgets:
+  max_context_tokens: 8000
+  max_context_chars: 4000
+  max_tool_calls: 4
+  max_run_seconds: 60
+  max_graph_rounds: 6
+
+resources:
+  docs_fallback: scenarios/minimal/docs

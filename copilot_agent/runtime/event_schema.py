@@ -18,6 +18,8 @@ EVENT_APPROVAL_REQUIRED = "approval_required"
 EVENT_APPROVAL_RESOLVED = "approval_resolved"
 EVENT_RUN_CHECKPOINT_META = "run_checkpoint_meta"
 EVENT_RUN_COMPLETED_META = "run_completed_meta"
+EVENT_RUN_FAILED_META = "run_failed_meta"
+EVENT_RUN_CONSISTENCY_CHECKED = "run_consistency_checked"
 EVENT_THREAD_CHECKPOINT_PURGED = "thread_checkpoint_purged"
 EVENT_PLAN_CREATED = "plan_created"
 EVENT_CANCEL_REQUESTED = "cancel_requested"
@@ -28,6 +30,9 @@ EVENT_MEMORY_RUN_SUMMARY = "memory_run_summary"
 EVENT_MEMORY_THREAD_SUMMARY = "memory_thread_summary"
 EVENT_CHECKPOINT_COMPACTED = "checkpoint_compacted"
 EVENT_RETRIEVAL_COMPLETED = "retrieval_completed"
+EVENT_CONTEXT_BUILT = "context_built"
+EVENT_CREDENTIAL_BINDING_AUDIT = "credential_binding_audit"
+EVENT_OUTPUT_GUARD_CHECKED = "output_guard_checked"
 
 KNOWN_EVENT_TYPES = frozenset(
     {
@@ -41,6 +46,8 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_APPROVAL_RESOLVED,
         EVENT_RUN_CHECKPOINT_META,
         EVENT_RUN_COMPLETED_META,
+        EVENT_RUN_FAILED_META,
+        EVENT_RUN_CONSISTENCY_CHECKED,
         EVENT_THREAD_CHECKPOINT_PURGED,
         EVENT_PLAN_CREATED,
         EVENT_CANCEL_REQUESTED,
@@ -51,6 +58,9 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_MEMORY_THREAD_SUMMARY,
         EVENT_CHECKPOINT_COMPACTED,
         EVENT_RETRIEVAL_COMPLETED,
+        EVENT_CONTEXT_BUILT,
+        EVENT_CREDENTIAL_BINDING_AUDIT,
+        EVENT_OUTPUT_GUARD_CHECKED,
     }
 )
 
@@ -59,4 +69,7 @@ __all__ = [
     "KNOWN_EVENT_TYPES",
     "envelope_payload",
     "payload_schema_version",
+    "EVENT_OUTPUT_GUARD_CHECKED",
+    "EVENT_RUN_FAILED_META",
+    "EVENT_RUN_CONSISTENCY_CHECKED",
 ]

@@ -1,7 +1,7 @@
 # LearnAgent Demo 需求设计
 
 > 最终 Demo 功能需求：可信水印任务 Agent 与司法材料确权 RAG。  
-> 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[rag-design.md](./rag-design.md)（实现对照）、[tool-grounded-design.md](./tool-grounded-design.md)、[runtime-design.md](./runtime-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)。
+> 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[rag-design.md](./rag-design.md)（实现对照）、[tool-design.md](./tool-design.md)、[runtime-design.md](./runtime-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)。
 
 ---
 
@@ -12,28 +12,22 @@
 | 需求域 | 状态 | 验收入口 |
 |--------|------|----------|
 | §2.1 Agent Runtime（Run FSM / SSE / Timeline） | ✅ 已实现 | `verify_runtime_*`，`--profile core` |
-| §2.2 Tool Registry + HTTP 白名单 | ✅ 已实现 | `verify_tool_audit_v1.py`，Phase3 safety_gate |
-| §2.3 Safety Gate + Approval | ✅ 已实现 | `verify_phase3_safety_gate.py` |
-| §2.4 Tool-grounded 编排（规则路由） | ✅ 已实现 | [tool-grounded-design.md](./tool-grounded-design.md) §0 |
+| §2.2 Tool Registry + HTTP 白名单 | ✅ 已实现 | Scenario `HttpPathPolicy` + `verify_scenario_loader.py` |
+| §2.3 Safety Gate + Approval + **required_scopes** | ✅ 已实现 | `verify_phase3_safety_gate.py`，`verify_policy_credentials.py` |
+| §2.4 Tool-grounded 编排（规则路由） | ✅ 已实现 | [tool-design.md §3](./tool-design.md)（编排 §0 见同文档） |
 | §2.5 Timeline 审计 + 脱敏 | ✅ 已实现 | `verify_runtime_timeline.py`（含 `retrieval_call_id_linked`） |
 | §2.6 Agent 行为评估（≥15 case） | ✅ 已实现 | L5 proxy **28 case**；Demo golden **6 case** |
-| §3.1–3.4 RAG 知识库 + 检索 + 引用 | ✅ 已实现 | [rag-design.md](./rag-design.md) §0；9 篇 `docs/source/` |
+| §3.1–3.4 RAG 知识库 + 检索 + 引用 | ✅ 已实现 | [rag-design.md](./rag-design.md) §0；`scenarios/watermark/docs/` |
 | §3.2 API 契约结构化 ingest | ✅ 已实现 | `verify_rag_api_ingest.py` |
 | §3.5 Tool-grounded RAG（先 RAG 再 API） | ✅ 已实现 | 检索 path 注入 + 排障模板 + 路由优先级 |
 | §3.6 RAG 评估（≥20 case） | ✅ 已实现 | `phase4-eval-cases.json` **20 docs** + **8 api/safety** |
-| §4 Demo 1–6 脚本 | ✅ proxy 已覆盖 | `verify_demo_golden_e2e.py`，`--profile e2e` |
-| 真实 LLM E2E（`--mode live`） | ❌ 未默认启用 | proxy mock LLM PASS；无 key 时 SKIP |
-| RAGAS 作为 PR 硬门禁 | ❌ 未实现 | proxy + L4-lite 为主 |
+| §4 Demo 1–6 脚本 | ✅ proxy 已覆盖 | `verify_demo_golden_e2e.py` |
 
-**成熟度**：**中高** — Demo 1–6 在 deterministic proxy 下已闭环；**真实 LLM 轨迹**与 **RAGAS 夜跑趋势**仍是主要缺口。
+全局缺口（真实 LLM E2E、RAGAS PR 门禁等）见 [agent-learning-guide §2.8](./agent-learning-guide.md)。
 
-**本地一键验收**（conda 环境 `learnagent312` 或等价 venv）：
+**成熟度**：**中高** — Demo 1–6 在 deterministic proxy 下已闭环；全局缺口见 [agent-learning-guide §2.8](./agent-learning-guide.md)。
 
-```powershell
-python scripts/verify_eval_suite.py --profile core   # Runtime / Contract / Golden
-python scripts/verify_eval_suite.py --profile rag    # RAG + L4 + L5 + diagnosis
-python scripts/verify_eval_suite.py --profile e2e    # Demo 1–6 golden proxy
-```
+**本地一键验收**：见 [README.md](../README.md) §6；CI 行为见 [ci-design.md](./ci-design.md)。
 
 ---
 
@@ -589,6 +583,6 @@ approve
 - Demo 1–6 golden E2E proxy
 - 自动化 summary（`verify_eval_suite.py`）
 
-**仍待做**：真实 LLM E2E（`verify_demo_golden_e2e.py --mode live`）；RAGAS 夜跑趋势进 CI；生产 `backend-java/docs` 语料替换 `docs/source/` 虚构内容。  
+**仍待做**：真实 LLM E2E（`verify_demo_golden_e2e.py --mode live`）；RAGAS 夜跑趋势进 CI；生产 `backend-java/docs` 语料替换 Scenario demo 虚构内容。  
 **改造波次**：见 [agent-learning-guide.md](./agent-learning-guide.md) §7（八层栈）。
 

@@ -2,103 +2,105 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.types import Command
-from pydantic import BaseModel, Field
 
 from copilot_agent.agent.graph import build_agent_graph
 from copilot_agent.agent.nodes import AgentNodes
-from copilot_agent.agent.prompts import DANGEROUS_JOB_PATH, MAX_ROUNDS, SYSTEM_PROMPT
 from copilot_agent.agent.message_utils import current_turn_messages, last_user_content
 from copilot_agent.agent.stream.event_mapper import GraphEventMapper
+from copilot_agent.context import ContextManager
 from copilot_agent.contracts.adapters.event_store import EventStoreAdapter
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
-from copilot_agent.agent.tool_handlers import ToolHandlers
-from copilot_agent.conversation_store import ConversationCookieStore
-from copilot_agent.llm import LLMProvider
-from copilot_agent.memory import MemoryManager
-from copilot_agent.memory.manager import CHECKPOINT_COMPACTED_EVENT
+from copilot_agent.kernel import KernelDeps, build_kernel_components
 from copilot_agent.memory.checkpoint_compactor import CheckpointCompactor
-from copilot_agent.memory.prompt_inject import build_graph_turn_messages
+from copilot_agent.memory.manager import CHECKPOINT_COMPACTED_EVENT
 from copilot_agent.observability import end_chat_trace, flush_langfuse, start_chat_trace
-from copilot_agent.policy import PolicyRegistry
 from copilot_agent.rag import RagStore
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader
 from copilot_agent.runtime.event_store import EventStore
+from copilot_agent.scenario import load_scenario
+from copilot_agent.scenario.loader import LoadedScenario
 from copilot_agent.settings import settings
-from copilot_agent.tools.http_tools import WatermarkHttpTools
-from copilot_agent.tools.registry import ToolRegistry
+from copilot_agent.tools.extensions.mcp import McpRuntime
+from copilot_agent.credentials import CredentialManager
 
 log = logging.getLogger(__name__)
 
 
-class SearchDocsArgs(BaseModel):
-    query: str = Field(description="Natural language or keywords")
-
-
-class HttpGetArgs(BaseModel):
-    path: str = Field(description="Path starting with /api/v1/ or /actuator/health")
-    cookie_header: Optional[str] = Field(default=None, description="Optional Cookie header")
-
-
-class HttpPostArgs(BaseModel):
-    path: str
-    json_body: dict[str, Any]
-    cookie_header: Optional[str] = None
-    idempotency_key: Optional[str] = None
-
-
 class ChatRunner:
+    """Kernel orchestration entry: Run loop + LangGraph, built on K/C/S layers."""
+
     def __init__(
         self,
         rag_store: RagStore,
-        cookie_store: ConversationCookieStore,
+        credential_manager: CredentialManager,
         event_store: EventStore | None = None,
-        http: Optional[WatermarkHttpTools] = None,
-        memory: MemoryManager | None = None,
-        llm_provider: LLMProvider | None = None,
-        policy_registry: PolicyRegistry | None = None,
+        scenario: LoadedScenario | None = None,
+        mcp_runtime: McpRuntime | None = None,
+        *,
+        kernel_deps: KernelDeps | None = None,
     ) -> None:
-        self._cookies = cookie_store
-        self._llm_provider = llm_provider or LLMProvider()
-        self._memory = memory or MemoryManager(
-            rag_store=rag_store,
-            event_store=event_store,
-            checkpoint_path=settings.agent_checkpoint_path,
-            llm_provider=self._llm_provider,
+        scenario = scenario or load_scenario(
+            settings.scenario,
+            scenarios_root_path=settings.scenarios_root or None,
         )
-        self._http = http or WatermarkHttpTools()
-        self._tool_handlers = ToolHandlers(memory=self._memory, http=self._http, cookies=self._cookies)
-        self._tool_registry = self._build_tool_registry()
-        self._policy = policy_registry or PolicyRegistry(self._tool_registry)
-        self._tools = self._tool_registry.tools()
+        deps = kernel_deps or KernelDeps(
+            rag_store=rag_store,
+            credential_manager=credential_manager,
+            event_store=event_store,
+            mcp_runtime=mcp_runtime,
+        )
+        kernel = build_kernel_components(scenario, deps)
+
+        self._scenario = kernel.scenario
+        self._mcp_runtime = kernel.mcp_runtime
+        self._max_rounds = kernel.scenario.budgets.max_graph_rounds
+        self._memory = kernel.memory
+        self._llm_provider = kernel.llm_provider
+        self._tool_registry = kernel.tool_registry
+        self._policy = kernel.policy
+        self._tools = kernel.tools
+
+        self._context_manager = ContextManager(
+            scenario=kernel.scenario,
+            memory=kernel.memory,
+            tool_registry=kernel.tool_registry,
+            router_engine=kernel.scenario.router_engine,
+        )
         self._nodes = AgentNodes(
-            memory=self._memory,
-            llm_provider=self._llm_provider,
-            policy=self._policy,
-            tool_registry=self._tool_registry,
+            memory=kernel.memory,
+            llm_provider=kernel.llm_provider,
+            policy=kernel.policy,
+            tool_registry=kernel.tool_registry,
             tools=self._tools,
+            context_manager=self._context_manager,
         )
         self._graph = build_agent_graph(
             self._nodes.planner,
             self._nodes.assistant,
             self._nodes.safety_gate,
             self._tools,
-            checkpoint_path=self._memory.checkpoint_path,
+            checkpoint_path=kernel.memory.checkpoint_path,
             async_checkpoint=True,
         )
+        self._context_manager.bind_graph(self._graph)
         self._mapper = GraphEventMapper(
-            memory=self._memory,
-            tool_registry=self._tool_registry,
+            memory=kernel.memory,
+            tool_registry=kernel.tool_registry,
             checkpoint_reader=CheckpointReader(self._graph),
         )
-        self._checkpoint_compactor = CheckpointCompactor(self._graph, policy=self._memory.policy)
+        self._checkpoint_compactor = CheckpointCompactor(self._graph, policy=kernel.memory.policy)
 
     @property
-    def memory(self) -> MemoryManager:
+    def scenario(self) -> LoadedScenario:
+        return self._scenario
+
+    @property
+    def memory(self):
         return self._memory
 
     @property
@@ -123,27 +125,32 @@ class ChatRunner:
         try:
             turn_messages = current_turn_messages(messages)
             goal = last_user_content(turn_messages)
-            memory_context = self._memory.build_context(
-                thread_id=conversation_id,
-                run_id=run_id,
-                messages=turn_messages,
-                goal=goal,
-            )
             if resume is None:
                 lc_turn = self._to_lc_messages(turn_messages)
-                lc_messages = await build_graph_turn_messages(
-                    graph=self._graph,
+                bundle = await self._context_manager.assemble(
                     thread_id=conversation_id,
-                    system_prompt=SYSTEM_PROMPT,
-                    memory_context=memory_context.as_dict(),
+                    run_id=run_id,
                     turn_messages=lc_turn,
-                    policy=self._memory.policy,
+                    goal=goal,
+                    confirm_dangerous=confirm_dangerous,
+                    allow_job_post=settings.copilot_allow_job_post,
                 )
-                graph_input = {"messages": lc_messages}
+                graph_input = {"messages": bundle.graph_messages}
+                preretrieval_cache = bundle.truncation_report.get("preretrieval_cache")
+                tool_route = next(
+                    (
+                        hint.get("tool_route")
+                        for hint in bundle.policy_hints
+                        if isinstance(hint, dict) and hint.get("tool_route")
+                    ),
+                    None,
+                )
             else:
                 graph_input = Command(resume=resume)
+                preretrieval_cache = None
+                tool_route = None
             graph_config = {
-                "recursion_limit": (MAX_ROUNDS * 2) + 4,
+                "recursion_limit": (self._max_rounds * 2) + 4,
                 "configurable": {
                     "thread_id": conversation_id,
                     "conversation_id": conversation_id,
@@ -151,6 +158,8 @@ class ChatRunner:
                     "input_messages": turn_messages,
                     "confirm_dangerous": confirm_dangerous,
                     "allow_job_post": settings.copilot_allow_job_post,
+                    "preretrieval_cache": preretrieval_cache,
+                    "tool_route": tool_route,
                     "trace": trace,
                 },
             }
@@ -206,21 +215,12 @@ class ChatRunner:
         return result
 
     async def aclose(self) -> None:
+        if self._mcp_runtime is not None:
+            await self._mcp_runtime.aclose()
         checkpointer = getattr(self._graph, "checkpointer", None)
         conn = getattr(checkpointer, "_learnagent_conn", None)
         if conn is not None and hasattr(conn, "close"):
             await conn.close()
-
-    def _build_tool_registry(self) -> ToolRegistry:
-        return ToolRegistry.from_agent_tools(
-            search_docs=self._tool_handlers.search_docs,
-            http_get=self._tool_handlers.http_get,
-            http_post=self._tool_handlers.http_post,
-            search_docs_args_schema=SearchDocsArgs,
-            http_get_args_schema=HttpGetArgs,
-            http_post_args_schema=HttpPostArgs,
-            dangerous_post_requires_approval=_requires_dangerous_post_approval,
-        )
 
     def _to_lc_messages(self, messages: list[dict[str, Any]]) -> list[BaseMessage]:
         out: list[BaseMessage] = []
@@ -240,7 +240,3 @@ class ChatRunner:
             else:
                 out.append(HumanMessage(content=content))
         return out
-
-
-def _requires_dangerous_post_approval(args: dict[str, Any]) -> bool:
-    return str(args.get("path", "")).split("?", 1)[0] == DANGEROUS_JOB_PATH

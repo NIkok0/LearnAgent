@@ -1,0 +1,8 @@
+{
+  "load_order": [
+    "README.md"
+  ],
+  "doc_types": {
+    "README.md": "overview"
+  }
+}

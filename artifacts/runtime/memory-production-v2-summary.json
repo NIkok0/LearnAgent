@@ -1,10 +1,10 @@
 {
-  "thread_id": "thread-p2-6e2202c1",
-  "run_id": "2f51f344-0ab8-4262-8f34-d4e118780665",
+  "thread_id": "thread-p2-4530361d",
+  "run_id": "661bb06d-3e65-49c6-8db1-9efdbb2a48d4",
   "recalled": [
     {
-      "id": "mem_e8c973edb1b7",
-      "user_id": "user-p2-ff0f1143",
+      "id": "mem_97a9cd66fb76",
+      "user_id": "user-p2-06505256",
       "thread_id": null,
       "scope": "user",
       "memory_type": "fact",
@@ -19,8 +19,8 @@
       "expires_at": null,
       "access_count": 0,
       "last_accessed_at": null,
-      "created_at": "2026-05-21T05:13:12.983306+00:00",
-      "updated_at": "2026-05-21T05:13:12.983306+00:00",
+      "created_at": "2026-05-21T10:20:19.526597+00:00",
+      "updated_at": "2026-05-21T10:20:19.526597+00:00",
       "source_run_id": "manual",
       "history": [],
       "score": 1.0543,
@@ -36,11 +36,11 @@
   ],
   "compact_events": [
     {
-      "id": 3738,
-      "thread_id": "thread-compact-bdb428de",
-      "run_id": "49212a5c-3501-446f-af90-ab43d18e6d2e",
+      "id": 24,
+      "thread_id": "thread-compact-85cc580f",
+      "run_id": "27b7763e-d880-4b96-bfd8-49c3dc0ca5e8",
       "type": "checkpoint_compacted",
-      "created_at": "2026-05-21T05:13:13.011450+00:00",
+      "created_at": "2026-05-21T10:20:19.552759+00:00",
       "payload": {
         "compacted": true,
         "before_count": 42,

@@ -26,9 +26,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.agent.graph import build_agent_graph  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
-
-DANGEROUS_JOB_PATH = "/api/v1/jobs/watermark"
 
 
 class HttpPostArgs(BaseModel):
@@ -36,6 +35,15 @@ class HttpPostArgs(BaseModel):
     json_body: dict[str, Any] = Field(default_factory=dict)
     cookie_header: Optional[str] = None
     idempotency_key: Optional[str] = None
+
+
+def _watermark_dangerous_path() -> str:
+    scenario = load_scenario("watermark")
+    if scenario.policy.dangerous_paths:
+        return str(scenario.policy.dangerous_paths[0])
+    if scenario.router_rules and scenario.router_rules.dangerous_job_path:
+        return scenario.router_rules.dangerous_job_path
+    raise RuntimeError("watermark scenario must declare a dangerous path")
 
 
 def _assistant_node(state: dict[str, Any]) -> dict[str, list[AIMessage]]:
@@ -53,7 +61,7 @@ def _assistant_node(state: dict[str, Any]) -> dict[str, list[AIMessage]]:
                             "id": "call_post_1",
                             "name": "http_post",
                             "args": {
-                                "path": DANGEROUS_JOB_PATH,
+                                "path": _watermark_dangerous_path(),
                                 "json_body": {"image_url": "https://example.invalid/test.png"},
                             },
                             "type": "tool_call",
@@ -80,13 +88,14 @@ def _safety_gate_node(state: dict[str, Any], config: dict[str, Any] | None = Non
         name = str(call.get("name", ""))
         args = call.get("args") if isinstance(call.get("args"), dict) else {}
         path = str(args.get("path", ""))
-        if name == "http_post" and path.split("?", 1)[0] == DANGEROUS_JOB_PATH:
+        dangerous_path = _watermark_dangerous_path()
+        if name == "http_post" and path.split("?", 1)[0] == dangerous_path:
             if not allow_job_post:
                 return {
                     "messages": [
                         AIMessage(
                             content=(
-                                "POST /api/v1/jobs/watermark is disabled by deployment. "
+                                f"POST {dangerous_path} is disabled by deployment. "
                                 "Enable COPILOT_ALLOW_JOB_POST=true, then retry with explicit confirmation."
                             )
                         )
@@ -103,6 +112,10 @@ def _safety_gate_node(state: dict[str, Any], config: dict[str, Any] | None = Non
                         )
                     ]
                 }
+    return {}
+
+
+def _planner_node(_state: dict[str, Any], _config: dict[str, Any] | None = None) -> dict[str, list[AIMessage]]:
     return {}
 
 
@@ -124,6 +137,9 @@ def main() -> int:
         help="Path to write structured verification summary JSON.",
     )
     args = parser.parse_args()
+
+    previous_allow_job_post = settings.copilot_allow_job_post
+    settings.copilot_allow_job_post = True
 
     checkpoint_path = Path(args.checkpoint_path).resolve()
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +164,7 @@ def main() -> int:
     )
 
     graph = build_agent_graph(
+        _planner_node,
         _assistant_node,
         _safety_gate_node,
         [tool],
@@ -172,7 +189,7 @@ def main() -> int:
     passed = blocked_by_gate and tool_not_called and (not has_tool_message)
     summary = {
         "thread_id": args.thread_id,
-        "dangerous_path": DANGEROUS_JOB_PATH,
+        "dangerous_path": _watermark_dangerous_path(),
         "blocked_by_gate": blocked_by_gate,
         "tool_not_called": tool_not_called,
         "tool_message_seen": has_tool_message,
@@ -194,8 +211,10 @@ def main() -> int:
 
     if passed:
         print("phase3_safety_gate=PASS")
+        settings.copilot_allow_job_post = previous_allow_job_post
         return 0
     print("phase3_safety_gate=FAIL")
+    settings.copilot_allow_job_post = previous_allow_job_post
     return 1
 
 

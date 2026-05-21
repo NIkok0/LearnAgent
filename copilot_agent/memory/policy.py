@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from typing import Any
 
 EPISODIC_MEMORY_PREFIX = "[EpisodicMemory]"
@@ -55,6 +55,23 @@ class EpisodicInjectBundle:
     inject_preview: str = ""
     budget_applied: dict[str, Any] = field(default_factory=dict)
     sources: dict[str, list[Any]] = field(default_factory=dict)
+
+
+def apply_memory_policy_overlay(
+    base: MemoryPolicyConfig,
+    overlay: dict[str, Any] | None,
+) -> MemoryPolicyConfig:
+    if not overlay:
+        return base
+    valid = {item.name for item in fields(MemoryPolicyConfig)}
+    updates: dict[str, Any] = {}
+    for key, value in overlay.items():
+        if key.startswith("#") or key not in valid:
+            continue
+        updates[key] = value
+    if not updates:
+        return base
+    return replace(base, **updates)
 
 
 def memory_policy_from_settings(settings: Any) -> MemoryPolicyConfig:

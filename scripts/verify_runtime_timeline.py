@@ -103,6 +103,13 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
         "run_completed_meta",
         {"checkpoint_thread_id": completed_thread, "message_count": 3, "has_interrupt": False},
     )
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "run_consistency_checked",
+        {"status": "completed", "ok": True, "missing_events": [], "event_count": 8, "last_event_id": 8},
+    )
     completed = store.complete_run(completed_run_id)
     completed_timeline = projector.project_run(completed, store.list_run_events(completed_run_id))
 
@@ -201,6 +208,9 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "checkpoint_message_count": (completed_timeline.get("checkpoint") or {}).get("completed", {}).get(
                 "message_count"
             ),
+            "debugger_status": (completed_timeline.get("debugger") or {}).get("status"),
+            "debugger_tool_total": (completed_timeline.get("debugger") or {}).get("tool_calls", {}).get("total"),
+            "debugger_consistency_ok": (completed_timeline.get("debugger") or {}).get("consistency", {}).get("ok"),
         },
         "missing_tool": {
             "run_id": missing_tool_run_id,
@@ -263,6 +273,9 @@ def main() -> int:
         and summary["completed"]["tool_success"] is True
         and not summary["completed"]["warnings"]
         and "checkpoint" in summary["completed"]["kinds"]
+        and summary["completed"]["debugger_status"] == "completed"
+        and summary["completed"]["debugger_tool_total"] == 1
+        and summary["completed"]["debugger_consistency_ok"] is True
     )
     ok_missing_tool = "tool_missing_end" in summary["missing_tool"]["warnings"]
     ok_approval = summary["approval"]["status"] == "approved" and summary["approval"]["resolved"].get("approved") is True

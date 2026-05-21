@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+os.environ.setdefault("SCENARIO", "watermark")
+
 
 def _load_dataset(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -112,19 +114,21 @@ def _maybe_run_ragas(records: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
 
 
 def _docs_precondition() -> tuple[bool, dict[str, Any]]:
-    from copilot_agent.rag.ingest import DOC_FILENAMES, repo_docs_dir  # noqa: WPS433
+    from copilot_agent.rag.docs_manifest import load_docs_manifest
+    from copilot_agent.rag.ingest import repo_docs_dir  # noqa: WPS433
 
     base = repo_docs_dir()
     if base is None:
         return False, {
             "docs_dir": None,
-            "required_files": list(DOC_FILENAMES),
-            "missing_files": list(DOC_FILENAMES),
+            "required_files": [],
+            "missing_files": [],
         }
-    missing = [name for name in DOC_FILENAMES if not (base / name).is_file()]
+    required = list(load_docs_manifest(base).filenames(docs_dir=base))
+    missing = [name for name in required if not (base / name).is_file()]
     return len(missing) == 0, {
         "docs_dir": str(base),
-        "required_files": list(DOC_FILENAMES),
+        "required_files": required,
         "missing_files": missing,
     }
 
@@ -208,7 +212,7 @@ def main() -> int:
         return 0
     if not docs_ready:
         errors.append(
-            "docs_precondition_failed: set WATERMARK_DOCS_PATH or restore docs/source with required markdown files"
+            "docs_precondition_failed: set COPILOT_DOCS_PATH or run with SCENARIO=watermark and scenario docs available"
         )
 
     disable_vector = bool(args.disable_vector and not args.enable_vector)

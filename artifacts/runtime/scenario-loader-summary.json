@@ -1,0 +1,90 @@
+{
+  "suite_name": "scenario_loader",
+  "status": "PASS",
+  "checks": {
+    "watermark_loaded": true,
+    "watermark_flat_config": true,
+    "watermark_deployment_capabilities": true,
+    "watermark_system_prompt": true,
+    "watermark_docs_resolved": true,
+    "watermark_allowlist": true,
+    "watermark_router_rules": true,
+    "watermark_memory_overlay": true,
+    "watermark_memory_top_k": true,
+    "watermark_resources_rag_rules": true,
+    "watermark_resources_diagnosis": true,
+    "watermark_eval_golden": true,
+    "watermark_eval_rag_cases": true,
+    "watermark_http_get_allowlist": true,
+    "watermark_http_post_allowlist": true,
+    "minimal_loaded": true,
+    "minimal_policy_denylist": true,
+    "context_bundle_schema": true,
+    "capability_registry_tools": true,
+    "scenario_policy_denies_minimal": true
+  },
+  "watermark": {
+    "name": "watermark",
+    "config_path": "E:\\code\\LearnAgent\\config\\watermark.yaml",
+    "root": "E:\\code\\LearnAgent",
+    "deployment_capabilities": [
+      "rag",
+      "http",
+      "mcp"
+    ],
+    "docs_dir": "E:\\code\\LearnAgent\\scenarios\\watermark\\docs",
+    "budgets": {
+      "max_context_tokens": 24000,
+      "max_context_chars": 14000,
+      "max_tool_calls": 8,
+      "max_run_seconds": 120,
+      "max_graph_rounds": 12
+    },
+    "policy": {
+      "tool_allowlist": [
+        "search_docs",
+        "http_get",
+        "http_post",
+        "mcp_watermark_ops_check_api_health",
+        "mcp_watermark_ops_search_platform_docs"
+      ],
+      "tool_denylist": [],
+      "mcp_server_allowlist": [
+        "watermark_ops"
+      ],
+      "mcp_tool_allowlist": [
+        "check_api_health",
+        "search_platform_docs"
+      ]
+    },
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        "watermark_ops"
+      ]
+    },
+    "router": {
+      "enabled": true,
+      "rules": 6
+    },
+    "memory_policy": {
+      "overlay_keys": [
+        "episodic_recall_top_k",
+        "long_term_recall_top_k"
+      ],
+      "episodic_recall_top_k": 2,
+      "long_term_recall_top_k": 3
+    },
+    "resources": {
+      "api_base_url_env": "WATERMARK_API_BASE_URL",
+      "credential_binding": "wmsession",
+      "credential_cookie_name": "WMSESSIONID",
+      "rag_rules_loaded": true,
+      "diagnosis_loaded": true
+    },
+    "eval": {
+      "golden": "E:\\code\\LearnAgent\\eval\\golden\\runtime-golden-scenarios.json",
+      "rag_cases": "E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json"
+    }
+  }
+}

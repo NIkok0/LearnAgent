@@ -1,0 +1,312 @@
+{
+  "profile": "rag",
+  "enable_ragas": false,
+  "overall_pass": true,
+  "suites_total": 12,
+  "suites_failed": 0,
+  "failed_suites": [],
+  "skipped_suites": [],
+  "failed_scenarios": [],
+  "runtime_contract_breaks": [],
+  "rag_metrics": {
+    "docs_cases": 20,
+    "vector_enabled": false,
+    "avg_required_source_coverage": 0.95,
+    "required_source_full_match_rate": 0.95,
+    "retrieval_hit_rate": 0.95
+  },
+  "contract_schema_ok": true,
+  "contract_metrics": {},
+  "duration_total_ms": 28910,
+  "results": [
+    {
+      "suite_name": "phase4_ragas",
+      "script": "scripts/verify_phase4_ragas.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 441,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "dataset_path=E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
+        "eval_mode=proxy",
+        "docs_cases=20",
+        "retrieval_hit_rate=0.95",
+        "required_source_full_match_rate=0.95",
+        "avg_required_source_coverage=0.95",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
+        "phase4_ragas=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "phase4_tool_trajectory",
+      "script": "scripts/verify_phase4_tool_trajectory.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 5970,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-tool-trajectory-summary.json",
+      "checks": {
+        "trajectory_gate_ok": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-tool-trajectory-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "dataset_path=E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
+        "cases_total=28",
+        "cases_passed=28",
+        "tool_trajectory_pass_rate=1.0",
+        "rag_before_api_pass_rate=1.0",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-tool-trajectory-summary.json",
+        "phase4_tool_trajectory=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "rag_api_path_extraction",
+      "script": "scripts/verify_rag_api_path_extraction.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1257,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [],
+      "stdout_tail": [
+        "extracts_job_path=True",
+        "extracts_health_path=True",
+        "merge_paths=True",
+        "verify_rag_api_path_extraction=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "rag_api_ingest",
+      "script": "scripts/verify_rag_api_ingest.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 373,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json",
+      "checks": {
+        "chunks_loaded": true,
+        "login_endpoint": true,
+        "login_fields": true,
+        "login_response_fields": true,
+        "health_response_fields": true,
+        "health_endpoint": true,
+        "error_codes": true,
+        "chunk_index_present": true,
+        "updated_at_present": true,
+        "parser_unit_login_fields": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "api_contract_chunks=19",
+        "login_response_fields=['success', 'userId']",
+        "health_response_fields=['status']",
+        "checks={\"chunks_loaded\": true, \"login_endpoint\": true, \"login_fields\": true, \"login_response_fields\": true, \"health_response_fields\": true, \"health_endpoint\": true, \"error_codes\": true, \"chunk_index_present\": true, \"updated_at_present\": true, \"parser_unit_login_fields\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json",
+        "verify_rag_api_ingest=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "extract_validate",
+      "script": "scripts/verify_extract_validate.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 422,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json",
+      "checks": {
+        "login_response_fields": true,
+        "health_response_fields": true,
+        "memory_record_valid": true,
+        "memory_scope_user": true,
+        "invalid_memory_rejected": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "checks={\"login_response_fields\": true, \"health_response_fields\": true, \"memory_record_valid\": true, \"memory_scope_user\": true, \"invalid_memory_rejected\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json",
+        "verify_extract_validate=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "rag_retrieval_quality",
+      "script": "scripts/verify_rag_retrieval_quality.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1112,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [],
+      "stdout_tail": [
+        "PASS: ascii tokenize",
+        "PASS: query rewrite expands",
+        "PASS: bm25 scores",
+        "PASS: rrf fuse",
+        "PASS: dedup same heading path",
+        "PASS: budget packing limits chunks",
+        "PASS: dynamic top-k respects budget",
+        "PASS: route sparse for api path",
+        "PASS: route dense for open chinese",
+        "PASS: store search chinese queue question",
+        "PASS: store search returns route",
+        "verify_rag_retrieval_quality=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "citation_l4",
+      "script": "scripts/verify_citation_l4.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 87,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json",
+      "checks": {
+        "good_answer_passes": true,
+        "bad_answer_fails": true,
+        "required_coverage_good": true,
+        "missing_required_bad": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "citation_l4=PASS",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "diagnosis_template",
+      "script": "scripts/verify_diagnosis_template.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1117,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json",
+      "checks": {
+        "should_inject": true,
+        "outline_created": true,
+        "status_queued": true,
+        "has_sections": true,
+        "mentions_runbook": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "diagnosis_template=PASS",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "tool_router",
+      "script": "scripts/verify_tool_router.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1132,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [],
+      "stdout_tail": [
+        "PASS: P4-028 docs route",
+        "PASS: P4-028 docs recommends search",
+        "PASS: P4-013 api live or login",
+        "PASS: P4-013 recommends http_get",
+        "PASS: P4-014 api live or login",
+        "PASS: P4-014 recommends http_get",
+        "PASS: deploy steps knowledge",
+        "PASS: deploy forbids http_get",
+        "PASS: queued troubleshooting",
+        "PASS: troubleshoot search first",
+        "PASS: contract question knowledge",
+        "verify_tool_router=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "rag_hot_reload",
+      "script": "scripts/verify_rag_hot_reload.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 483,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [],
+      "stdout_tail": [
+        "docs_dir=E:\\code\\LearnAgent\\scenarios\\watermark\\docs",
+        "chunks=74",
+        "rag_hot_reload=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "rag_incremental_index",
+      "script": "scripts/verify_rag_incremental_index.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 354,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [],
+      "stdout_tail": [
+        "docs_dir=E:\\code\\LearnAgent\\scenarios\\watermark\\docs",
+        "delta_changed_on_edit=['REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md', 'API-CONTRACT.md', 'DEPLOY-SERVER.md', 'SECURITY-BASELINE.md', 'RUNBOOK.md', 'OPERATIONS-SLO-SLA.md', 'watermark-java-backend-tech-selection.md', 'README.md', 'README_ALGORITHM.md']",
+        "rag_incremental=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "rag_rerank",
+      "script": "scripts/verify_rag_rerank.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 16162,
+      "summary_json": null,
+      "checks": {},
+      "artifacts": [],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "PASS: rerank promotes relevant chunk",
+        "PASS: rerank returns top_k",
+        "PASS: store search with rerank enabled",
+        "rerank_mode=enabled",
+        "PASS: store search with rerank disabled",
+        "verify_rag_rerank=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\transformers\\utils\\hub.py:128: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.",
+        "  warnings.warn("
+      ]
+    }
+  ],
+  "eval_suite": "PASS"
+}

@@ -1,0 +1,20 @@
+servers:
+  - name: watermark_ops
+    transport: stdio
+    command: python
+    args:
+      - scenarios/watermark/mcp/watermark_ops.py
+    cwd: .
+    discover_tools: true
+    enabled: true
+    tools:
+      - name: check_api_health
+        description: Check scenario HTTP API /actuator/health
+        risk_level: low
+        requires_approval: false
+        timeout_seconds: 30.0
+      - name: search_platform_docs
+        description: Keyword search scenario documentation via MCP
+        risk_level: low
+        requires_approval: false
+        timeout_seconds: 45.0

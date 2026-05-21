@@ -41,6 +41,13 @@ class DocChunk(BaseModel):
     request_fields: list[ApiField] = Field(default_factory=list)
     response_fields: list[ApiField] = Field(default_factory=list)
     error_codes: list[ApiErrorCode] = Field(default_factory=list)
+    tenant_id: str = "default"
+    doc_id: str = ""
+    acl: list[str] = Field(default_factory=list)
+    classification: str = "internal"
+    pii_level: str = "none"
+    source_hash: str = ""
+    retention_policy: str = "default"
 
     @property
     def key(self) -> tuple[str, int]:

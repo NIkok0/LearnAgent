@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.contracts.base import RuntimeEvent  # noqa: E402
+from copilot_agent.contracts.events.context import build_context_built_payload
 from copilot_agent.contracts.events.retrieval import build_retrieval_completed_payload  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.runtime.event_schema import KNOWN_EVENT_TYPES, payload_schema_version  # noqa: E402
@@ -57,6 +58,23 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
                 "Redis Stream key",
                 [DocChunk(source="DEPLOY-SERVER.md", start_line=10, text="# Redis\nDefault key")],
                 excerpt_chars=64,
+            ),
+        ),
+        (
+            "context_built",
+            build_context_built_payload(
+                user_message="hello",
+                assembled_message_count=4,
+                budget_max_chars=14000,
+                used_chars=1200,
+                truncated=False,
+                router_injected=True,
+                preretrieval_enabled=True,
+                preretrieval_sources=["RUNBOOK.md"],
+                preretrieval_excerpt_chars=800,
+                memory_inject_chars=100,
+                checkpoint_compacted=True,
+                checkpoint_chars=1800,
             ),
         ),
         (

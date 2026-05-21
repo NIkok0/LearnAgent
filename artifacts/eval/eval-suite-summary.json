@@ -1,220 +1,623 @@
 {
-  "profile": "rag",
+  "profile": "core-fast",
   "enable_ragas": false,
-  "overall_pass": false,
-  "suites_total": 8,
-  "suites_failed": 1,
-  "failed_suites": [
-    "phase4_tool_trajectory"
-  ],
+  "overall_pass": true,
+  "suites_total": 15,
+  "suites_failed": 0,
+  "failed_suites": [],
   "skipped_suites": [],
   "failed_scenarios": [],
   "runtime_contract_breaks": [],
-  "rag_metrics": {
-    "docs_cases": 20,
-    "vector_enabled": false,
-    "avg_required_source_coverage": 1.0,
-    "required_source_full_match_rate": 1.0,
-    "retrieval_hit_rate": 1.0
-  },
+  "rag_metrics": {},
   "contract_schema_ok": true,
-  "contract_metrics": {},
-  "duration_total_ms": 2961,
+  "contract_metrics": {
+    "contract_events": {
+      "round_trip_ok": true,
+      "schema_ok": true,
+      "kinds_ok": true,
+      "model_validate_ok": true,
+      "contract_schema_ok": true
+    },
+    "tool_audit_v1": {
+      "start_contract": true,
+      "end_contract": true,
+      "failure_contract": true,
+      "timeline_contract": true,
+      "persisted_sanitized": true,
+      "contract_schema_ok": true
+    },
+    "tool_execution_reliability": {
+      "read_retried_once": true,
+      "timeout_enforced": true,
+      "write_not_retried": true,
+      "idempotency_declared": true,
+      "retry_declared": true
+    },
+    "eval_cases_contract": {
+      "phase4_shape_ok": true,
+      "phase4_model_validate_ok": true,
+      "golden_events_ok": true,
+      "phase4_case_count_ok": true,
+      "golden_case_count_ok": true,
+      "contract_schema_ok": true
+    },
+    "scenario_loader": {
+      "watermark_loaded": true,
+      "watermark_flat_config": true,
+      "watermark_deployment_capabilities": true,
+      "watermark_system_prompt": true,
+      "watermark_docs_resolved": true,
+      "watermark_allowlist": true,
+      "watermark_router_rules": true,
+      "watermark_memory_overlay": true,
+      "watermark_memory_top_k": true,
+      "watermark_resources_rag_rules": true,
+      "watermark_resources_diagnosis": true,
+      "watermark_eval_golden": true,
+      "watermark_eval_rag_cases": true,
+      "watermark_http_get_allowlist": true,
+      "watermark_http_post_allowlist": true,
+      "minimal_loaded": true,
+      "minimal_policy_denylist": true,
+      "context_bundle_schema": true,
+      "capability_registry_tools": true,
+      "scenario_policy_denies_minimal": true
+    },
+    "context_manager": {
+      "should_preretrieve_knowledge": true,
+      "packing_truncates_rag": true,
+      "context_built_event": true,
+      "context_built_payload_valid": true,
+      "preretrieval_in_bundle": true,
+      "preretrieval_cache_in_bundle": true,
+      "preretrieval_dedupe_skips_duplicate": true,
+      "checkpoint_pack_compacts_history": true
+    },
+    "policy_credentials": {
+      "credentials_binding_id_from_scenario": true,
+      "credentials_binding_scopes": true,
+      "credentials_store_round_trip": true,
+      "credentials_scope_gate_denies_unknown": true,
+      "credentials_audit_payload_no_secret": true,
+      "credentials_schema_validates": true,
+      "credentials_mcp_server_outside_kernel": true,
+      "credentials_legacy_shim_removed": true,
+      "policy_http_get_declares_read_scope": true,
+      "policy_http_post_declares_write_scope": true,
+      "policy_scope_allowed_emits_audit": true,
+      "policy_scope_denied_on_write_with_read_only_binding": true,
+      "policy_docs_has_no_scope_audit": true,
+      "policy_missing_binding_denies_http_get": true,
+      "policy_eventstore_writes_audit_rows": true,
+      "policy_audit_payload_contract_valid": true,
+      "policy_audit_payload_has_no_secret": true
+    },
+    "policy_docs_contract": {
+      "docs_resolved": true,
+      "docs_scenario_name": true,
+      "docs_source_kind": true,
+      "docs_manifest_present": true,
+      "policy_decision_ask": true,
+      "policy_requires_approval": true,
+      "policy_source": true,
+      "policy_tool_name": true,
+      "policy_call_id": true,
+      "policy_metadata_path": true,
+      "policy_unknown_denied": true
+    },
+    "events_validated": {
+      "contract_validated_flag": true,
+      "correlation_present": true,
+      "payload_goal_preserved": true,
+      "memory_summary_validates": true
+    }
+  },
+  "duration_total_ms": 16753,
+  "slow_suites": [
+    {
+      "suite_name": "phase3_safety_gate",
+      "duration_ms": 3901,
+      "status": "PASS"
+    },
+    {
+      "suite_name": "hitl_checkpoint_resume",
+      "duration_ms": 1541,
+      "status": "PASS"
+    },
+    {
+      "suite_name": "context_manager",
+      "duration_ms": 1304,
+      "status": "PASS"
+    },
+    {
+      "suite_name": "policy_docs_contract",
+      "duration_ms": 1259,
+      "status": "PASS"
+    },
+    {
+      "suite_name": "phase4_dataset",
+      "duration_ms": 1204,
+      "status": "PASS"
+    }
+  ],
   "results": [
     {
-      "suite_name": "phase4_ragas",
-      "script": "scripts/verify_phase4_ragas.py",
+      "suite_name": "contract_events",
+      "script": "scripts/verify_contract_events.py",
       "pass": true,
       "status": "PASS",
-      "duration_ms": 333,
-      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
+      "duration_ms": 538,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\contract-events-summary.json",
+      "checks": {
+        "round_trip_ok": true,
+        "schema_ok": true,
+        "kinds_ok": true,
+        "model_validate_ok": true,
+        "contract_schema_ok": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\contract-events-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "round_trip_ok=True",
+        "schema_ok=True",
+        "model_validate_ok=True",
+        "contract_schema_ok=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\contract-events-summary.json",
+        "contract_events=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "tool_audit_v1",
+      "script": "scripts/verify_tool_audit_v1.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 518,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\tool-audit-v1-summary.json",
+      "checks": {
+        "start_contract": true,
+        "end_contract": true,
+        "failure_contract": true,
+        "timeline_contract": true,
+        "persisted_sanitized": true,
+        "contract_schema_ok": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\tool-audit-v1-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "event_store_path=E:\\code\\LearnAgent\\storage\\verify-tool-audit-eval.sqlite",
+        "start_contract=True",
+        "end_contract=True",
+        "failure_contract=True",
+        "timeline_contract=True",
+        "persisted_sanitized=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\tool-audit-v1-summary.json",
+        "tool_audit_v1=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "tool_execution_reliability",
+      "script": "scripts/verify_tool_execution_reliability.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1089,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\tool-execution-reliability-summary.json",
+      "checks": {
+        "read_retried_once": true,
+        "timeout_enforced": true,
+        "write_not_retried": true,
+        "idempotency_declared": true,
+        "retry_declared": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\tool-execution-reliability-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "read_retried_once=True",
+        "timeout_enforced=True",
+        "write_not_retried=True",
+        "idempotency_declared=True",
+        "retry_declared=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\tool-execution-reliability-summary.json",
+        "tool_execution_reliability=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "eval_cases_contract",
+      "script": "scripts/verify_eval_cases_contract.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 412,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\eval\\eval-cases-contract-summary.json",
+      "checks": {
+        "phase4_shape_ok": true,
+        "phase4_model_validate_ok": true,
+        "golden_events_ok": true,
+        "phase4_case_count_ok": true,
+        "golden_case_count_ok": true,
+        "contract_schema_ok": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\eval\\eval-cases-contract-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "contract_schema_ok=True",
+        "phase4_cases=28",
+        "golden_cases=10",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\eval\\eval-cases-contract-summary.json",
+        "eval_cases_contract=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "scenario_loader",
+      "script": "scripts/verify_scenario_loader.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1169,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\scenario-loader-summary.json",
+      "checks": {
+        "watermark_loaded": true,
+        "watermark_flat_config": true,
+        "watermark_deployment_capabilities": true,
+        "watermark_system_prompt": true,
+        "watermark_docs_resolved": true,
+        "watermark_allowlist": true,
+        "watermark_router_rules": true,
+        "watermark_memory_overlay": true,
+        "watermark_memory_top_k": true,
+        "watermark_resources_rag_rules": true,
+        "watermark_resources_diagnosis": true,
+        "watermark_eval_golden": true,
+        "watermark_eval_rag_cases": true,
+        "watermark_http_get_allowlist": true,
+        "watermark_http_post_allowlist": true,
+        "minimal_loaded": true,
+        "minimal_policy_denylist": true,
+        "context_bundle_schema": true,
+        "capability_registry_tools": true,
+        "scenario_policy_denies_minimal": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\scenario-loader-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "checks={\"watermark_loaded\": true, \"watermark_flat_config\": true, \"watermark_deployment_capabilities\": true, \"watermark_system_prompt\": true, \"watermark_docs_resolved\": true, \"watermark_allowlist\": true, \"watermark_router_rules\": true, \"watermark_memory_overlay\": true, \"watermark_memory_top_k\": true, \"watermark_resources_rag_rules\": true, \"watermark_resources_diagnosis\": true, \"watermark_eval_golden\": true, \"watermark_eval_rag_cases\": true, \"watermark_http_get_allowlist\": true, \"watermark_http_post_allowlist\": true, \"minimal_loaded\": true, \"minimal_policy_denylist\": true, \"context_bundle_schema\": true, \"capability_registry_tools\": true, \"scenario_policy_denies_minimal\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\scenario-loader-summary.json",
+        "verify_scenario_loader=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "context_manager",
+      "script": "scripts/verify_context_manager.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1304,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\context-manager-summary.json",
+      "checks": {
+        "should_preretrieve_knowledge": true,
+        "packing_truncates_rag": true,
+        "context_built_event": true,
+        "context_built_payload_valid": true,
+        "preretrieval_in_bundle": true,
+        "preretrieval_cache_in_bundle": true,
+        "preretrieval_dedupe_skips_duplicate": true,
+        "checkpoint_pack_compacts_history": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\context-manager-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "checks={\"should_preretrieve_knowledge\": true, \"packing_truncates_rag\": true, \"context_built_event\": true, \"context_built_payload_valid\": true, \"preretrieval_in_bundle\": true, \"preretrieval_cache_in_bundle\": true, \"preretrieval_dedupe_skips_duplicate\": true, \"checkpoint_pack_compacts_history\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\context-manager-summary.json",
+        "verify_context_manager=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "policy_credentials",
+      "script": "scripts/verify_policy_credentials.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1198,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\policy-credentials-summary.json",
+      "checks": {
+        "credentials_binding_id_from_scenario": true,
+        "credentials_binding_scopes": true,
+        "credentials_store_round_trip": true,
+        "credentials_scope_gate_denies_unknown": true,
+        "credentials_audit_payload_no_secret": true,
+        "credentials_schema_validates": true,
+        "credentials_mcp_server_outside_kernel": true,
+        "credentials_legacy_shim_removed": true,
+        "policy_http_get_declares_read_scope": true,
+        "policy_http_post_declares_write_scope": true,
+        "policy_scope_allowed_emits_audit": true,
+        "policy_scope_denied_on_write_with_read_only_binding": true,
+        "policy_docs_has_no_scope_audit": true,
+        "policy_missing_binding_denies_http_get": true,
+        "policy_eventstore_writes_audit_rows": true,
+        "policy_audit_payload_contract_valid": true,
+        "policy_audit_payload_has_no_secret": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\policy-credentials-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "checks={\"credentials_binding_id_from_scenario\": true, \"credentials_binding_scopes\": true, \"credentials_store_round_trip\": true, \"credentials_scope_gate_denies_unknown\": true, \"credentials_audit_payload_no_secret\": true, \"credentials_schema_validates\": true, \"credentials_mcp_server_outside_kernel\": true, \"credentials_legacy_shim_removed\": true, \"policy_http_get_declares_read_scope\": true, \"policy_http_post_declares_write_scope\": true, \"policy_scope_allowed_emits_audit\": true, \"policy_scope_denied_on_write_with_read_only_binding\": true, \"policy_docs_has_no_scope_audit\": true, \"policy_missing_binding_denies_http_get\": true, \"policy_eventstore_writes_audit_rows\": true, \"policy_audit_payload_contract_valid\": true, \"policy_audit_payload_has_no_secret\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\policy-credentials-summary.json",
+        "verify_policy_credentials=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "policy_docs_contract",
+      "script": "scripts/verify_policy_docs_contract.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1259,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\policy-docs-contract-summary.json",
+      "checks": {
+        "docs_resolved": true,
+        "docs_scenario_name": true,
+        "docs_source_kind": true,
+        "docs_manifest_present": true,
+        "policy_decision_ask": true,
+        "policy_requires_approval": true,
+        "policy_source": true,
+        "policy_tool_name": true,
+        "policy_call_id": true,
+        "policy_metadata_path": true,
+        "policy_unknown_denied": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\policy-docs-contract-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "checks={\"docs_resolved\": true, \"docs_scenario_name\": true, \"docs_source_kind\": true, \"docs_manifest_present\": true, \"policy_decision_ask\": true, \"policy_requires_approval\": true, \"policy_source\": true, \"policy_tool_name\": true, \"policy_call_id\": true, \"policy_metadata_path\": true, \"policy_unknown_denied\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\policy-docs-contract-summary.json",
+        "verify_policy_docs_contract=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "events_validated",
+      "script": "scripts/verify_events_validated.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 479,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\events-validated-summary.json",
+      "checks": {
+        "contract_validated_flag": true,
+        "correlation_present": true,
+        "payload_goal_preserved": true,
+        "memory_summary_validates": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\events-validated-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "checks={\"contract_validated_flag\": true, \"correlation_present\": true, \"payload_goal_preserved\": true, \"memory_summary_validates\": true}",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\events-validated-summary.json",
+        "verify_events_validated=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_event_store",
+      "script": "scripts/verify_runtime_event_store.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 463,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json",
+      "checks": {
+        "thread_ok": true,
+        "run_ok": true,
+        "events_ok": true,
+        "payload_ok": true,
+        "schema_ok": true,
+        "pagination_ok": true,
+        "archived_ok": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "event_count=4",
+        "event_types=token,tool_start,tool_end,done",
+        "db_exists=True",
+        "thread_ok=True",
+        "run_ok=True",
+        "events_ok=True",
+        "payload_ok=True",
+        "schema_ok=True",
+        "pagination_ok=True",
+        "archived_ok=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\event-store-summary.json",
+        "runtime_event_store=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_timeline",
+      "script": "scripts/verify_runtime_timeline.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 633,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json",
       "checks": {},
       "artifacts": [
-        "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json"
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "event_store_path=E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
+        "completed_assistant_output=hello world",
+        "completed_tool_merged=True",
+        "missing_tool_warnings=tool_missing_end",
+        "approval_status=approved",
+        "memory_summary_type=run",
+        "cancelled_status=cancelled",
+        "failed_warnings=failed_without_error_event",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\timeline-summary.json",
+        "runtime_timeline=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "runtime_execution_engine",
+      "script": "scripts/verify_runtime_execution_engine.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1045,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\execution-engine-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\execution-engine-summary.json"
+      ],
+      "errors": [],
+      "stdout_tail": [
+        "cancelled_concurrent_blocked=True",
+        "approved_status=completed",
+        "approved_waiting_status_seen=True",
+        "rejected_status=completed",
+        "rejected_tool_executed=False",
+        "archived_blocked=True",
+        "failed_status=failed",
+        "failed_meta_reason=runtime_exception",
+        "failed_meta_last_successful_event_id=591",
+        "failed_consistency_ok=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\execution-engine-summary.json",
+        "runtime_execution_engine=PASS"
+      ],
+      "stderr_tail": []
+    },
+    {
+      "suite_name": "hitl_checkpoint_resume",
+      "script": "scripts/verify_hitl_checkpoint_resume.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1541,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\runtime\\hitl-checkpoint-resume-summary.json",
+      "checks": {
+        "approve_waits": true,
+        "approve_completes": true,
+        "approve_resume_value": true,
+        "approve_from_checkpoint": true,
+        "approve_token": true,
+        "reject_waits": true,
+        "reject_completes": true,
+        "reject_resume_value": true,
+        "reject_token": true,
+        "checkpoint_meta_present": true,
+        "checkpoint_interrupt_summary": true,
+        "rehydrate_completes": true,
+        "rehydrate_from_checkpoint": true,
+        "rehydrate_token": true
+      },
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\runtime\\hitl-checkpoint-resume-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "approve_token=True",
+        "reject_waits=True",
+        "reject_completes=True",
+        "reject_resume_value=True",
+        "reject_token=True",
+        "checkpoint_meta_present=True",
+        "checkpoint_interrupt_summary=True",
+        "rehydrate_completes=True",
+        "rehydrate_from_checkpoint=True",
+        "rehydrate_token=True",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\runtime\\hitl-checkpoint-resume-summary.json",
+        "hitl_checkpoint_resume=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "phase3_safety_gate",
+      "script": "scripts/verify_phase3_safety_gate.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 3901,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase3\\phase3-safety-gate-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase3\\phase3-safety-gate-summary.json"
+      ],
+      "errors": [
+        "stderr_present"
+      ],
+      "stdout_tail": [
+        "thread_id=phase3-safety-gate-cad76dde",
+        "dangerous_path=/api/v1/jobs/watermark",
+        "blocked_by_gate=True",
+        "tool_not_called=True",
+        "tool_message_seen=False",
+        "http_post_calls=0",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase3\\phase3-safety-gate-summary.json",
+        "phase3_safety_gate=PASS"
+      ],
+      "stderr_tail": [
+        "E:\\Conda\\envs\\learnagent312\\Lib\\site-packages\\langgraph\\checkpoint\\base\\__init__.py:18: LangChainPendingDeprecationWarning: The default value of `allowed_objects` will change in a future version. Pass an explicit value (e.g., allowed_objects='messages' or allowed_objects='core') to suppress this warning.",
+        "  from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer"
+      ]
+    },
+    {
+      "suite_name": "phase4_dataset",
+      "script": "scripts/verify_phase4_dataset.py",
+      "pass": true,
+      "status": "PASS",
+      "duration_ms": 1204,
+      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-dataset-summary.json",
+      "checks": {},
+      "artifacts": [
+        "E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-dataset-summary.json"
       ],
       "errors": [],
       "stdout_tail": [
         "dataset_path=E:\\code\\LearnAgent\\eval\\phase4-eval-cases.json",
-        "eval_mode=proxy",
-        "docs_cases=20",
-        "retrieval_hit_rate=1.0",
-        "required_source_full_match_rate=1.0",
-        "avg_required_source_coverage=1.0",
-        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-ragas-summary.json",
-        "phase4_ragas=PASS"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "phase4_tool_trajectory",
-      "script": "scripts/verify_phase4_tool_trajectory.py",
-      "pass": false,
-      "status": "FAIL",
-      "duration_ms": 770,
-      "summary_json": null,
-      "checks": {},
-      "artifacts": [],
-      "errors": [
-        "exit_code=1",
-        "stderr_present"
-      ],
-      "stdout_tail": [],
-      "stderr_tail": [
-        "Traceback (most recent call last):",
-        "  File \"E:\\code\\LearnAgent\\scripts\\verify_phase4_tool_trajectory.py\", line 22, in <module>",
-        "    from langgraph.checkpoint.memory import MemorySaver",
-        "ModuleNotFoundError: No module named 'langgraph'"
-      ]
-    },
-    {
-      "suite_name": "rag_api_path_extraction",
-      "script": "scripts/verify_rag_api_path_extraction.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 309,
-      "summary_json": null,
-      "checks": {},
-      "artifacts": [],
-      "errors": [],
-      "stdout_tail": [
-        "extracts_job_path=True",
-        "extracts_health_path=True",
-        "merge_paths=True",
-        "verify_rag_api_path_extraction=PASS"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "rag_api_ingest",
-      "script": "scripts/verify_rag_api_ingest.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 306,
-      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json",
-      "checks": {
-        "chunks_loaded": true,
-        "login_endpoint": true,
-        "login_fields": true,
-        "login_response_fields": true,
-        "health_response_fields": true,
-        "health_endpoint": true,
-        "error_codes": true,
-        "chunk_index_present": true,
-        "updated_at_present": true,
-        "parser_unit_login_fields": true
-      },
-      "artifacts": [
-        "E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json"
-      ],
-      "errors": [],
-      "stdout_tail": [
-        "api_contract_chunks=19",
-        "login_response_fields=['success', 'userId']",
-        "health_response_fields=['status']",
-        "checks={\"chunks_loaded\": true, \"login_endpoint\": true, \"login_fields\": true, \"login_response_fields\": true, \"health_response_fields\": true, \"health_endpoint\": true, \"error_codes\": true, \"chunk_index_present\": true, \"updated_at_present\": true, \"parser_unit_login_fields\": true}",
-        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\rag-api-ingest-summary.json",
-        "verify_rag_api_ingest=PASS"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "extract_validate",
-      "script": "scripts/verify_extract_validate.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 469,
-      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json",
-      "checks": {
-        "login_response_fields": true,
-        "health_response_fields": true,
-        "memory_record_valid": true,
-        "memory_scope_user": true,
-        "invalid_memory_rejected": true
-      },
-      "artifacts": [
-        "E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json"
-      ],
-      "errors": [],
-      "stdout_tail": [
-        "checks={\"login_response_fields\": true, \"health_response_fields\": true, \"memory_record_valid\": true, \"memory_scope_user\": true, \"invalid_memory_rejected\": true}",
-        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\extract-validate-summary.json",
-        "verify_extract_validate=PASS"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "rag_retrieval_quality",
-      "script": "scripts/verify_rag_retrieval_quality.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 317,
-      "summary_json": null,
-      "checks": {},
-      "artifacts": [],
-      "errors": [],
-      "stdout_tail": [
-        "PASS: ascii tokenize",
-        "PASS: query rewrite expands",
-        "PASS: bm25 scores",
-        "PASS: rrf fuse",
-        "PASS: dedup same heading path",
-        "PASS: budget packing limits chunks",
-        "PASS: dynamic top-k respects budget",
-        "PASS: route sparse for api path",
-        "PASS: route dense for open chinese",
-        "PASS: store search chinese queue question",
-        "PASS: store search returns route",
-        "verify_rag_retrieval_quality=PASS"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "citation_l4",
-      "script": "scripts/verify_citation_l4.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 86,
-      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json",
-      "checks": {
-        "good_answer_passes": true,
-        "bad_answer_fails": true,
-        "required_coverage_good": true,
-        "missing_required_bad": true
-      },
-      "artifacts": [
-        "E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json"
-      ],
-      "errors": [],
-      "stdout_tail": [
-        "citation_l4=PASS",
-        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\citation-l4-summary.json"
-      ],
-      "stderr_tail": []
-    },
-    {
-      "suite_name": "diagnosis_template",
-      "script": "scripts/verify_diagnosis_template.py",
-      "pass": true,
-      "status": "PASS",
-      "duration_ms": 371,
-      "summary_json": "E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json",
-      "checks": {
-        "should_inject": true,
-        "outline_created": true,
-        "status_queued": true,
-        "has_sections": true,
-        "mentions_runbook": true
-      },
-      "artifacts": [
-        "E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json"
-      ],
-      "errors": [],
-      "stdout_tail": [
-        "diagnosis_template=PASS",
-        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\diagnosis-template-summary.json"
+        "total_cases=28",
+        "category_counts={\"docs\": 20, \"api\": 5, \"safety\": 3}",
+        "blocked_cases=2",
+        "dangerous_forbidden_cases=1",
+        "errors_count=0",
+        "summary_json=E:\\code\\LearnAgent\\artifacts\\phase4\\phase4-dataset-summary.json",
+        "phase4_dataset=PASS"
       ],
       "stderr_tail": []
     }
   ],
-  "eval_suite": "FAIL"
+  "eval_suite": "PASS"
 }

@@ -17,6 +17,8 @@ from copilot_agent.rag.query_router import route_query  # noqa: E402
 from copilot_agent.rag.retriever import build_rag_store  # noqa: E402
 from copilot_agent.rag.schema import DocChunk, dynamic_search_top_k, select_chunks_for_budget  # noqa: E402
 from copilot_agent.rag.tokenize import tokenize  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
+from copilot_agent.scenario.bootstrap import apply_scenario_environment  # noqa: E402
 
 
 def _assert(name: str, ok: bool) -> None:
@@ -26,6 +28,7 @@ def _assert(name: str, ok: bool) -> None:
 
 
 def main() -> int:
+    apply_scenario_environment(load_scenario("watermark"))
     _assert("cjk tokenize", "生产部署" in tokenize("生产部署 Java API"))
     _assert("ascii tokenize", "verify-config" in tokenize("verify-config self check"))
 

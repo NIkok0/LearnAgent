@@ -54,14 +54,14 @@ class ToolResultModel(BaseModel):
         return out
 
     @classmethod
-    def from_http_legacy(
+    def from_http_result(
         cls,
         raw: dict[str, Any],
         *,
         duration_ms: int | None = None,
         sanitized_args: dict[str, Any] | None = None,
     ) -> ToolResultModel:
-        """Map WatermarkHttpTools {ok, status_code, body, ...} to contract."""
+        """Map ScenarioHttpClient {ok, status_code, body, ...} to contract."""
         sanitized = sanitize_tool_payload(raw)
         if not isinstance(sanitized, dict):
             sanitized = {"value": sanitized}
@@ -125,6 +125,53 @@ class ToolResultModel(BaseModel):
         )
 
     @classmethod
+    def from_mcp(
+        cls,
+        raw: dict[str, Any],
+        *,
+        server: str,
+        tool: str,
+        duration_ms: int | None = None,
+        sanitized_args: dict[str, Any] | None = None,
+    ) -> ToolResultModel:
+        """Unified MCP tool result entry (mock, stdio, SSE)."""
+        sanitized = sanitize_tool_payload(raw)
+        if not isinstance(sanitized, dict):
+            sanitized = {"value": sanitized}
+        success = bool(raw.get("success", True)) and not raw.get("error")
+        error = str(raw.get("error")) if raw.get("error") else None
+
+        data: dict[str, Any] = {}
+        for key in ("content", "text", "structured", "echo", "tool", "arguments"):
+            value = sanitized.get(key)
+            if value is not None:
+                data[key] = value
+        structured = sanitized.get("structured")
+        if isinstance(structured, dict):
+            for key, value in structured.items():
+                data.setdefault(key, value)
+        if not data:
+            data = {
+                key: value
+                for key, value in sanitized.items()
+                if key not in {"success", "error", "metadata"}
+            }
+
+        metadata: dict[str, Any] = {"mcp_server": server, "mcp_tool": tool}
+        if isinstance(raw.get("metadata"), dict):
+            metadata.update(raw["metadata"])
+
+        return cls(
+            success=success,
+            data=data or None,
+            error=error if not success else None,
+            duration_ms=duration_ms,
+            sanitized_args=sanitized_args,
+            sanitized_result=dict(sanitized),
+            metadata=metadata,
+        )
+
+    @classmethod
     def from_any(
         cls,
         value: Any,
@@ -134,7 +181,7 @@ class ToolResultModel(BaseModel):
         duration_ms: int | None = None,
         sanitized_args: dict[str, Any] | None = None,
     ) -> ToolResultModel:
-        """Normalize tool output from handlers, legacy dicts, or prior envelopes."""
+        """Normalize tool output from handlers, structured dicts, or prior envelopes."""
         if isinstance(value, cls):
             updates: dict[str, Any] = {}
             if duration_ms is not None:
@@ -157,7 +204,7 @@ class ToolResultModel(BaseModel):
                 ):
                     model = cls.from_search_docs(value, duration_ms=duration_ms)
                 else:
-                    model = cls.from_http_legacy(value, duration_ms=duration_ms, sanitized_args=sanitized_args)
+                    model = cls.from_http_result(value, duration_ms=duration_ms, sanitized_args=sanitized_args)
                 if error is not None:
                     return model.model_copy(update={"success": False, "error": error})
                 return model

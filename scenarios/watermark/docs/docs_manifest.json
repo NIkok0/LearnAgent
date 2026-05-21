@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "include_glob": "*.md",
+  "load_order": [
+    "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md",
+    "API-CONTRACT.md",
+    "DEPLOY-SERVER.md",
+    "SECURITY-BASELINE.md",
+    "RUNBOOK.md",
+    "OPERATIONS-SLO-SLA.md",
+    "watermark-java-backend-tech-selection.md",
+    "README.md",
+    "README_ALGORITHM.md"
+  ],
+  "doc_types": {
+    "API-CONTRACT.md": "api_contract",
+    "DEPLOY-SERVER.md": "deploy",
+    "SECURITY-BASELINE.md": "security",
+    "RUNBOOK.md": "runbook",
+    "OPERATIONS-SLO-SLA.md": "operations",
+    "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md": "requirements",
+    "watermark-java-backend-tech-selection.md": "tech_selection",
+    "README.md": "overview",
+    "README_ALGORITHM.md": "algorithm"
+  }
+}

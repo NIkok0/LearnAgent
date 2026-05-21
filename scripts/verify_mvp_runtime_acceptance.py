@@ -22,12 +22,22 @@ from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
 from copilot_agent.runtime.execution_engine import ExecutionEngine, GraphInterrupted, ManagedRun  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.audit import (  # noqa: E402
     audit_payload_has_secret,
     build_tool_end_payload,
     build_tool_start_payload,
 )
+
+
+def _watermark_dangerous_path() -> str:
+    scenario = load_scenario("watermark")
+    if scenario.policy.dangerous_paths:
+        return str(scenario.policy.dangerous_paths[0])
+    if scenario.router_rules and scenario.router_rules.dangerous_job_path:
+        return scenario.router_rules.dangerous_job_path
+    raise RuntimeError("watermark scenario must declare a dangerous path")
 
 
 class AcceptanceFakeRunner:
@@ -67,7 +77,7 @@ class AcceptanceFakeRunner:
             payload = {
                 "required": True,
                 "reason": "dangerous_tool",
-                "message": "POST /api/v1/jobs/watermark requires approval.",
+                "message": f"POST {_watermark_dangerous_path()} requires approval.",
             }
             yield self._emit(
                 thread_id,

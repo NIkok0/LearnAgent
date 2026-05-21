@@ -1,7 +1,7 @@
 {
-  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-timeline-callid.sqlite",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
   "completed": {
-    "run_id": "20f08f63-d86a-426a-ae87-78d231b3aaa1",
+    "run_id": "6aed7bb4-152e-49e9-afb8-157fed054992",
     "assistant_output": "hello world",
     "kinds": [
       "lifecycle",
@@ -9,6 +9,7 @@
       "tool_call",
       "retrieval",
       "lifecycle",
+      "checkpoint",
       "checkpoint",
       "assistant_output"
     ],
@@ -20,16 +21,19 @@
     "tool_merged": true,
     "tool_success": true,
     "warnings": [],
-    "checkpoint_message_count": 3
+    "checkpoint_message_count": 3,
+    "debugger_status": "completed",
+    "debugger_tool_total": 1,
+    "debugger_consistency_ok": true
   },
   "missing_tool": {
-    "run_id": "b13e24e5-7dfe-4a82-829e-1734628d56ef",
+    "run_id": "deefbd27-bb80-4223-b87a-398c04adcc90",
     "warnings": [
       "tool_missing_end"
     ]
   },
   "approval": {
-    "run_id": "c9592840-9e43-46b3-b4a8-9a8424b742dc",
+    "run_id": "88e9d9d2-873b-42f5-ac26-c53c87710155",
     "status": "approved",
     "resolved": {
       "approved": true,
@@ -37,17 +41,17 @@
     }
   },
   "memory": {
-    "run_id": "aba0630c-de00-4e5c-aaec-ba4acff72850",
+    "run_id": "303bff42-f03a-4dd2-af3a-d38b4b09c6f8",
     "derived": true,
     "summary_type": "run"
   },
   "cancelled": {
-    "run_id": "c3fbbb33-8e5e-4adc-bb8b-5455255c9ed5",
+    "run_id": "616bc3c6-e81a-4146-841c-f3de802ecb8b",
     "status": "cancelled",
     "warnings": []
   },
   "failed_without_error": {
-    "run_id": "bcc16c9a-6f1c-401f-a4ab-4b01351124bb",
+    "run_id": "f1852c09-349f-4dc1-a86b-42fedde651ae",
     "warnings": [
       "failed_without_error_event"
     ]

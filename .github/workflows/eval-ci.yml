@@ -1,4 +1,4 @@
-name: LearnAgent Eval CI
+name: LearnAgent CI
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       run_full:
-        description: "Run full profile (core + rag)"
+        description: "Run full profile (core + rag + e2e)"
         required: false
         type: boolean
         default: true
@@ -20,7 +20,7 @@ on:
         default: false
 
 concurrency:
-  group: learnagent-eval-${{ github.workflow }}-${{ github.ref }}
+  group: learnagent-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,38 +47,56 @@ jobs:
       - name: Run eval core profile
         run: python scripts/verify_eval_suite.py --profile core
 
+      - name: Run eval rag profile
+        run: python scripts/verify_eval_suite.py --profile rag --summary-json artifacts/eval/eval-rag-summary.json
+
       - name: Build eval job summary
         if: always()
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p = Path("artifacts/eval/eval-suite-summary.json")
-          if not p.exists():
-              print("No eval summary found.")
-              raise SystemExit(0)
-          payload = json.loads(p.read_text(encoding="utf-8"))
+
+          def load(path: Path) -> dict:
+              if not path.is_file():
+                  return {}
+              return json.loads(path.read_text(encoding="utf-8"))
+
+          core = load(Path("artifacts/eval/eval-suite-summary.json"))
+          rag = load(Path("artifacts/eval/eval-rag-summary.json"))
+          overall = bool(core.get("overall_pass", False) and rag.get("overall_pass", False))
           lines = [
-              "## Eval Core Summary",
-              f"- overall_pass: {payload.get('overall_pass')}",
-              f"- suites_total: {payload.get('suites_total')}",
-              f"- suites_failed: {payload.get('suites_failed')}",
-              f"- skipped_suites: {', '.join(payload.get('skipped_suites', [])) or '(none)'}",
-              f"- failed_suites: {', '.join(payload.get('failed_suites', [])) or '(none)'}",
-              f"- failed_scenarios: {', '.join(payload.get('failed_scenarios', [])) or '(none)'}",
-              f"- runtime_contract_breaks: {', '.join(payload.get('runtime_contract_breaks', [])) or '(none)'}",
-              f"- contract_schema_ok: {payload.get('contract_schema_ok')}",
+              "## LearnAgent CI Summary",
+              f"- overall_pass: {overall}",
+              "",
+              "### core",
+              f"- overall_pass: {core.get('overall_pass')}",
+              f"- suites_total: {core.get('suites_total')}",
+              f"- suites_failed: {core.get('suites_failed')}",
+              f"- failed_suites: {', '.join(core.get('failed_suites', [])) or '(none)'}",
+              f"- contract_schema_ok: {core.get('contract_schema_ok')}",
+              "",
+              "### rag",
+              f"- overall_pass: {rag.get('overall_pass')}",
+              f"- suites_total: {rag.get('suites_total')}",
+              f"- suites_failed: {rag.get('suites_failed')}",
+              f"- failed_suites: {', '.join(rag.get('failed_suites', [])) or '(none)'}",
+              f"- skipped_suites: {', '.join(rag.get('skipped_suites', [])) or '(none)'}",
           ]
           summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
           summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          if not overall:
+              raise SystemExit(1)
           PY
 
       - name: Upload eval artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: eval-core-artifacts
-          path: artifacts/eval/eval-suite-summary.json
+          name: eval-pr-artifacts
+          path: |
+            artifacts/eval/eval-suite-summary.json
+            artifacts/eval/eval-rag-summary.json
           if-no-files-found: warn
 
   eval_full_nightly:

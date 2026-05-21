@@ -4,7 +4,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from copilot_agent.rag.ingest import DOC_FILENAMES, load_chunks, repo_docs_dir
+from copilot_agent.rag.docs_manifest import load_docs_manifest
+from copilot_agent.rag.ingest import load_chunks, repo_docs_dir
 from copilot_agent.rag.manifest import (
     ManifestDelta,
     RagManifest,
@@ -103,6 +104,10 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
     if docs_dir is None:
         return VectorSyncResult(index=None, delta=empty_delta, skipped=True)
 
+    manifest_filenames = load_docs_manifest(docs_dir).filenames(docs_dir=docs_dir)
+    client = chromadb.PersistentClient(path=str(chroma_dir()))
+    collection = client.get_or_create_collection("wm_docs")
+
     manifest = load_manifest()
     if manifest.embedding_model != settings.rag_embedding_model:
         log.info(
@@ -115,17 +120,10 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
             collection = client.get_or_create_collection("wm_docs")
         manifest = RagManifest.empty()
 
-    if not manifest.files and collection.count() > 0 and not settings.rag_rebuild_index:
-        log.info("Migrating legacy Chroma index to rag_manifest incremental layout")
-        client.delete_collection("wm_docs")
-        collection = client.get_or_create_collection("wm_docs")
-
     delta = compute_delta(manifest, docs_dir=docs_dir)
     if settings.rag_rebuild_index:
-        delta = ManifestDelta(changed=tuple(DOC_FILENAMES), removed=tuple(manifest.files.keys()))
+        delta = ManifestDelta(changed=manifest_filenames, removed=tuple(manifest.files.keys()))
 
-    client = chromadb.PersistentClient(path=str(chroma_dir()))
-    collection = client.get_or_create_collection("wm_docs")
     embed_model = _get_embed_model()
 
     if (
@@ -147,7 +145,7 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
         client.delete_collection("wm_docs")
         collection = client.get_or_create_collection("wm_docs")
         manifest = RagManifest.empty()
-        delta = ManifestDelta(changed=tuple(DOC_FILENAMES), removed=tuple())
+        delta = ManifestDelta(changed=manifest_filenames, removed=tuple())
 
     delete_ids: list[str] = []
     for source in delta.removed:
@@ -188,5 +186,5 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
 
 
 def build_vector_index(chunks: list[DocChunk]) -> Any | None:
-    """Backward-compatible entry: incremental sync when possible."""
+    """Build or load the current manifest-based vector index."""
     return sync_vector_index(chunks).index

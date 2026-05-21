@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    watermark_api_base_url: str = "http://127.0.0.1:8080"
+    default_api_base_url: str = ""
     openai_api_key: str = ""
     openai_base_url: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     copilot_port: int = 8090
 
     copilot_allow_job_post: bool = False
-    """When false, http_post to /api/v1/jobs/watermark is rejected regardless of user text."""
+    """When false, http_post to scenario dangerous_paths is rejected regardless of user text."""
 
     conversation_cookie_ttl_seconds: int = 86400
 
@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     rag_rerank_candidates: int = 50
     rag_rerank_max_chars: int = 512
     rag_context_budget_chars: int = 14000
+    private_rag_require_citations: bool = True
+    private_rag_output_guard_enabled: bool = True
+    private_rag_output_guard_block: bool = True
+    context_preretrieval_enabled: bool = True
+    context_preretrieval_budget_chars: int = 3500
+    context_packing_enabled: bool = True
+    context_checkpoint_pack_enabled: bool = True
+    context_preretrieval_dedupe_enabled: bool = True
+    context_emit_built_event: bool = True
 
     agent_tool_route_enabled: bool = True
     agent_tool_route_enforce: bool = True
@@ -128,8 +137,20 @@ class Settings(BaseSettings):
     memory_llm_confirm_threshold: float = 0.7
     memory_emit_checkpoint_compacted: bool = True
 
+    scenario: str = "minimal"
+    scenarios_root: str = ""
+    config_root: str = ""
+    copilot_capabilities: str = "rag,http,mcp"
+    """Deployment capability switches (comma-separated). Scenario policy only tightens allowlist."""
+
     # HuggingFace model cache root (hub/ lives under this directory).
     hf_home: str = r"F:\model"
+
+    def enabled_capabilities(self) -> tuple[str, ...]:
+        raw = (self.copilot_capabilities or "").strip()
+        if not raw or raw.lower() in {"none", "null", "off"}:
+            return ()
+        return tuple(part.strip().lower() for part in raw.split(",") if part.strip())
 
     @property
     def langfuse_configured(self) -> bool:

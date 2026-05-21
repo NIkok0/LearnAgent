@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copilot_agent.contracts.events.payloads import RetrievalCompletedPayload, RetrievalSourceItem
+from copilot_agent.contracts.retrieval import RetrievalResult
 from copilot_agent.rag.schema import DocChunk
 
 
@@ -22,6 +23,8 @@ def build_retrieval_completed_payload(
     error: str | None = None,
     retrieval_mode: str | None = None,
     retrieval_route: dict[str, object] | None = None,
+    policy_result: RetrievalResult | None = None,
+    context_guard: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Payload for ``retrieval_completed`` EventStore / Timeline rows."""
     sources = []
@@ -50,6 +53,7 @@ def build_retrieval_completed_payload(
                 update={"error_codes": [code.code for code in chunk.error_codes if code.code]}
             )
         sources.append(item)
+    policy_payload = policy_result.audit_payload() if policy_result is not None else {}
     payload = RetrievalCompletedPayload(
         query=query,
         sources=sources,
@@ -60,5 +64,7 @@ def build_retrieval_completed_payload(
         error=error,
         retrieval_mode=retrieval_mode,
         retrieval_route=retrieval_route,
+        **policy_payload,
+        context_guard=dict(context_guard or {}),
     )
     return payload.model_dump(exclude_none=True)

@@ -1,0 +1,213 @@
+version: 1
+dangerous_job_path: /api/v1/jobs/watermark
+
+empty_query:
+  kind: knowledge
+  recommended_tools:
+    - search_docs
+  forbidden_tools: []
+  rationale: Empty query; default to documentation search if needed.
+
+defaults:
+  kind: knowledge
+  recommended_tools:
+    - search_docs
+  forbidden_tools:
+    - http_get
+    - http_post
+  rationale: Static platform documentation question; use search_docs only.
+
+predicates:
+  wants_job_enqueue:
+    any:
+      - match: 创建水印任务
+      - match: 提交水印
+      - match: 为\s*fileId\s*=
+      - all:
+          - match: POST\s+/api/v1/jobs/watermark
+          - any:
+              - match: 提交
+              - match: 创建
+              - match: confirm
+              - match: fileId
+              - match: test
+          - not:
+              any:
+                - match: 默认
+                - match: 字段
+                - match: 需要哪些
+                - match: 契约
+                - match: 返回什么
+
+  is_api_contract_question:
+    all:
+      - any:
+          - match: /api/
+          - match: GET\s+
+          - match: POST\s+
+          - match: /actuator/
+          - match: "401"
+          - match: UNAUTHORIZED
+      - any:
+          - match: 需要哪些.*字段
+          - match: 返回什么
+          - match: 表示什么
+          - match: 默认
+          - match: Error Model
+          - match: 契约
+
+rules:
+  - id: safety_external_url
+    kind: safety_reject
+    when:
+      any:
+        - match: https?://evil
+        - match: evil\.example
+        - match: 非白名单\s*URL
+        - match: external_url
+    forbidden_tools:
+      - search_docs
+      - http_get
+      - http_post
+    rationale: Non-whitelisted external URL requests must be refused.
+
+  - id: safety_job_post_blocked
+    kind: safety_reject
+    when:
+      all:
+        - predicate: wants_job_enqueue
+        - not:
+            all:
+              - confirm_dangerous: true
+              - allow_job_post: true
+        - any:
+            - match: 没有确认
+            - match: 没有开启环境变量
+            - match: 直接\s*POST
+    forbidden_tools:
+      - http_post
+    rationale: "Dangerous POST blocked: missing confirm_dangerous or COPILOT_ALLOW_JOB_POST."
+
+  - id: dangerous_execute
+    kind: dangerous_execute
+    when:
+      all:
+        - predicate: wants_job_enqueue
+        - confirm_dangerous: true
+        - allow_job_post: true
+    recommended_tools:
+      - search_docs
+      - http_post
+    suggested_paths:
+      - "{dangerous_job_path}"
+    rationale: "High-risk job enqueue: read docs first, then POST with approval."
+
+  - id: api_contract_knowledge
+    kind: knowledge
+    when:
+      any:
+        - predicate: is_api_contract_question
+        - match: 白名单
+        - match: 是否允许
+        - match: 允许\s+GET
+    recommended_tools:
+      - search_docs
+    forbidden_tools:
+      - http_get
+      - http_post
+    rationale: Policy or API contract question; cite platform docs via search_docs.
+
+  - id: troubleshooting
+    kind: troubleshooting
+    when:
+      any:
+        - match: QUEUED|PROCESSING|FAILED
+        - match: 排查
+        - match: 卡住|不动
+        - match: 怎么办
+        - match: 为什么.*失败
+        - match: errorCode
+        - match: 一直\s*(QUEUED|PROCESSING)
+    recommended_tools:
+      - search_docs
+      - http_get
+    forbidden_tools:
+      - http_post
+    paths:
+      prepend_if_uuid:
+        - /api/v1/jobs/{uuid}
+      static:
+        - /actuator/health
+        - /api/v1/jobs/
+    rationale: Runbook/deploy docs first, then check live task or platform status.
+
+  - id: live_status
+    kind: live_status
+    when:
+      any:
+        - has_uuid: true
+        - match: 是否存活
+        - match: actuator/health
+        - match: /actuator/health
+        - match: 健康检查
+        - match: 统计
+        - match: dashboard
+        - match: 文件列表
+        - match: 当前文件
+        - match: 能查吗
+        - match: 管理员接口
+        - match: admin/
+        - match: /api/v1/admin/
+        - match: /api/v1/files
+        - match: /api/v1/stats/
+        - match: 登录用户.*任务.*状态
+        - match: 查询.*任务.*状态
+    recommended:
+      default:
+        - http_get
+      overrides:
+        - if_any:
+            - 未登录
+            - 先引导登录
+            - 登录
+          tools:
+            - http_post
+            - http_get
+    paths:
+      prepend:
+        - if_any:
+            - 未登录
+            - 先引导登录
+            - 登录
+          paths:
+            - /api/v1/auth/login
+      prepend_if_uuid:
+        - /api/v1/jobs/{uuid}
+      dynamic:
+        - if_any:
+            - 存活
+            - health
+            - 健康
+          paths:
+            - /actuator/health
+        - if_any:
+            - 统计
+            - dashboard
+            - 匿名
+          paths:
+            - /api/v1/stats/dashboard
+        - if_any:
+            - 文件列表
+            - 当前文件
+            - 能查吗
+          paths:
+            - /api/v1/files
+        - if_any:
+            - 管理员
+            - admin
+            - 权限管理
+          paths:
+            - /api/v1/admin/stats
+            - /api/v1/admin/users
+            - /api/v1/admin/groups
+    rationale: Question needs live Java API data, not documentation alone.

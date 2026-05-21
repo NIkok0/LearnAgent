@@ -1,0 +1,18 @@
+servers:
+  - name: demo
+    transport: mock
+    enabled: true
+    tools:
+      - name: echo
+        description: Echo text through mock MCP server
+        input_schema:
+          type: object
+          properties:
+            text:
+              type: string
+              description: Text to echo
+          required:
+            - text
+        risk_level: low
+        requires_approval: false
+        timeout_seconds: 30.0

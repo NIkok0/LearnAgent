@@ -2,41 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from copilot_agent.rag.docs_resolver import resolve_docs_source
 from copilot_agent.rag.api_parse import parse_api_section
 from copilot_agent.rag.ingest_source import FileIngestSource, IngestSource
 from copilot_agent.rag.schema import DocChunk
 
 log = logging.getLogger(__name__)
-
-# Legacy constants kept for tests and backward-compatible imports.
-DOC_FILENAMES = (
-    "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md",
-    "API-CONTRACT.md",
-    "DEPLOY-SERVER.md",
-    "SECURITY-BASELINE.md",
-    "RUNBOOK.md",
-    "OPERATIONS-SLO-SLA.md",
-    "watermark-java-backend-tech-selection.md",
-    "README.md",
-    "README_ALGORITHM.md",
-)
-
-DOC_TYPE_BY_FILE: dict[str, str] = {
-    "API-CONTRACT.md": "api_contract",
-    "DEPLOY-SERVER.md": "deploy",
-    "SECURITY-BASELINE.md": "security",
-    "RUNBOOK.md": "runbook",
-    "OPERATIONS-SLO-SLA.md": "operations",
-    "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md": "requirements",
-    "watermark-java-backend-tech-selection.md": "tech_selection",
-    "README.md": "overview",
-    "README_ALGORITHM.md": "algorithm",
-}
 
 
 @dataclass(frozen=True)
@@ -53,21 +28,8 @@ def resolve_ingest_source(base: Path | None = None) -> FileIngestSource:
 
 
 def repo_docs_dir() -> Path | None:
-    """Locate project docs from env, local sample docs, or a parent `backend-java/docs`."""
-    env = os.environ.get("WATERMARK_DOCS_PATH", "").strip()
-    if env:
-        p = Path(env)
-        return p if p.is_dir() else None
-    here = Path(__file__).resolve()
-    for base in here.parents:
-        cand = base / "docs" / "source"
-        if cand.is_dir():
-            return cand
-    for base in here.parents:
-        cand = base / "backend-java" / "docs"
-        if cand.is_dir():
-            return cand
-    return None
+    """Compatibility wrapper for the Scenario-bound docs resolver."""
+    return resolve_docs_source().docs_dir
 
 
 def _heading_level(line: str) -> int:
@@ -150,11 +112,15 @@ def _append_chunk(
     chunk_index: int,
     updated_at: str,
     api_meta=None,
+    security_meta: dict[str, object] | None = None,
 ) -> None:
     endpoint = api_meta.api_endpoint if api_meta is not None else None
     request_fields = list(api_meta.request_fields) if api_meta is not None else []
     response_fields = list(api_meta.response_fields) if api_meta is not None else []
     error_codes = list(api_meta.error_codes) if api_meta is not None else []
+    security = security_meta or {}
+    acl_raw = security.get("acl") or []
+    acl = [str(item) for item in acl_raw] if isinstance(acl_raw, list) else []
     chunks.append(
         DocChunk(
             source=source,
@@ -169,6 +135,13 @@ def _append_chunk(
             request_fields=request_fields,
             response_fields=response_fields,
             error_codes=error_codes,
+            tenant_id=str(security.get("tenant_id") or "default"),
+            doc_id=str(security.get("doc_id") or source),
+            acl=acl,
+            classification=str(security.get("classification") or "internal"),
+            pii_level=str(security.get("pii_level") or "none"),
+            source_hash=str(security.get("source_hash") or ""),
+            retention_policy=str(security.get("retention_policy") or "default"),
         )
     )
 
@@ -180,6 +153,7 @@ def _load_file_chunks(
     max_chunk_chars: int,
     overlap: int,
     doc_type: str,
+    security_meta: dict[str, object] | None = None,
 ) -> list[DocChunk]:
     path = base / name
     if not path.is_file():
@@ -204,6 +178,7 @@ def _load_file_chunks(
                 chunk_index=chunk_index,
                 updated_at=updated_at,
                 api_meta=api_meta,
+                security_meta=security_meta,
             )
             chunk_index += 1
         else:
@@ -223,6 +198,7 @@ def _load_file_chunks(
                     chunk_index=chunk_index,
                     updated_at=updated_at,
                     api_meta=api_meta,
+                    security_meta=security_meta,
                 )
                 chunk_index += 1
                 pos += step
@@ -241,7 +217,7 @@ def load_chunks(
     chunks: list[DocChunk] = []
     if base is None:
         log.warning(
-            "project docs not found (set WATERMARK_DOCS_PATH or add Markdown files under docs/source). RAG disabled."
+            "project docs not found (set COPILOT_DOCS_PATH or add Markdown under scenarios/*/docs). RAG disabled."
         )
         return chunks
     manifest = source.manifest()
@@ -251,6 +227,7 @@ def load_chunks(
         if name not in allowed:
             continue
         doc_type = manifest.doc_type_for(name)
+        security_meta = manifest.security_for(name)
         chunks.extend(
             _load_file_chunks(
                 base,
@@ -258,6 +235,7 @@ def load_chunks(
                 max_chunk_chars=max_chunk_chars,
                 overlap=overlap,
                 doc_type=doc_type,
+                security_meta=security_meta,
             )
         )
     return chunks

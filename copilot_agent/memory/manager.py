@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from copilot_agent.contracts.retrieval import RetrievalRequest
 from copilot_agent.memory.policy import (
     EpisodicInjectBundle,
     MemoryPolicyConfig,
@@ -87,6 +88,9 @@ class MemoryManager:
 
     def search_docs_detailed(self, query: str, top_k: int = 8):
         return self._rag.search_detailed(query, top_k=top_k)
+
+    def policy_aware_search_docs(self, request: RetrievalRequest, top_k: int = 8):
+        return self._rag.policy_aware_search(request, top_k=top_k)
 
     def reload_rag_store(self, rag_store: RagStore) -> None:
         """Swap the in-process RAG store (hot reload)."""

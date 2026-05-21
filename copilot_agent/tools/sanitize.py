@@ -4,6 +4,8 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
+from copilot_agent.scenario.runtime_bindings import SESSION_COOKIE_NAME
+
 SENSITIVE_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -74,3 +76,16 @@ def audit_payload_has_secret(value: Any) -> bool:
         lower = value.lower()
         return "wmsessionid=" in lower or "set-cookie:" in lower
     return False
+
+
+def redact_cookie_header(value: str | None, *, cookie_name: str | None = None) -> str:
+    """Return a non-secret display label for cookie-bearing logs and audits."""
+
+    if not value:
+        return ""
+    lower = value.lower()
+    configured_name = (cookie_name or SESSION_COOKIE_NAME or "wmsessionid").strip()
+    configured_lower = configured_name.lower()
+    if configured_lower and f"{configured_lower}=" in lower:
+        return f"Cookie:<{configured_name.upper()}=***REDACTED***>"
+    return "Cookie:<REDACTED>"

@@ -5,7 +5,8 @@ import threading
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from copilot_agent.rag.ingest import docs_source_fingerprint, load_chunks, repo_docs_dir
+from copilot_agent.rag.docs_resolver import resolve_docs_source
+from copilot_agent.rag.ingest import docs_source_fingerprint, load_chunks
 from copilot_agent.rag.retriever import RagStore, build_rag_store, sync_rag_store_vectors
 from copilot_agent.settings import settings
 
@@ -125,7 +126,8 @@ class RagStoreManager:
         return True
 
     def status(self) -> dict[str, Any]:
-        base = repo_docs_dir()
+        docs_source = resolve_docs_source()
+        base = docs_source.docs_dir
         with self._vector_lock:
             vector_status = self._vector_status
             vector_sync = dict(self._last_vector_sync)
@@ -135,6 +137,7 @@ class RagStoreManager:
 
         return {
             "docs_dir": str(base) if base is not None else None,
+            "docs_source": docs_source.as_dict(),
             "chunk_count": len(self._store.chunks),
             "vector_enabled": self._store.vector_enabled,
             "vector_index_status": vector_status,

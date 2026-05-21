@@ -14,9 +14,12 @@ if str(ROOT) not in sys.path:
 from langchain_core.messages import ToolMessage  # noqa: E402
 
 from copilot_agent.agent.diagnosis import build_diagnosis_outline, should_inject_diagnosis  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
+from copilot_agent.scenario.bootstrap import apply_scenario_environment  # noqa: E402
 
 
 def main() -> int:
+    apply_scenario_environment(load_scenario("watermark"))
     messages = [
         ToolMessage(
             content='{"success": true, "data": {"sources": ["RUNBOOK.md"], "suggested_api_paths": []}}',

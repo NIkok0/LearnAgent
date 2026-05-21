@@ -4,8 +4,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from copilot_agent.conversation_store import redact_cookie_header
 from copilot_agent.settings import settings
+from copilot_agent.tools.sanitize import redact_cookie_header
 
 log = logging.getLogger(__name__)
 

@@ -1,0 +1,55 @@
+{
+  "suite_name": "policy_docs_contract",
+  "status": "PASS",
+  "checks": {
+    "docs_resolved": true,
+    "docs_scenario_name": true,
+    "docs_source_kind": true,
+    "docs_manifest_present": true,
+    "policy_decision_ask": true,
+    "policy_requires_approval": true,
+    "policy_source": true,
+    "policy_tool_name": true,
+    "policy_call_id": true,
+    "policy_metadata_path": true,
+    "policy_unknown_denied": true
+  },
+  "docs_source": {
+    "docs_dir": "E:\\code\\LearnAgent\\scenarios\\watermark\\docs",
+    "manifest_path": "E:\\code\\LearnAgent\\scenarios\\watermark\\docs\\docs_manifest.json",
+    "scenario_name": "watermark",
+    "source_kind": "scenario",
+    "override_env": "",
+    "available": true
+  },
+  "policy_decision": {
+    "allowed": true,
+    "requires_approval": true,
+    "decision": "ask",
+    "message": "POST /api/v1/jobs/watermark is gated by scenario policy. Approve this run to continue.",
+    "reason": "dangerous_tool_requires_approval",
+    "tool_name": "http_post",
+    "call_id": "call_policy_docs_1",
+    "policy_source": "scenario_approval_policy",
+    "credential_audits": [
+      {
+        "action": "scope_allowed",
+        "binding_id": "wmsession",
+        "provider": "watermark_java_api",
+        "credential_type": "cookie",
+        "granted_scopes": [
+          "http:read",
+          "http:write"
+        ],
+        "required_scopes": [
+          "http:write"
+        ],
+        "tool_name": "http_post",
+        "reason": "credential_scope_allowed"
+      }
+    ],
+    "metadata": {
+      "path": "/api/v1/jobs/watermark"
+    }
+  }
+}

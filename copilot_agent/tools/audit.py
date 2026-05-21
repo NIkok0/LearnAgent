@@ -45,6 +45,9 @@ def build_tool_start_payload(
     risk_level: str,
     requires_approval: bool,
     arguments: Any,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     sanitized_arguments = sanitize_tool_payload(arguments)
     payload = ToolStartPayload(
@@ -55,6 +58,9 @@ def build_tool_start_payload(
         requires_approval=requires_approval,
         arguments=sanitized_arguments if isinstance(sanitized_arguments, dict) else {},
         sanitized_args=sanitized_arguments if isinstance(sanitized_arguments, dict) else None,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        idempotency_key=idempotency_key,
     )
     return payload.model_dump(exclude_none=True)
 
@@ -68,6 +74,9 @@ def build_tool_end_payload(
     success: bool = True,
     error: str | None = None,
     sanitized_args: dict[str, Any] | None = None,
+    retry_count: int | None = None,
+    timeout_seconds: float | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     tool_result = normalize_tool_result(
         result,
@@ -85,6 +94,9 @@ def build_tool_end_payload(
         success=tool_result.success,
         error=tool_result.error,
         sanitized_result=tool_result.sanitized_result,
+        retry_count=retry_count,
+        timeout_seconds=timeout_seconds,
+        idempotency_key=idempotency_key,
     )
     out = payload.model_dump(exclude_none=True)
     # Keep full audit key set in nested result (exclude_none would drop error=None).

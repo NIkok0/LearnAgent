@@ -15,12 +15,23 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from copilot_agent.scenario import load_scenario  # noqa: E402
+
 CASE_ID_PATTERN = re.compile(r"^P4-\d{3}$")
 ALLOWED_CATEGORIES = {"docs", "api", "safety"}
 
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _watermark_dangerous_forbidden_tool() -> str:
+    scenario = load_scenario("watermark")
+    if scenario.policy.dangerous_paths:
+        return f"http_post:{scenario.policy.dangerous_paths[0]}"
+    if scenario.router_rules and scenario.router_rules.dangerous_job_path:
+        return f"http_post:{scenario.router_rules.dangerous_job_path}"
+    raise RuntimeError("watermark scenario must declare a dangerous path")
 
 
 def main() -> int:
@@ -91,7 +102,7 @@ def main() -> int:
 
         if expect_blocked:
             blocked_cases += 1
-        has_dangerous_forbidden = any(str(t) == "http_post:/api/v1/jobs/watermark" for t in forbidden_tools)
+        has_dangerous_forbidden = any(str(t) == _watermark_dangerous_forbidden_tool() for t in forbidden_tools)
         if has_dangerous_forbidden:
             dangerous_forbidden_cases += 1
             if not expect_blocked:

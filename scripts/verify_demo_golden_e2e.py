@@ -26,9 +26,11 @@ from langgraph.prebuilt import ToolNode
 from copilot_agent.agent.graph import route_after_assistant, route_after_safety_gate  # noqa: E402
 from copilot_agent.agent.state import AgentState  # noqa: E402
 from copilot_agent.agent.nodes import AgentNodes  # noqa: E402
-from copilot_agent.agent.prompts import DANGEROUS_JOB_PATH, SYSTEM_PROMPT  # noqa: E402
+from copilot_agent.context import ContextManager  # noqa: E402
+from copilot_agent.scenario import load_scenario  # noqa: E402
+from copilot_agent.agent.prompts import DEFAULT_KERNEL_PROMPT  # noqa: E402
 from copilot_agent.agent.tool_call_context import set_tool_call_context  # noqa: E402
-from copilot_agent.agent.tool_router import route_tools  # noqa: E402
+from copilot_agent.credentials import CredentialManager  # noqa: E402
 from copilot_agent.eval.citation import evaluate_citation  # noqa: E402
 from copilot_agent.eval.tool_trajectory import evaluate_trajectory  # noqa: E402
 from copilot_agent.llm import LLMProvider  # noqa: E402
@@ -37,6 +39,7 @@ from copilot_agent.policy import PolicyRegistry  # noqa: E402
 from copilot_agent.rag.retriever import RagStore  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.scenario.router import route_tools  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
 
@@ -73,6 +76,15 @@ def _last_search_paths(executed: list[dict[str, Any]]) -> list[str]:
     return []
 
 
+def _watermark_dangerous_path() -> str:
+    scenario = load_scenario("watermark")
+    if scenario.policy.dangerous_paths:
+        return str(scenario.policy.dangerous_paths[0])
+    if scenario.router_rules and scenario.router_rules.dangerous_job_path:
+        return scenario.router_rules.dangerous_job_path
+    raise RuntimeError("watermark scenario must declare a dangerous path")
+
+
 def _default_tool_args(
     tool_name: str,
     *,
@@ -88,8 +100,9 @@ def _default_tool_args(
         path = (search_paths or paths or ["/actuator/health"])[0]
         return {"path": path}
     if tool_name == "http_post":
-        path = paths[0] if paths else DANGEROUS_JOB_PATH
-        if path == DANGEROUS_JOB_PATH:
+        dangerous_path = _watermark_dangerous_path()
+        path = paths[0] if paths else dangerous_path
+        if path == dangerous_path:
             return {"path": path, "json_body": {"fileId": 1, "watermarkText": "test"}}
         return {"path": path, "json_body": {"username": "demo", "password": "demo"}}
     return {}
@@ -193,7 +206,7 @@ def _build_tool_registry(*, executed_counter: dict[str, int], question: str) -> 
         search_docs_args_schema=SearchDocsArgs,
         http_get_args_schema=HttpGetArgs,
         http_post_args_schema=HttpPostArgs,
-        dangerous_post_requires_approval=lambda args: str(args.get("path", "")).split("?", 1)[0] == DANGEROUS_JOB_PATH,
+        dangerous_post_requires_approval=lambda args: str(args.get("path", "")).split("?", 1)[0] == _watermark_dangerous_path(),
     )
 
 
@@ -233,7 +246,12 @@ async def _run_case(case: dict[str, Any], *, nodes: AgentNodes, registry: ToolRe
     required_sources = [str(x) for x in case.get("required_sources") or []]
     answer_must_contain = [str(x) for x in case.get("answer_must_contain") or []]
 
-    route = route_tools(question, confirm_dangerous=confirm_dangerous, allow_job_post=allow_job_post)
+    route = route_tools(
+        question,
+        engine=load_scenario("watermark").router_engine,
+        confirm_dangerous=confirm_dangerous,
+        allow_job_post=allow_job_post,
+    )
     executed: list[dict[str, Any]] = []
     graph = _build_graph(
         nodes.planner,
@@ -245,7 +263,7 @@ async def _run_case(case: dict[str, Any], *, nodes: AgentNodes, registry: ToolRe
     thread_id = f"demo-{case_id}-{uuid.uuid4().hex[:6]}"
     run_id = f"run-{case_id}"
     final_state = await graph.ainvoke(
-        {"messages": [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=question)]},
+        {"messages": [SystemMessage(content=DEFAULT_KERNEL_PROMPT), HumanMessage(content=question)]},
         config={
             "recursion_limit": 24,
             "configurable": {
@@ -333,12 +351,24 @@ async def _main_async() -> int:
     for case in cases:
         question = str((case.get("input") or {}).get("messages", [{}])[-1].get("content", ""))
         registry = _build_tool_registry(executed_counter={}, question=question)
+        scenario = load_scenario("watermark")
+        credentials = CredentialManager.from_scenario_resources(scenario.resources, ttl_seconds=120)
+        context_manager = ContextManager(
+            scenario=scenario,
+            memory=memory,
+            tool_registry=registry,
+        )
         nodes = AgentNodes(
             memory=memory,
             llm_provider=LLMProvider(),
-            policy=PolicyRegistry(registry),
+            policy=PolicyRegistry(
+                registry,
+                scenario_policy=scenario.policy,
+                credential_manager=credentials,
+            ),
             tool_registry=registry,
             tools=registry.tools(),
+            context_manager=context_manager,
         )
         records.append(await _run_case(case, nodes=nodes, registry=registry))
 

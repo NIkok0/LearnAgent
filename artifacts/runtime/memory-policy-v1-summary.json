@@ -1,31 +1,31 @@
 {
-  "recall_thread": "policy-recall-34ef06e6",
+  "recall_thread": "policy-recall-f9aca864",
   "run_ids": {
-    "run1": "59369e3c-f7d4-423b-9c9c-cf21fb0ce061",
-    "run2": "c3d216f3-bf11-4962-88bc-cec7569f9d97"
+    "run1": "7a01698f-3094-4611-832c-3d2fe5828375",
+    "run2": "560242dc-1a30-40cb-b005-d8c68dc54e24"
   },
   "recalled_runs": [
     {
-      "run_id": "59369e3c-f7d4-423b-9c9c-cf21fb0ce061",
+      "run_id": "7a01698f-3094-4611-832c-3d2fe5828375",
       "score": 0.75,
       "goal": "check redis stream status",
       "outcome": "completed",
       "snippet": "Redis stream status should be checked with docs.",
-      "source_event_id": 3702
+      "source_event_id": 3742
     }
   ],
   "dropped_conflicts": [
     {
-      "run_id": "da7f1687-3c2e-4ca9-879f-97ec46532c7e",
+      "run_id": "76864f3c-7fa5-43a4-8f0e-a5248a1e7ad4",
       "score": 0.25,
       "goal": "build mobile app in Swift",
       "outcome": "completed",
       "snippet": "Swift mobile app",
-      "source_event_id": 3712,
+      "source_event_id": 3752,
       "reason": "goal_conflict"
     }
   ],
-  "budget_used_chars": 270,
+  "budget_used_chars": 400,
   "failed_summary_goals": [
     "ok run goal"
   ],

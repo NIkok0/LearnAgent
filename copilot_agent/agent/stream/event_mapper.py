@@ -18,20 +18,19 @@ from copilot_agent.agent.message_utils import (
 )
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.memory import MemoryManager
+from copilot_agent.rag.context_guard import detect_sensitive_output
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader
-from copilot_agent.runtime.event_schema import EVENT_RUN_COMPLETED_META
+from copilot_agent.runtime.event_schema import EVENT_OUTPUT_GUARD_CHECKED, EVENT_RUN_COMPLETED_META
 from copilot_agent.runtime.execution_engine import GraphInterrupted
+from copilot_agent.settings import settings
 from copilot_agent.tools.audit import build_tool_end_payload, build_tool_start_payload
 from copilot_agent.tools.registry import ToolRegistry
-
-# Backward-compatible alias (Phase 2).
-DomainEvent = RuntimeEvent
-
 
 @dataclass
 class _ToolTracker:
     started_at: dict[str, float] = field(default_factory=dict)
     start_names: dict[str, str] = field(default_factory=dict)
+    start_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
     end_emitted: set[str] = field(default_factory=set)
 
 
@@ -92,7 +91,10 @@ class GraphEventMapper:
                 text = extract_text_from_chunk(chunk)
                 if text:
                     last_assistant_output += text
-                    yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
+                    if settings.private_rag_output_guard_enabled:
+                        pass
+                    else:
+                        yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             if kind == "on_chat_model_end":
@@ -109,7 +111,10 @@ class GraphEventMapper:
                 text = extract_text_from_chat_output(output)
                 if text and text not in last_assistant_output:
                     last_assistant_output += text
-                    yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
+                    if settings.private_rag_output_guard_enabled:
+                        pass
+                    else:
+                        yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             blocked_text = extract_blocked_message_text(event)
@@ -124,7 +129,10 @@ class GraphEventMapper:
                     )
                     raise GraphInterrupted(payload)
                 last_assistant_output += blocked_text
-                yield _runtime_event("token", {"text": blocked_text}, thread_id=thread_id, run_id=run_id)
+                if settings.private_rag_output_guard_enabled:
+                    pass
+                else:
+                    yield _runtime_event("token", {"text": blocked_text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             if kind == "on_tool_start":
@@ -141,13 +149,21 @@ class GraphEventMapper:
                     )
                 args = (event.get("data") or {}).get("input", {})
                 spec = self._tool_registry.get_spec(name)
+                metadata = _tool_audit_metadata(spec, args if isinstance(args, dict) else {})
+                if call_id:
+                    tracker.start_meta[call_id] = metadata
                 yield _runtime_event(
                     "tool_start",
                     build_tool_start_payload(
                         name=name,
                         call_id=call_id,
-                        **_tool_audit_metadata(spec, args if isinstance(args, dict) else {}),
+                        category=str(metadata.get("category", "")),
+                        risk_level=str(metadata.get("risk_level", "")),
+                        requires_approval=bool(metadata.get("requires_approval", False)),
                         arguments=args,
+                        timeout_seconds=metadata.get("timeout_seconds"),
+                        max_retries=metadata.get("max_retries"),
+                        idempotency_key=metadata.get("idempotency_key"),
                     ),
                     thread_id=thread_id,
                     run_id=run_id,
@@ -163,6 +179,7 @@ class GraphEventMapper:
                     tracker.end_emitted.add(call_id)
                 result = (event.get("data") or {}).get("output", {})
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
+                metadata = tracker.start_meta.pop(call_id, {}) if call_id else {}
                 yield _runtime_event(
                     "tool_end",
                     build_tool_end_payload(
@@ -170,6 +187,9 @@ class GraphEventMapper:
                         call_id=call_id,
                         result=result,
                         duration_ms=duration_ms,
+                        retry_count=metadata.get("retry_count"),
+                        timeout_seconds=metadata.get("timeout_seconds"),
+                        idempotency_key=metadata.get("idempotency_key"),
                     ),
                     thread_id=thread_id,
                     run_id=run_id,
@@ -183,6 +203,7 @@ class GraphEventMapper:
                 if call_id and not name:
                     name = tracker.start_names.pop(call_id, "")
                 started_at = tracker.started_at.pop(call_id, None) if call_id else None
+                metadata = tracker.start_meta.pop(call_id, {}) if call_id else {}
                 error_value = (event.get("data") or {}).get("error")
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
                 if call_id:
@@ -196,6 +217,9 @@ class GraphEventMapper:
                         duration_ms=duration_ms,
                         success=False,
                         error=str(error_value or "tool execution failed"),
+                        retry_count=metadata.get("retry_count"),
+                        timeout_seconds=metadata.get("timeout_seconds"),
+                        idempotency_key=metadata.get("idempotency_key"),
                     ),
                     thread_id=thread_id,
                     run_id=run_id,
@@ -219,7 +243,17 @@ class GraphEventMapper:
                 run_id=run_id,
             )
 
-        assistant_message = {"content": last_assistant_output}
+        final_output, guard_payload = _apply_output_guard(last_assistant_output)
+        if settings.private_rag_output_guard_enabled:
+            yield _runtime_event(
+                EVENT_OUTPUT_GUARD_CHECKED,
+                guard_payload,
+                thread_id=thread_id,
+                run_id=run_id,
+            )
+            if final_output:
+                yield _runtime_event("token", {"text": final_output}, thread_id=thread_id, run_id=run_id)
+        assistant_message = {"content": final_output}
         if last_reasoning_content:
             assistant_message["reasoning_content"] = last_reasoning_content
         yield _runtime_event(
@@ -274,6 +308,7 @@ class GraphEventMapper:
             name = str(payload.get("name") or tracker.start_names.get(call_id, ""))
             started_at = tracker.started_at.pop(call_id, None)
             duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
+            metadata = tracker.start_meta.pop(call_id, {})
             end_payload = build_tool_end_payload(
                 name=name,
                 call_id=call_id,
@@ -281,6 +316,9 @@ class GraphEventMapper:
                 duration_ms=duration_ms,
                 success=False,
                 error="tool execution did not produce a result event before graph completed",
+                retry_count=metadata.get("retry_count"),
+                timeout_seconds=metadata.get("timeout_seconds"),
+                idempotency_key=metadata.get("idempotency_key"),
             )
             tracker.start_names.pop(call_id, None)
             tracker.end_emitted.add(call_id)
@@ -300,15 +338,69 @@ def _runtime_event(
     return RuntimeEvent.from_payload(kind, payload, thread_id=thread_id, run_id=run_id)
 
 
+def _apply_output_guard(text: str) -> tuple[str, dict[str, Any]]:
+    if not settings.private_rag_output_guard_enabled:
+        return text, {
+            "guard": "private_rag_output_v1",
+            "safe": True,
+            "action": "disabled",
+            "finding_count": 0,
+            "findings": [],
+            "original_chars": len(text),
+            "emitted_chars": len(text),
+        }
+    verdict = detect_sensitive_output(text)
+    safe = bool(verdict.get("safe"))
+    findings = [str(item) for item in verdict.get("findings") or []]
+    if safe or not settings.private_rag_output_guard_block:
+        action = "allow" if safe else "audit_only"
+        output = text
+    else:
+        action = "degrade"
+        output = (
+            "I cannot return that answer because it appears to contain sensitive information. "
+            "Please narrow the request or use an authorized retrieval path."
+        )
+    payload = {
+        "guard": "private_rag_output_v1",
+        "safe": safe,
+        "action": action,
+        "finding_count": int(verdict.get("finding_count") or len(findings)),
+        "findings": findings,
+        "original_chars": len(text),
+        "emitted_chars": len(output),
+    }
+    return output, payload
+
+
 def _tool_audit_metadata(spec, args: dict[str, Any]) -> dict[str, Any]:
     if spec is None:
         return {
             "category": "",
             "risk_level": "",
             "requires_approval": False,
+            "timeout_seconds": None,
+            "max_retries": None,
+            "retry_count": None,
+            "idempotency_key": None,
         }
     return {
         "category": spec.category,
         "risk_level": spec.risk_level,
         "requires_approval": spec.requires_approval_for(args),
+        "timeout_seconds": spec.timeout_seconds,
+        "max_retries": spec.max_retries,
+        "retry_count": 0,
+        "idempotency_key": _idempotency_key_for(spec, args),
     }
+
+
+def _idempotency_key_for(spec, args: dict[str, Any]) -> str | None:
+    field = getattr(spec, "idempotency_key_field", None)
+    if not field:
+        return None
+    value = args.get(str(field))
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

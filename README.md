@@ -445,6 +445,7 @@ OPENAI_PROXY_URL=
 OPENAI_AUTO_PROXY=true
 OPENAI_PROXY_PROBE_HOSTS=127.0.0.1:7890,127.0.0.1:7897,127.0.0.1:1080
 
+SCENARIO=watermark
 WATERMARK_API_BASE_URL=http://127.0.0.1:8080
 
 AGENT_CHECKPOINT_PATH=storage/langgraph-checkpoints.sqlite
@@ -490,97 +491,45 @@ conda run -n learnagent312 python -m uvicorn copilot_agent.server:app --host 0.0
 
 ## 6. 验证命令
 
-编译检查：
+本地请使用 **`conda run -n learnagent312`**（或已激活的 learnagent312 环境）。  
+**PR 门禁与 profile 清单**见 [docs/ci-design.md](docs/ci-design.md)；Eval 分层见 [docs/eval-design.md](docs/eval-design.md)。
 
 ```powershell
+# 编译检查
 conda run -n learnagent312 python -m compileall copilot_agent scripts
+
+# PR 等价（core + rag）
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile core
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile rag
+
+# 本地快检（不进 PR CI）
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile core-fast
+
+# Demo / 夜跑
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile e2e
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --enable-ragas
 ```
 
-Provider / DeepSeek thinking 兼容：
+可选专项（单套件调试）：
 
 ```powershell
-conda run -n learnagent312 python scripts\verify_deepseek_provider.py
-```
-
-真实 chat API smoke：
-
-```powershell
-conda run -n learnagent312 python scripts\smoke_chat_api.py --message "hello agent"
-```
-
-MVP runtime acceptance：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_mvp_runtime_acceptance.py --event-store-path storage\verify-mvp-runtime-events.sqlite --checkpoint-path storage\verify-mvp-runtime-checkpoints.sqlite
-```
-
-Runtime：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_runtime_event_store.py --event-store-path storage\verify-runtime-events.sqlite
-conda run -n learnagent312 python scripts\verify_runtime_run_manager.py --event-store-path storage\verify-run-manager-events.sqlite
-conda run -n learnagent312 python scripts\verify_runtime_timeline.py --event-store-path storage\verify-runtime-timeline-events.sqlite
-conda run -n learnagent312 python scripts\verify_run_state_machine.py
-```
-
-Memory：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_memory_v1.py --event-store-path storage\verify-memory-v1-events.sqlite --checkpoint-path storage\verify-memory-v1-checkpoints.sqlite
-conda run -n learnagent312 python scripts\verify_memory_policy_v1.py --event-store-path storage\verify-memory-policy-events.sqlite --checkpoint-path storage\verify-memory-policy-checkpoints.sqlite
-conda run -n learnagent312 python scripts\verify_memory_production_v1.py
-conda run -n learnagent312 python scripts\verify_memory_production_v2.py
-```
-
-Tool / Contract：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_tool_audit_v1.py --event-store-path storage\verify-tool-audit-events.sqlite
-conda run -n learnagent312 python scripts\verify_tool_router.py
-conda run -n learnagent312 python scripts\verify_contract_events.py
-conda run -n learnagent312 python scripts\verify_events_validated.py
-```
-
-RAG：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_rag_query_router.py
-conda run -n learnagent312 python scripts\verify_rag_retrieval_quality.py
-conda run -n learnagent312 python scripts\verify_rag_rerank.py
-conda run -n learnagent312 python scripts\verify_rag_hot_reload.py
-```
-
-Legacy regression：
-
-```powershell
-conda run -n learnagent312 python scripts\verify_phase3_checkpoint.py
-conda run -n learnagent312 python scripts\verify_phase3_safety_gate.py
-conda run -n learnagent312 python scripts\verify_phase4_dataset.py
-conda run -n learnagent312 python scripts\verify_phase4_ragas.py --mode proxy --disable-vector
+conda run -n learnagent312 python scripts/verify_policy_credentials.py
+conda run -n learnagent312 python scripts/verify_context_manager.py
+conda run -n learnagent312 python scripts/verify_deepseek_provider.py
+conda run -n learnagent312 python scripts/smoke_chat_api.py --message "hello agent"
 ```
 
 ---
 
-## 7. Git 推送代理
-
-如果本机代理端口是 `7890`，推送时使用：
-
-```powershell
-git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push origin main
-```
-
-该方式只对当前命令生效，不修改全局 Git 配置。
-
----
-
-## 8. 设计文档
+## 7. 设计文档
 
 - [Agent learning guide](docs/agent-learning-guide.md)
 - [Runtime design](docs/runtime-design.md)
 - [Data flow design](docs/data-flow-design.md)
 - [Memory checkpoint design](docs/memory-checkpoint-design.md)
+- [Context manager design](docs/context-manager-design.md)
 - [RAG design](docs/rag-design.md)
-- [Tool grounded design](docs/tool-grounded-design.md)
+- [Tool design](docs/tool-design.md)
 - [Guardrail policy design](docs/guardrail-policy-design.md)
 - [Observability design](docs/observability-design.md)
 - [Eval design](docs/eval-design.md)
@@ -589,7 +538,7 @@ git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 pus
 
 ---
 
-## 9. 当前限制
+## 8. 当前限制
 
 - 当前是单用户本地 runtime，不是多租户 SaaS。
 - 没有完整认证、RBAC、审计后台和生产部署方案。

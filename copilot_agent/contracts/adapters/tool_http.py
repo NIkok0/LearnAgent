@@ -6,7 +6,7 @@ from copilot_agent.contracts.tool_result import ToolResultModel
 
 
 class HttpResponseAdapter:
-    """Convert Watermark HTTP tool legacy dicts to ToolResultModel."""
+    """Convert HTTP tool response dicts to ToolResultModel."""
 
     @staticmethod
     def to_tool_result(
@@ -15,7 +15,7 @@ class HttpResponseAdapter:
         duration_ms: int | None = None,
         sanitized_args: dict[str, Any] | None = None,
     ) -> ToolResultModel:
-        return ToolResultModel.from_http_legacy(
+        return ToolResultModel.from_http_result(
             raw,
             duration_ms=duration_ms,
             sanitized_args=sanitized_args,

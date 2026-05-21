@@ -4,11 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from copilot_agent.contracts.retrieval import RetrievalRequest, RetrievalResult
 from copilot_agent.rag.bm25 import BM25Index
 from copilot_agent.rag.fusion import apply_doc_type_boost, dedup_chunks, rank_from_scores, rrf_fuse
 from copilot_agent.rag.index import build_vector_index, sync_vector_index
 from copilot_agent.rag.ingest import load_chunks
 from copilot_agent.rag.keyword import keyword_search, keyword_scores
+from copilot_agent.rag.policy_filter import RagPolicyFilter
 from copilot_agent.rag.rerank import rerank_chunks
 from copilot_agent.rag.query_rewrite import query_doc_type_hints, rewrite_query
 from copilot_agent.rag.query_router import RetrievalRoute, route_query
@@ -39,6 +41,7 @@ class RagStore:
         self._vector_index = vector_index
         self._retriever = None
         self._bm25: BM25Index | None = BM25Index(chunks) if chunks else None
+        self._policy_filter = RagPolicyFilter()
         self._bind_retriever(vector_index)
 
     def _bind_retriever(self, vector_index: Any | None) -> None:
@@ -172,6 +175,33 @@ class RagStore:
         else:
             chunks = chunks[:top_k]
         return chunks
+
+    def policy_aware_search(self, request: RetrievalRequest, top_k: int = 6) -> tuple[RagSearchResult, RetrievalResult]:
+        """Search with metadata pre-filter and post-filter.
+
+        The base ranking pipeline is reused on a temporary filtered store so legacy
+        search behavior remains unchanged for callers that do not pass a policy.
+        """
+        prefiltered, pre_decisions = self._policy_filter.pre_filter_with_decisions(self.chunks, request)
+        if len(prefiltered) == len(self.chunks):
+            detailed = self.search_detailed(request.query, top_k=top_k)
+        else:
+            scoped = RagStore(prefiltered, vector_index=None)
+            detailed = scoped.search_detailed(request.query, top_k=top_k)
+        result = self._policy_filter.post_filter(detailed.chunks, request)
+        pre_blocked = [decision for decision in pre_decisions if not decision.allowed]
+        result = result.model_copy(
+            update={
+                "prefilter_blocked_chunk_ids": [decision.chunk_id for decision in pre_blocked],
+                "prefilter_blocked_count": len(pre_blocked),
+                "blocked_count": result.blocked_count + len(pre_blocked),
+                "policy_decisions": [*pre_blocked, *result.policy_decisions],
+            }
+        )
+        return (
+            RagSearchResult(chunks=result.allowed_chunks, route=detailed.route, search_query=detailed.search_query),
+            result,
+        )
 
     def _bm25_scores(self, query: str) -> dict[tuple[str, int], float]:
         if self._bm25 is None:
