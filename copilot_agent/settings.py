@@ -43,6 +43,28 @@ class Settings(BaseSettings):
     rag_keyword_weight: float = 0.5
     rag_vector_weight: float = 0.5
     rag_vector_top_k: int = 12
+    rag_hot_reload_enabled: bool = True
+    rag_hot_reload_poll_seconds: float = 2.0
+    rag_vector_async_reload: bool = True
+    rag_query_rewrite_enabled: bool = True
+    rag_query_route_enabled: bool = True
+    rag_use_bm25: bool = True
+    rag_use_rrf: bool = True
+    rag_rrf_k: int = 60
+    rag_bm25_weight: float = 1.0
+    rag_doc_type_boost_enabled: bool = True
+    rag_dedup_results: bool = True
+    rag_fusion_candidate_multiplier: int = 4
+    rag_rerank_enabled: bool = False
+    rag_rerank_model: str = "BAAI/bge-reranker-base"
+    rag_rerank_candidates: int = 50
+    rag_rerank_max_chars: int = 512
+    rag_context_budget_chars: int = 14000
+
+    agent_tool_route_enabled: bool = True
+    agent_tool_route_enforce: bool = True
+    agent_diagnosis_template_enabled: bool = True
+    agent_retrieval_path_inject: bool = True
 
     # Phase 3: persisted LangGraph checkpoint.
     agent_checkpoint_path: str = "storage/langgraph-checkpoints.sqlite"
@@ -73,6 +95,38 @@ class Settings(BaseSettings):
     memory_include_failed_runs: bool = False
     memory_include_cancelled_runs: bool = False
     memory_key_output_max_chars: int = 800
+
+    # Checkpoint compaction (working memory compression).
+    memory_checkpoint_compact_enabled: bool = True
+    memory_checkpoint_compact_message_threshold: int = 40
+    memory_checkpoint_compact_keep_recent_turns: int = 6
+    memory_checkpoint_compact_summary_max_chars: int = 2000
+
+    # Structured long-term memory (production Phase 1).
+    memory_long_term_enabled: bool = True
+    memory_long_term_recall_top_k: int = 3
+    memory_long_term_recall_min_score: float = 0.2
+    memory_long_term_importance_min: float = 0.5
+    memory_long_term_max_items_per_user: int = 200
+    memory_long_term_protected_importance: float = 0.9
+    memory_long_term_dedup_jaccard_threshold: float = 0.25
+    memory_long_term_conflict_jaccard_threshold: float = 0.3
+    memory_long_term_time_decay_half_life_days: float = 14.0
+    memory_long_term_keyword_weight: float = 0.5
+    memory_long_term_time_weight: float = 0.25
+    memory_long_term_importance_weight: float = 0.25
+    memory_inject_dedupe_system_prompt: bool = True
+    memory_inject_dedupe_memory_messages: bool = True
+    memory_long_term_use_vector: bool = False
+    memory_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    memory_embedding_deterministic: bool = False
+    memory_long_term_vector_weight: float = 0.35
+    memory_long_term_vector_min_score: float = 0.55
+    memory_hyde_enabled: bool = True
+    memory_hyde_mode: str = "rule"
+    memory_llm_extract_enabled: bool = True
+    memory_llm_confirm_threshold: float = 0.7
+    memory_emit_checkpoint_compacted: bool = True
 
     # HuggingFace model cache root (hub/ lives under this directory).
     hf_home: str = r"F:\model"

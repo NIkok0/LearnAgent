@@ -14,7 +14,7 @@ LIFECYCLE_EVENTS = {
     "cancelled",
 }
 CHECKPOINT_EVENTS = {"run_checkpoint_meta", "run_completed_meta", "thread_checkpoint_purged"}
-MEMORY_EVENTS = {"memory_run_summary", "memory_thread_summary"}
+MEMORY_EVENTS = {"memory_run_summary", "memory_thread_summary", "checkpoint_compacted"}
 
 
 class TimelineProjector:
@@ -199,6 +199,27 @@ class TimelineProjector:
                 )
                 continue
 
+            if event_type == "retrieval_completed":
+                sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
+                items.append(
+                    {
+                        "kind": "retrieval",
+                        "title": "Document retrieval",
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "query": payload.get("query"),
+                        "source_count": int(payload.get("source_count") or len(sources)),
+                        "excerpt_chars": payload.get("excerpt_chars"),
+                        "sources": sources,
+                        "preview": _retrieval_preview(payload),
+                        "success": bool(payload.get("success", True)),
+                        "error": payload.get("error"),
+                        "call_id": payload.get("call_id"),
+                        "payload": payload,
+                    }
+                )
+                continue
+
             if event_type in MEMORY_EVENTS:
                 items.append(
                     {
@@ -352,3 +373,27 @@ def _preview(text: str, limit: int) -> str:
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 3]}..."
+
+
+def _retrieval_preview(payload: dict[str, Any]) -> str:
+    query = str(payload.get("query") or "").strip()
+    sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
+    names: list[str] = []
+    for source in sources[:4]:
+        if not isinstance(source, dict):
+            continue
+        file_name = str(source.get("source_file") or "").strip()
+        section = str(
+            source.get("section_title") or source.get("heading_path") or ""
+        ).strip()
+        if file_name and section:
+            names.append(f"{file_name} · {section}")
+        elif file_name:
+            names.append(file_name)
+    parts = [f"query={query!r}"] if query else []
+    if names:
+        parts.append("sources=" + ", ".join(names))
+    count = int(payload.get("source_count") or len(sources))
+    if count:
+        parts.append(f"hits={count}")
+    return _preview("; ".join(parts) or "retrieval", 240)

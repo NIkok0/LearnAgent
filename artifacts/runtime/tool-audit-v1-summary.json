@@ -1,7 +1,7 @@
 {
-  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-tool-audit-events.sqlite",
-  "thread_id": "tool-audit-5e785263",
-  "run_id": "a646c293-c3e2-4d4b-8ff4-efadb693aa81",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\learnagent-events.sqlite",
+  "thread_id": "tool-audit-48c2240a",
+  "run_id": "ed4d1d87-7031-459c-b88a-8f7d88c8b1e0",
   "start_contract": {
     "has_call_id": true,
     "has_metadata": true,
@@ -12,7 +12,9 @@
   "end_contract": {
     "has_result_envelope": true,
     "success": true,
+    "no_ok_in_result": true,
     "duration_ms": 42,
+    "top_level_sanitized_result": true,
     "result_sanitized": true,
     "raw_cookie_removed": true
   },
@@ -37,6 +39,14 @@
     "nested": {
       "secret": "***REDACTED***"
     }
+  },
+  "checks": {
+    "start_contract": true,
+    "end_contract": true,
+    "failure_contract": true,
+    "timeline_contract": true,
+    "persisted_sanitized": true,
+    "contract_schema_ok": true
   },
   "tool_audit_v1": "PASS"
 }

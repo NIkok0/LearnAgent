@@ -25,7 +25,28 @@ class SuiteSpec:
     rag_related: bool = False
 
 
-CORE_SUITES: tuple[SuiteSpec, ...] = (
+CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="contract_events",
+        script="scripts/verify_contract_events.py",
+        args=("--event-store-path", "storage/verify-contract-events-eval.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="tool_audit_v1",
+        script="scripts/verify_tool_audit_v1.py",
+        args=("--event-store-path", "storage/verify-tool-audit-eval.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="eval_cases_contract",
+        script="scripts/verify_eval_cases_contract.py",
+    ),
+    SuiteSpec(
+        suite_name="events_validated",
+        script="scripts/verify_events_validated.py",
+    ),
+)
+
+CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
     SuiteSpec(
         suite_name="golden_scenarios",
         script="scripts/verify_golden_scenarios.py",
@@ -61,6 +82,36 @@ CORE_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_session_mvp.py",
         args=("--event-store-path", "storage/verify-session-mvp-events.sqlite"),
     ),
+    SuiteSpec(
+        suite_name="memory_checkpoint_consistency",
+        script="scripts/verify_memory_checkpoint_consistency.py",
+        args=(
+            "--event-store-path",
+            "storage/verify-memory-checkpoint-events.sqlite",
+            "--checkpoint-path",
+            "storage/verify-memory-checkpoint-checkpoints.sqlite",
+        ),
+    ),
+    SuiteSpec(
+        suite_name="memory_production_v1",
+        script="scripts/verify_memory_production_v1.py",
+        args=(
+            "--event-store-path",
+            "storage/verify-memory-production-events.sqlite",
+            "--checkpoint-path",
+            "storage/verify-memory-production-checkpoints.sqlite",
+        ),
+    ),
+    SuiteSpec(
+        suite_name="memory_production_v2",
+        script="scripts/verify_memory_production_v2.py",
+        args=(
+            "--event-store-path",
+            "storage/verify-memory-production-v2-events.sqlite",
+            "--checkpoint-path",
+            "storage/verify-memory-production-v2-checkpoints.sqlite",
+        ),
+    ),
 )
 
 RAG_SUITES: tuple[SuiteSpec, ...] = (
@@ -68,6 +119,50 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         suite_name="phase4_ragas",
         script="scripts/verify_phase4_ragas.py",
         args=("--mode", "proxy", "--disable-vector", "--allow-missing-docs"),
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="phase4_tool_trajectory",
+        script="scripts/verify_phase4_tool_trajectory.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_api_path_extraction",
+        script="scripts/verify_rag_api_path_extraction.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_api_ingest",
+        script="scripts/verify_rag_api_ingest.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="extract_validate",
+        script="scripts/verify_extract_validate.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_retrieval_quality",
+        script="scripts/verify_rag_retrieval_quality.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="citation_l4",
+        script="scripts/verify_citation_l4.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="diagnosis_template",
+        script="scripts/verify_diagnosis_template.py",
+        rag_related=True,
+    ),
+)
+
+E2E_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="demo_golden_e2e",
+        script="scripts/verify_demo_golden_e2e.py",
+        args=("--mode", "proxy",),
         rag_related=True,
     ),
 )
@@ -86,7 +181,8 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
     return {
         "core": CORE_SUITES,
         "rag": rag,
-        "full": CORE_SUITES + rag,
+        "e2e": E2E_SUITES,
+        "full": CORE_SUITES + rag + E2E_SUITES,
     }
 
 
@@ -131,8 +227,22 @@ def _load_checks_from_summary(summary_json: str | None) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
-    checks = payload.get("checks")
-    return checks if isinstance(checks, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    checks: dict[str, Any] = {}
+    nested = payload.get("checks")
+    if isinstance(nested, dict):
+        checks.update(nested)
+    for key, value in payload.items():
+        if key == "checks":
+            continue
+        if isinstance(value, bool) and (
+            key.endswith("_ok")
+            or key.endswith("_contract")
+            or key in {"start_contract", "end_contract", "failure_contract", "timeline_contract", "persisted_sanitized"}
+        ):
+            checks[key] = value
+    return checks
 
 
 def _suite_status(return_code: int, kv: dict[str, str]) -> str:
@@ -149,6 +259,8 @@ def _suite_status(return_code: int, kv: dict[str, str]) -> str:
         or key.lower().endswith("_link")
         or key.lower().endswith("_scenarios")
         or key.lower().endswith("_ragas")
+        or key.lower().endswith("_contract")
+        or key in {"contract_events", "eval_cases_contract", "tool_audit_v1", "phase4_tool_trajectory"}
     ]
     if not pass_like:
         return "PASS"
@@ -162,7 +274,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run aggregated eval suite profiles.")
     parser.add_argument(
         "--profile",
-        choices=["core", "rag", "full"],
+        choices=["core", "rag", "e2e", "full"],
         default="core",
         help="Which suite profile to execute.",
     )
@@ -273,6 +385,18 @@ def main() -> int:
         for item in failed
         if str(item["suite_name"]).startswith("runtime_") or item["suite_name"] in {"session_mvp"}
     ]
+    contract_suite_names = {spec.suite_name for spec in CONTRACT_SUITES}
+    contract_metrics: dict[str, Any] = {}
+    contract_schema_ok = True
+    for item in results:
+        if item["suite_name"] not in contract_suite_names:
+            continue
+        checks = item.get("checks") if isinstance(item.get("checks"), dict) else {}
+        contract_metrics[item["suite_name"]] = checks
+        if not item["pass"]:
+            contract_schema_ok = False
+        if checks.get("contract_schema_ok") is False:
+            contract_schema_ok = False
     rag_metrics: dict[str, Any] = {}
     for item in results:
         if item["suite_name"] != "phase4_ragas":
@@ -300,6 +424,8 @@ def main() -> int:
         "failed_scenarios": failed_scenarios,
         "runtime_contract_breaks": runtime_contract_breaks,
         "rag_metrics": rag_metrics,
+        "contract_schema_ok": contract_schema_ok,
+        "contract_metrics": contract_metrics,
         "duration_total_ms": duration_total_ms,
         "results": results,
         "eval_suite": "PASS" if overall_pass else "FAIL",
@@ -314,6 +440,8 @@ def main() -> int:
     print(f"skipped_suites={','.join(out['skipped_suites'])}")
     print(f"failed_scenarios={','.join(out['failed_scenarios'])}")
     print(f"runtime_contract_breaks={','.join(out['runtime_contract_breaks'])}")
+    print(f"contract_schema_ok={out['contract_schema_ok']}")
+    print(f"contract_metrics={json.dumps(out['contract_metrics'], ensure_ascii=False)}")
     print(f"rag_metrics={json.dumps(out['rag_metrics'], ensure_ascii=False)}")
     print(f"duration_total_ms={out['duration_total_ms']}")
     print(f"summary_json={summary_path}")

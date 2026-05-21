@@ -2,21 +2,27 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from typing import Literal
+
+from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from copilot_agent.agent.runner import ChatRunner
+from copilot_agent.contracts.validate import ContractValidationError, enrich_event_row
 from copilot_agent.conversation_store import ConversationCookieStore
 from copilot_agent.observability import flush_langfuse
-from copilot_agent.rag import build_rag_store
+from copilot_agent.rag import RagStoreManager
+from copilot_agent.rag.docs_manifest import register_uploaded_file
+from copilot_agent.rag.ingest import repo_docs_dir
 from copilot_agent.runtime.checkpoint_store import CheckpointStore
 from copilot_agent.runtime.event_store import (
     THREAD_END_REASON_BROWSER_CLOSE,
@@ -42,35 +48,72 @@ timeline_projector = TimelineProjector()
 runner: ChatRunner | None = None
 execution_engine: ExecutionEngine | None = None
 thread_lifecycle_cleaner: ThreadLifecycleCleaner | None = None
+rag_manager: RagStoreManager | None = None
+rag_watch_task: asyncio.Task | None = None
+
+
+async def _rag_hot_reload_loop(manager: RagStoreManager) -> None:
+    while True:
+        await asyncio.sleep(settings.rag_hot_reload_poll_seconds)
+        try:
+            changed = await asyncio.to_thread(manager.check_and_reload_if_changed)
+            if changed:
+                st = manager.status()
+                log.info(
+                    "RAG hot-reload (watch): chunks=%s vector=%s",
+                    st.get("chunk_count"),
+                    st.get("vector_enabled"),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("RAG hot-reload watch failed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global runner, execution_engine, thread_lifecycle_cleaner
-    rag_store = build_rag_store()
+    global runner, execution_engine, thread_lifecycle_cleaner, rag_manager, rag_watch_task
+    rag_manager = RagStoreManager(trigger="startup")
     log.info(
-        "RAG ready: chunks=%d hybrid_vector=%s",
-        len(rag_store.chunks),
-        rag_store.vector_enabled,
+        "RAG ready: chunks=%d hybrid_vector=%s hot_reload=%s",
+        len(rag_manager.store.chunks),
+        rag_manager.store.vector_enabled,
+        settings.rag_hot_reload_enabled,
     )
     log.info("Langfuse configured=%s", settings.langfuse_configured)
-    runner = ChatRunner(rag_store=rag_store, cookie_store=cookie_store, event_store=event_store)
+    runner = ChatRunner(rag_store=rag_manager.store, cookie_store=cookie_store, event_store=event_store)
+    rag_manager.attach_memory(runner.memory)
     execution_engine = ExecutionEngine(event_store=event_store, runner=runner)
+
+    async def _compact_idle_thread(thread_id: str) -> None:
+        await runner.compact_checkpoint(thread_id)
+
     thread_lifecycle_cleaner = ThreadLifecycleCleaner(
         event_store=event_store,
         checkpoint_store=checkpoint_store,
         active_idle_ttl_seconds=settings.thread_active_idle_ttl_seconds,
         ended_archive_ttl_seconds=settings.thread_ended_archive_ttl_seconds,
         interval_seconds=settings.thread_lifecycle_cleaner_interval_seconds,
+        compact_idle_thread=_compact_idle_thread,
     )
     thread_lifecycle_cleaner.start()
+    if settings.rag_hot_reload_enabled:
+        rag_watch_task = asyncio.create_task(_rag_hot_reload_loop(rag_manager))
     yield
+    if rag_watch_task is not None:
+        rag_watch_task.cancel()
+        try:
+            await rag_watch_task
+        except asyncio.CancelledError:
+            pass
     if thread_lifecycle_cleaner is not None:
         await thread_lifecycle_cleaner.stop()
     flush_langfuse()
     thread_lifecycle_cleaner = None
     execution_engine = None
     runner = None
+    rag_manager = None
+    rag_watch_task = None
 
 
 app = FastAPI(title="Watermark Copilot Agent", lifespan=lifespan)
@@ -88,9 +131,17 @@ if static_dir.is_dir():
 
 
 class ChatMessage(BaseModel):
-    role: str
+    role: Literal["user", "assistant", "system"]
     content: str
     reasoning_content: str | None = None
+
+
+class CreateThreadRequest(BaseModel):
+    title: str | None = None
+
+
+class EndThreadRequest(BaseModel):
+    reason: Literal["explicit", "browser_close", "idle"] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -110,6 +161,53 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _require_rag_manager() -> RagStoreManager:
+    if rag_manager is None:
+        raise HTTPException(status_code=503, detail="RAG not initialized")
+    return rag_manager
+
+
+@app.get("/v1/rag/status")
+def rag_status() -> dict[str, object]:
+    manager = _require_rag_manager()
+    return {
+        "rag": manager.status(),
+        "hot_reload_enabled": settings.rag_hot_reload_enabled,
+        "hot_reload_poll_seconds": settings.rag_hot_reload_poll_seconds,
+    }
+
+
+@app.post("/v1/rag/reload")
+def rag_reload() -> dict[str, object]:
+    manager = _require_rag_manager()
+    return {"rag": manager.reload(trigger="api")}
+
+
+_UPLOAD_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.md$")
+
+
+@app.post("/v1/rag/upload")
+async def rag_upload(file: UploadFile = File(...)) -> dict[str, object]:
+    manager = _require_rag_manager()
+    base = repo_docs_dir()
+    if base is None:
+        raise HTTPException(status_code=503, detail="docs dir not configured (set WATERMARK_DOCS_PATH)")
+    filename = Path(file.filename or "").name
+    if not _UPLOAD_FILENAME.match(filename):
+        raise HTTPException(status_code=400, detail="only safe *.md filenames are allowed")
+    raw = await file.read()
+    if len(raw) > 2_000_000:
+        raise HTTPException(status_code=413, detail="upload exceeds 2MB limit")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="upload must be UTF-8 markdown") from exc
+    (base / filename).write_text(text, encoding="utf-8")
+    register_uploaded_file(base, filename)
+    status = manager.reload(trigger="api")
+    return {"uploaded": filename, "rag": status}
+
+
 def _require_execution_engine() -> ExecutionEngine:
     if execution_engine is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
@@ -122,18 +220,24 @@ def _reject_inactive_thread(thread_id: str) -> None:
         raise HTTPException(status_code=409, detail="thread is not active")
 
 
+def _maybe_validate_events(rows: list[dict[str, object]], validated: bool) -> list[dict[str, object]]:
+    if not validated:
+        return rows
+    out: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            out.append(enrich_event_row(row))
+        except ContractValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return out
+
+
 @app.post("/v1/threads")
-async def create_thread(request: Request) -> dict[str, object]:
-    title = None
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if isinstance(body, dict):
-        raw_title = body.get("title")
-        title = str(raw_title) if raw_title is not None else None
+def create_thread(body: CreateThreadRequest = Body(default_factory=CreateThreadRequest)) -> dict[str, object]:
     thread_id = str(uuid.uuid4())
-    return event_store.ensure_thread(thread_id, title=title)
+    return event_store.ensure_thread(thread_id, title=body.title)
 
 
 @app.get("/v1/threads/{thread_id}")
@@ -145,14 +249,15 @@ def get_thread(thread_id: str) -> dict[str, object]:
 
 
 @app.post("/v1/threads/{thread_id}/end")
-async def end_thread(thread_id: str, request: Request) -> dict[str, object]:
+def end_thread(
+    thread_id: str,
+    body: EndThreadRequest = Body(default_factory=EndThreadRequest),
+) -> dict[str, object]:
     reason = THREAD_END_REASON_EXPLICIT
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if isinstance(body, dict) and body.get("reason") in {THREAD_END_REASON_EXPLICIT, THREAD_END_REASON_BROWSER_CLOSE, "idle"}:
-        reason = str(body["reason"])
+    if body.reason == THREAD_END_REASON_BROWSER_CLOSE:
+        reason = THREAD_END_REASON_BROWSER_CLOSE
+    elif body.reason == "idle":
+        reason = "idle"
     thread = event_store.end_thread(thread_id, reason=reason)
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
@@ -206,12 +311,17 @@ def get_thread_events(
     run_id: str | None = None,
     after_id: int | None = None,
     limit: int | None = None,
+    validated: bool = Query(default=False, description="Validate payloads against contract models"),
 ) -> dict[str, object]:
     if event_store.get_thread(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     if after_id is not None or limit is not None:
-        return event_store.list_events_page(thread_id, run_id=run_id, after_id=after_id, limit=limit)
-    return {"events": event_store.list_events(thread_id, run_id=run_id)}
+        page = event_store.list_events_page(thread_id, run_id=run_id, after_id=after_id, limit=limit)
+        if validated and isinstance(page.get("events"), list):
+            page["events"] = _maybe_validate_events(page["events"], validated=True)
+        return page
+    events = _maybe_validate_events(event_store.list_events(thread_id, run_id=run_id), validated=validated)
+    return {"events": events}
 
 
 @app.get("/v1/threads/{thread_id}/memory")
@@ -242,12 +352,21 @@ def get_run(run_id: str) -> dict[str, object]:
 
 
 @app.get("/v1/runs/{run_id}/events")
-def get_run_events(run_id: str, after_id: int | None = None, limit: int | None = None) -> dict[str, object]:
+def get_run_events(
+    run_id: str,
+    after_id: int | None = None,
+    limit: int | None = None,
+    validated: bool = Query(default=False, description="Validate payloads against contract models"),
+) -> dict[str, object]:
     if event_store.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="run not found")
     if after_id is not None or limit is not None:
-        return event_store.list_run_events_page(run_id, after_id=after_id, limit=limit)
-    return {"events": event_store.list_run_events(run_id)}
+        page = event_store.list_run_events_page(run_id, after_id=after_id, limit=limit)
+        if validated and isinstance(page.get("events"), list):
+            page["events"] = _maybe_validate_events(page["events"], validated=True)
+        return page
+    events = _maybe_validate_events(event_store.list_run_events(run_id), validated=validated)
+    return {"events": events}
 
 
 @app.get("/v1/runs/{run_id}/timeline")

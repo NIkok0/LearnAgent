@@ -1,29 +1,35 @@
 {
-  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-runtime-timeline-events.sqlite",
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-timeline-callid.sqlite",
   "completed": {
-    "run_id": "a5e09f6f-6894-482e-906b-b58da0a60e81",
+    "run_id": "20f08f63-d86a-426a-ae87-78d231b3aaa1",
     "assistant_output": "hello world",
     "kinds": [
       "lifecycle",
       "lifecycle",
       "tool_call",
+      "retrieval",
       "lifecycle",
       "checkpoint",
       "assistant_output"
     ],
+    "retrieval_present": true,
+    "retrieval_query": "Redis",
+    "retrieval_source_count": 1,
+    "retrieval_call_id": "tool-1",
+    "retrieval_call_id_linked": true,
     "tool_merged": true,
     "tool_success": true,
     "warnings": [],
     "checkpoint_message_count": 3
   },
   "missing_tool": {
-    "run_id": "ae316556-d753-4a98-8155-9514fddaa71d",
+    "run_id": "b13e24e5-7dfe-4a82-829e-1734628d56ef",
     "warnings": [
       "tool_missing_end"
     ]
   },
   "approval": {
-    "run_id": "1880661b-9dfa-467c-8242-c58059c1d95e",
+    "run_id": "c9592840-9e43-46b3-b4a8-9a8424b742dc",
     "status": "approved",
     "resolved": {
       "approved": true,
@@ -31,17 +37,17 @@
     }
   },
   "memory": {
-    "run_id": "a5d1bfa5-86f5-4369-98ad-95742ca64af6",
+    "run_id": "aba0630c-de00-4e5c-aaec-ba4acff72850",
     "derived": true,
     "summary_type": "run"
   },
   "cancelled": {
-    "run_id": "c21343dc-43fb-414e-bc25-4ae8d402261d",
+    "run_id": "c3fbbb33-8e5e-4adc-bb8b-5455255c9ed5",
     "status": "cancelled",
     "warnings": []
   },
   "failed_without_error": {
-    "run_id": "a4d5becd-fdf9-4532-9426-7bbeb2ab9195",
+    "run_id": "bcc16c9a-6f1c-401f-a4ab-4b01351124bb",
     "warnings": [
       "failed_without_error_event"
     ]

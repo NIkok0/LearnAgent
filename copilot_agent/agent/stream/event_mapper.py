@@ -3,8 +3,9 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any
 
+from copilot_agent.agent.tool_call_context import clear_tool_call_context, set_tool_call_context
 from copilot_agent.agent.message_utils import (
     approval_tool_call_ids,
     extract_blocked_message_text,
@@ -15,6 +16,7 @@ from copilot_agent.agent.message_utils import (
     extract_text_from_chat_output,
     extract_text_from_chunk,
 )
+from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.memory import MemoryManager
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader
 from copilot_agent.runtime.event_schema import EVENT_RUN_COMPLETED_META
@@ -22,10 +24,8 @@ from copilot_agent.runtime.execution_engine import GraphInterrupted
 from copilot_agent.tools.audit import build_tool_end_payload, build_tool_start_payload
 from copilot_agent.tools.registry import ToolRegistry
 
-
-class DomainEvent(TypedDict):
-    type: str
-    payload: dict[str, Any]
+# Backward-compatible alias (Phase 2).
+DomainEvent = RuntimeEvent
 
 
 @dataclass
@@ -55,7 +55,7 @@ class GraphEventMapper:
         graph_config: dict[str, Any],
         thread_id: str,
         run_id: str | None,
-    ) -> AsyncIterator[DomainEvent]:
+    ) -> AsyncIterator[RuntimeEvent]:
         tracker = _ToolTracker()
         pending_tool_call_ids = approval_tool_call_ids(
             self._memory.get_thread_events(thread_id, run_id=run_id)
@@ -70,7 +70,12 @@ class GraphEventMapper:
                 for call in interrupt_payload.get("tool_calls") or []:
                     if isinstance(call, dict) and call.get("name") and call.get("id"):
                         pending_tool_call_ids[str(call["name"])] = str(call["id"])
-                yield {"type": "approval_required", "payload": interrupt_payload}
+                yield _runtime_event(
+                    "approval_required",
+                    interrupt_payload,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                )
                 raise GraphInterrupted(interrupt_payload)
 
             if kind == "on_chat_model_stream":
@@ -78,14 +83,16 @@ class GraphEventMapper:
                 reasoning_delta = extract_reasoning_content(chunk)
                 if reasoning_delta:
                     last_reasoning_content += reasoning_delta
-                    yield {
-                        "type": "assistant_state",
-                        "payload": {"reasoning_content_delta": reasoning_delta},
-                    }
+                    yield _runtime_event(
+                        "assistant_state",
+                        {"reasoning_content_delta": reasoning_delta},
+                        thread_id=thread_id,
+                        run_id=run_id,
+                    )
                 text = extract_text_from_chunk(chunk)
                 if text:
                     last_assistant_output += text
-                    yield {"type": "token", "payload": {"text": text}}
+                    yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             if kind == "on_chat_model_end":
@@ -93,24 +100,31 @@ class GraphEventMapper:
                 reasoning = extract_reasoning_content_from_chat_output(output)
                 if reasoning and reasoning != last_reasoning_content:
                     last_reasoning_content = reasoning
-                    yield {
-                        "type": "assistant_state",
-                        "payload": {"reasoning_content": reasoning},
-                    }
+                    yield _runtime_event(
+                        "assistant_state",
+                        {"reasoning_content": reasoning},
+                        thread_id=thread_id,
+                        run_id=run_id,
+                    )
                 text = extract_text_from_chat_output(output)
                 if text and text not in last_assistant_output:
                     last_assistant_output += text
-                    yield {"type": "token", "payload": {"text": text}}
+                    yield _runtime_event("token", {"text": text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             blocked_text = extract_blocked_message_text(event)
             if blocked_text:
                 if "gated" in blocked_text.lower() and "confirm_dangerous=true" in blocked_text:
                     payload = {"required": True, "reason": "dangerous_tool", "message": blocked_text}
-                    yield {"type": "approval_required", "payload": payload}
+                    yield _runtime_event(
+                        "approval_required",
+                        payload,
+                        thread_id=thread_id,
+                        run_id=run_id,
+                    )
                     raise GraphInterrupted(payload)
                 last_assistant_output += blocked_text
-                yield {"type": "token", "payload": {"text": blocked_text}}
+                yield _runtime_event("token", {"text": blocked_text}, thread_id=thread_id, run_id=run_id)
                 continue
 
             if kind == "on_tool_start":
@@ -119,17 +133,25 @@ class GraphEventMapper:
                 if call_id:
                     tracker.started_at[call_id] = time.perf_counter()
                     tracker.start_names[call_id] = name
+                    set_tool_call_context(
+                        call_id=str(call_id),
+                        tool_name=name,
+                        thread_id=thread_id,
+                        run_id=str(run_id or ""),
+                    )
                 args = (event.get("data") or {}).get("input", {})
                 spec = self._tool_registry.get_spec(name)
-                yield {
-                    "type": "tool_start",
-                    "payload": build_tool_start_payload(
+                yield _runtime_event(
+                    "tool_start",
+                    build_tool_start_payload(
                         name=name,
                         call_id=call_id,
                         **_tool_audit_metadata(spec, args if isinstance(args, dict) else {}),
                         arguments=args,
                     ),
-                }
+                    thread_id=thread_id,
+                    run_id=run_id,
+                )
                 continue
 
             if kind == "on_tool_end":
@@ -141,15 +163,18 @@ class GraphEventMapper:
                     tracker.end_emitted.add(call_id)
                 result = (event.get("data") or {}).get("output", {})
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
-                yield {
-                    "type": "tool_end",
-                    "payload": build_tool_end_payload(
+                yield _runtime_event(
+                    "tool_end",
+                    build_tool_end_payload(
                         name=name,
                         call_id=call_id,
                         result=result,
                         duration_ms=duration_ms,
                     ),
-                }
+                    thread_id=thread_id,
+                    run_id=run_id,
+                )
+                clear_tool_call_context()
                 continue
 
             if kind == "on_tool_error":
@@ -162,9 +187,9 @@ class GraphEventMapper:
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
                 if call_id:
                     tracker.end_emitted.add(call_id)
-                yield {
-                    "type": "tool_end",
-                    "payload": build_tool_end_payload(
+                yield _runtime_event(
+                    "tool_end",
+                    build_tool_end_payload(
                         name=name,
                         call_id=call_id,
                         result={},
@@ -172,27 +197,37 @@ class GraphEventMapper:
                         success=False,
                         error=str(error_value or "tool execution failed"),
                     ),
-                }
+                    thread_id=thread_id,
+                    run_id=run_id,
+                )
+                clear_tool_call_context()
                 continue
 
-        for domain_event in self._missing_tool_end_events(thread_id, run_id, tracker):
-            yield domain_event
+        for missing in self._missing_tool_end_events(thread_id, run_id, tracker):
+            yield missing
 
         if self._checkpoint_reader is not None and run_id:
             snapshot = await self._checkpoint_reader.snapshot(thread_id)
-            yield {
-                "type": EVENT_RUN_COMPLETED_META,
-                "payload": {
+            yield _runtime_event(
+                EVENT_RUN_COMPLETED_META,
+                {
                     "checkpoint_thread_id": snapshot["checkpoint_thread_id"],
                     "message_count": snapshot["message_count"],
                     "has_interrupt": snapshot["has_interrupt"],
                 },
-            }
+                thread_id=thread_id,
+                run_id=run_id,
+            )
 
         assistant_message = {"content": last_assistant_output}
         if last_reasoning_content:
             assistant_message["reasoning_content"] = last_reasoning_content
-        yield {"type": "done", "payload": {"assistant_message": assistant_message}}
+        yield _runtime_event(
+            "done",
+            {"assistant_message": assistant_message},
+            thread_id=thread_id,
+            run_id=run_id,
+        )
 
     def _resolve_tool_call_id(
         self,
@@ -218,7 +253,7 @@ class GraphEventMapper:
         thread_id: str,
         run_id: str | None,
         tracker: _ToolTracker,
-    ) -> list[DomainEvent]:
+    ) -> list[RuntimeEvent]:
         if not run_id:
             return []
         events = self._memory.get_thread_events(thread_id, run_id=run_id)
@@ -230,7 +265,7 @@ class GraphEventMapper:
             str((event.get("payload") or {}).get("call_id") or "")
             for event in tool_ends
         }
-        out: list[DomainEvent] = []
+        out: list[RuntimeEvent] = []
         for event in tool_starts:
             payload = event.get("payload") or {}
             call_id = str(payload.get("call_id") or "")
@@ -249,8 +284,20 @@ class GraphEventMapper:
             )
             tracker.start_names.pop(call_id, None)
             tracker.end_emitted.add(call_id)
-            out.append({"type": "tool_end", "payload": end_payload})
+            out.append(
+                _runtime_event("tool_end", end_payload, thread_id=thread_id, run_id=run_id)
+            )
         return out
+
+
+def _runtime_event(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    thread_id: str,
+    run_id: str | None,
+) -> RuntimeEvent:
+    return RuntimeEvent.from_payload(kind, payload, thread_id=thread_id, run_id=run_id)
 
 
 def _tool_audit_metadata(spec, args: dict[str, Any]) -> dict[str, Any]:

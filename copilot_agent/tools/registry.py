@@ -95,7 +95,7 @@ class ToolRegistry:
         registry.register_async(
             coroutine=search_docs,
             name="search_docs",
-            description="Keyword search over DEPLOY-SERVER.md, REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md, watermark-java-backend-tech-selection.md.",
+            description="Keyword search over watermark platform docs (API, deploy, runbook, security, requirements, algorithms).",
             args_schema=search_docs_args_schema,
             category="memory",
             risk_level="low",

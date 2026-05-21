@@ -98,7 +98,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
     timeline = TimelineProjector().project_run(completed, events)
     tool_items = [item for item in timeline["items"] if item.get("kind") == "tool_call"]
     failed_tool = next((item for item in tool_items if item.get("call_id") == "tool-audit-2"), {})
-    normalized_failure = normalize_tool_result(failed_result).as_dict()
+    normalized_failure = normalize_tool_result(failed_result).as_audit_dict()
 
     start_event = next(event for event in events if event["type"] == "tool_start")
     end_event = next(event for event in events if event["type"] == "tool_end")
@@ -115,9 +115,14 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
             "password_redacted": start_payload["arguments"].get("json_body", {}).get("password") == "***REDACTED***",
         },
         "end_contract": {
-            "has_result_envelope": all(key in end_payload.get("result", {}) for key in ("success", "data", "error", "metadata", "sanitized")),
-            "success": end_payload.get("success"),
+            "has_result_envelope": all(
+                key in end_payload.get("result", {})
+                for key in ("success", "data", "error", "metadata", "sanitized", "sanitized_result")
+            ),
+            "success": end_payload.get("success") is True,
+            "no_ok_in_result": "ok" not in end_payload.get("result", {}),
             "duration_ms": end_payload.get("duration_ms"),
+            "top_level_sanitized_result": end_payload.get("sanitized_result") is not None,
             "result_sanitized": not audit_payload_has_secret(end_payload.get("result")),
             "raw_cookie_removed": "_raw_set_cookie_for_store_only" not in json.dumps(end_payload, ensure_ascii=False),
         },
@@ -177,6 +182,14 @@ def main() -> int:
     ok_persisted = not summary["persisted"]["start_has_secret"] and not summary["persisted"]["end_has_secret"]
     ok_direct = summary["direct_sanitizer"]["token"] == "***REDACTED***" and summary["direct_sanitizer"]["nested"]["secret"] == "***REDACTED***"
     passed = ok_start and ok_end and ok_failure and ok_timeline and ok_persisted and ok_direct
+    summary["checks"] = {
+        "start_contract": ok_start,
+        "end_contract": ok_end,
+        "failure_contract": ok_failure,
+        "timeline_contract": ok_timeline,
+        "persisted_sanitized": ok_persisted,
+        "contract_schema_ok": passed,
+    }
     summary["tool_audit_v1"] = "PASS" if passed else "FAIL"
 
     summary_path = Path(args.summary_json).resolve()

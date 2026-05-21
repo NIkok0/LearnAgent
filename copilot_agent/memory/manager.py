@@ -11,12 +11,19 @@ from copilot_agent.memory.policy import (
     memory_policy_from_settings,
     recall_episodic_runs,
 )
+from copilot_agent.memory.item_store import MemoryItemStore
+from copilot_agent.memory.item_writer import (
+    MemoryItemWriter,
+    recall_long_term_items,
+    render_long_term_memory_body,
+)
 from copilot_agent.rag import RagStore
 from copilot_agent.runtime.event_store import EventStore
 from copilot_agent.settings import settings
 
 MEMORY_RUN_SUMMARY_EVENT = "memory_run_summary"
 MEMORY_THREAD_SUMMARY_EVENT = "memory_thread_summary"
+CHECKPOINT_COMPACTED_EVENT = "checkpoint_compacted"
 
 
 @dataclass(frozen=True)
@@ -43,11 +50,25 @@ class MemoryManager:
         event_store: EventStore | None,
         checkpoint_path: str,
         policy: MemoryPolicyConfig | None = None,
+        llm_provider: Any | None = None,
     ) -> None:
         self._rag = rag_store
         self._events = event_store
         self.checkpoint_path = checkpoint_path
         self._policy = policy or memory_policy_from_settings(settings)
+        self._llm_provider = llm_provider
+        store_path = str(event_store.path) if event_store is not None else settings.agent_event_store_path
+        self._item_store = MemoryItemStore(store_path) if self._policy.long_term_enabled else None
+        self._item_writer = (
+            MemoryItemWriter(self._item_store, policy=self._policy, llm_provider=self._llm_provider)
+            if self._item_store is not None
+            else None
+        )
+
+    def resolve_user_id(self, thread_id: str) -> str:
+        if self._events is not None:
+            return self._events.get_user_id(thread_id)
+        return thread_id
 
     @property
     def policy(self) -> MemoryPolicyConfig:
@@ -64,6 +85,13 @@ class MemoryManager:
     def search_docs(self, query: str, top_k: int = 8):
         return self._rag.search(query, top_k=top_k)
 
+    def search_docs_detailed(self, query: str, top_k: int = 8):
+        return self._rag.search_detailed(query, top_k=top_k)
+
+    def reload_rag_store(self, rag_store: RagStore) -> None:
+        """Swap the in-process RAG store (hot reload)."""
+        self._rag = rag_store
+
     def build_context(
         self,
         *,
@@ -78,6 +106,7 @@ class MemoryManager:
                 "thread_id": thread_id,
                 "run_id": run_id,
                 "goal": goal,
+                "current_turn_messages": messages,
                 "messages": messages,
                 "checkpoint_path": self.checkpoint_path,
             },
@@ -89,6 +118,7 @@ class MemoryManager:
                 "enabled": self._policy.enabled,
                 "thread_summary": bundle.thread_summary,
                 "recalled_runs": bundle.recalled_runs,
+                "recalled_long_term": bundle.recalled_long_term,
                 "dropped_conflicts": bundle.dropped_conflicts,
                 "inject_preview": bundle.inject_preview,
                 "budget_applied": bundle.budget_applied,
@@ -111,12 +141,34 @@ class MemoryManager:
             current_run_id=current_run_id,
             config=self._policy,
         )
+        long_term_rows: list[dict[str, Any]] = []
+        long_term_body = ""
+        if self._item_store is not None and self._policy.long_term_enabled and (goal or "").strip():
+            user_id = self.resolve_user_id(thread_id)
+            recalled_items = recall_long_term_items(
+                store=self._item_store,
+                user_id=user_id,
+                thread_id=thread_id,
+                query=goal or "",
+                policy=self._policy,
+                llm_provider=self._llm_provider,
+            )
+            long_term_rows = [row.as_dict() for row in recalled_items]
+            long_term_body = render_long_term_memory_body(recalled_items)
         return build_episodic_inject_bundle(
             thread_summary=thread_summary,
             recalled_runs=recalled,
             dropped_conflicts=dropped,
+            recalled_long_term=long_term_rows,
+            long_term_body=long_term_body,
             config=self._policy,
         )
+
+    def confirm_memory_item(self, item_id: str) -> dict[str, Any] | None:
+        if self._item_store is None:
+            return None
+        confirmed = self._item_store.confirm_item(item_id)
+        return confirmed.as_dict() if confirmed is not None else None
 
     def append_event(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
         if self._events is not None and run_id:
@@ -163,6 +215,16 @@ class MemoryManager:
             return {}
         summary = _summarize_run_events(events, fallback_goal=fallback_goal, policy=self._policy)
         self._events.append_event(thread_id, run_id, MEMORY_RUN_SUMMARY_EVENT, summary)
+        if self._item_writer is not None:
+            user_id = self.resolve_user_id(thread_id)
+            self._item_writer.persist_run_memories(
+                user_id=user_id,
+                thread_id=thread_id,
+                goal=str(summary.get("goal", "")),
+                key_outputs=list(summary.get("key_outputs") or []),
+                outcome=str(summary.get("outcome", "")),
+                run_id=run_id,
+            )
         return summary
 
     def update_thread_summary(self, thread_id: str, run_id: str | None = None) -> dict[str, Any]:

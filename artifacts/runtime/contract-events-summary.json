@@ -1,0 +1,20 @@
+{
+  "event_store_path": "E:\\code\\LearnAgent\\storage\\verify-contract-events.sqlite",
+  "thread_id": "contract-bc6fd4b5",
+  "run_id": "2c4f6f58-25e9-4ca5-af79-838dd941bac1",
+  "sample_count": 7,
+  "round_trip_ok": true,
+  "schema_ok": true,
+  "kinds_ok": true,
+  "model_validate_ok": true,
+  "validated_event_count": 8,
+  "errors": [],
+  "checks": {
+    "round_trip_ok": true,
+    "schema_ok": true,
+    "kinds_ok": true,
+    "model_validate_ok": true,
+    "contract_schema_ok": true
+  },
+  "contract_events": "PASS"
+}

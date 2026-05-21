@@ -128,6 +128,20 @@ def last_user_content(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
+def current_turn_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only the current-turn user message.
+
+    Client ``messages[]`` may still carry full history for backward compatibility;
+    LangGraph checkpoint state is the source of truth for prior turns.
+    """
+    if not messages:
+        return []
+    for message in reversed(messages):
+        if str(message.get("role", "")).lower() == "user":
+            return [message]
+    return [messages[-1]]
+
+
 def approval_tool_call_ids(events: list[dict[str, Any]]) -> dict[str, str]:
     out: dict[str, str] = {}
     for event in events:

@@ -153,26 +153,32 @@ class EventStore:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_status_last_interaction ON threads(status, last_interaction_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_status_ended_at ON threads(status, ended_at)")
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE threads ADD COLUMN user_id TEXT NULL")
+            conn.execute("UPDATE threads SET user_id = id WHERE user_id IS NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads(user_id)")
 
-    def ensure_thread(self, thread_id: str, *, title: str | None = None) -> dict[str, Any]:
+    def ensure_thread(self, thread_id: str, *, title: str | None = None, user_id: str | None = None) -> dict[str, Any]:
         now = utc_now_iso()
+        effective_user_id = user_id or thread_id
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO threads (
                     id, title, status, created_at, updated_at,
-                    last_interaction_at, ended_at, archived_at, end_reason
+                    last_interaction_at, ended_at, archived_at, end_reason, user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title = COALESCE(excluded.title, threads.title),
                     updated_at = excluded.updated_at,
+                    user_id = COALESCE(threads.user_id, excluded.user_id),
                     last_interaction_at = CASE
                         WHEN threads.status = 'active' THEN excluded.last_interaction_at
                         ELSE threads.last_interaction_at
                     END
                 """,
-                (thread_id, title, THREAD_STATUS_ACTIVE, now, now, now),
+                (thread_id, title, THREAD_STATUS_ACTIVE, now, now, now, effective_user_id),
             )
             row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
         return _row_to_dict(row)
@@ -304,6 +310,26 @@ class EventStore:
     def end_idle_threads_older_than(self, ttl_seconds: int | float, *, limit: int = 100) -> list[dict[str, Any]]:
         return self.end_idle_threads_before(utc_iso_before(ttl_seconds), limit=limit)
 
+    def list_idle_active_threads_older_than(
+        self,
+        ttl_seconds: int | float,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        cutoff_iso = utc_iso_before(ttl_seconds)
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM threads
+                WHERE status = ?
+                  AND last_interaction_at <= ?
+                ORDER BY last_interaction_at ASC
+                LIMIT ?
+                """,
+                (THREAD_STATUS_ACTIVE, cutoff_iso, limit),
+            ).fetchall()
+        return [_row_to_dict(row) for row in rows]
+
     def archive_ended_threads_older_than(self, ttl_seconds: int | float, *, limit: int = 100) -> list[dict[str, Any]]:
         return self.archive_ended_threads_before(utc_iso_before(ttl_seconds), limit=limit)
 
@@ -318,11 +344,11 @@ class EventStore:
                     """
                     INSERT INTO threads (
                         id, title, status, created_at, updated_at,
-                        last_interaction_at, ended_at, archived_at, end_reason
+                        last_interaction_at, ended_at, archived_at, end_reason, user_id
                     )
-                    VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, NULL)
+                    VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL, NULL, ?)
                     """,
-                    (thread_id, THREAD_STATUS_ACTIVE, now, now, now),
+                    (thread_id, THREAD_STATUS_ACTIVE, now, now, now, thread_id),
                 )
                 thread_status = THREAD_STATUS_ACTIVE
             else:
@@ -460,6 +486,12 @@ class EventStore:
                     run_ids,
                 ).fetchall()
         return [_row_to_dict(row) for row in rows]
+
+    def get_user_id(self, thread_id: str) -> str:
+        thread = self.get_thread(thread_id)
+        if thread and thread.get("user_id"):
+            return str(thread["user_id"])
+        return thread_id
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
         with self._lock, self._connect() as conn:

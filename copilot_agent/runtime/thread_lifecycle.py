@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from copilot_agent.runtime.checkpoint_store import CheckpointStore
@@ -23,6 +24,7 @@ class ThreadLifecycleCleaner:
         interval_seconds: int = 60,
         batch_size: int = 100,
         checkpoint_store: CheckpointStore | None = None,
+        compact_idle_thread: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> None:
         self.event_store = event_store
         self.checkpoint_store = checkpoint_store
@@ -30,6 +32,7 @@ class ThreadLifecycleCleaner:
         self.ended_archive_ttl_seconds = max(0, ended_archive_ttl_seconds)
         self.interval_seconds = max(1, interval_seconds)
         self.batch_size = max(1, batch_size)
+        self._compact_idle_thread = compact_idle_thread
         self._task: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
 
@@ -68,9 +71,29 @@ class ThreadLifecycleCleaner:
             log.info("Archived %d ended thread(s)", len(archived))
         return {"ended": ended, "archived": archived}
 
+    async def compact_idle_checkpoints(self) -> list[str]:
+        if self._compact_idle_thread is None or self.active_idle_ttl_seconds <= 0:
+            return []
+        idle_threads = self.event_store.list_idle_active_threads_older_than(
+            self.active_idle_ttl_seconds,
+            limit=self.batch_size,
+        )
+        compacted: list[str] = []
+        for thread in idle_threads:
+            thread_id = str(thread.get("id", ""))
+            if not thread_id:
+                continue
+            try:
+                await self._compact_idle_thread(thread_id)
+                compacted.append(thread_id)
+            except Exception:
+                log.exception("Checkpoint compaction failed for thread %s", thread_id[:8])
+        return compacted
+
     async def _run(self) -> None:
         while not self._stopped.is_set():
             try:
+                await self.compact_idle_checkpoints()
                 self.run_once()
             except Exception:
                 log.exception("Thread lifecycle cleanup failed")

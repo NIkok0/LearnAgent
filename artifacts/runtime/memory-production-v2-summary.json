@@ -1,0 +1,64 @@
+{
+  "thread_id": "thread-p2-6e2202c1",
+  "run_id": "2f51f344-0ab8-4262-8f34-d4e118780665",
+  "recalled": [
+    {
+      "id": "mem_e8c973edb1b7",
+      "user_id": "user-p2-ff0f1143",
+      "thread_id": null,
+      "scope": "user",
+      "memory_type": "fact",
+      "content": "User frequently troubleshoots redis stream health in deployment",
+      "content_hash": "a95346cbaa66085a",
+      "importance": 0.8,
+      "confidence": 0.95,
+      "version": 1,
+      "supersedes_id": null,
+      "is_deprecated": false,
+      "pending_confirmation": false,
+      "expires_at": null,
+      "access_count": 0,
+      "last_accessed_at": null,
+      "created_at": "2026-05-21T05:13:12.983306+00:00",
+      "updated_at": "2026-05-21T05:13:12.983306+00:00",
+      "source_run_id": "manual",
+      "history": [],
+      "score": 1.0543,
+      "keyword_score": 1.0,
+      "time_factor": 1.0,
+      "vector_score": 0.2981
+    }
+  ],
+  "hyde_query": "Relevant user memory about: redis stream health. May include preferences, recurring tasks, platform usage patterns, and prior troubleshooting goals.",
+  "pending_results": [
+    "insert",
+    "insert"
+  ],
+  "compact_events": [
+    {
+      "id": 3738,
+      "thread_id": "thread-compact-bdb428de",
+      "run_id": "49212a5c-3501-446f-af90-ab43d18e6d2e",
+      "type": "checkpoint_compacted",
+      "created_at": "2026-05-21T05:13:13.011450+00:00",
+      "payload": {
+        "compacted": true,
+        "before_count": 42,
+        "after_count": 8,
+        "reason": "test",
+        "schema_version": 1
+      }
+    }
+  ],
+  "checks": {
+    "vector_recall_score": true,
+    "hyde_rule_expand": true,
+    "pending_confirmation_flag": true,
+    "pending_excluded_from_inject": true,
+    "checkpoint_compacted_event": true,
+    "deterministic_embedding_similarity": true,
+    "run_summary_still_persisted": true,
+    "confirm_memory_item": true
+  },
+  "memory_production_v2": "PASS"
+}

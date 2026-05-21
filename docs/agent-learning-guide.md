@@ -1,364 +1,444 @@
-# Agent 开发学习指南
+# LearnAgent 项目地图
 
-> 学习笔记：Agent 开发「最难的部分」讨论 + LearnAgent 模块成熟度矩阵。  
-> **~~删除线~~** 表示 LearnAgent 侧已落地或已阶段性完成（截至 Execution Engine P0–P2、Memory v1.1）。
-
----
-
-## Agent 开发最难的部分是哪几个
-
-这是偏经验判断，没有唯一标准答案；结合你们在做 LearnAgent、以及面试知识库里的模块，**真正难的不是「接 LangChain」**，而是下面这几块——往往占项目 80% 的坑。
+> 全项目模块划分、职责边界、文档索引与成熟度总表。  
+> 操作安装与 API 字段见 [README.md](../README.md)；本页回答「有哪些块、边界在哪、详细设计读哪份文档」。
 
 ---
 
-### 1. 可靠性与可控性（最难、也最常低估）
+## 1. 文档怎么用
 
-**问题**：LLM 非确定性 + 多步 tool → 同一条输入，今天能跑、明天换模型/温度就偏了。
 
-难在：
+| 文档                                                     | 写什么                       | 不写什么                                                  |
+| ------------------------------------------------------ | ------------------------- | ----------------------------------------------------- |
+| [README.md](../README.md)                              | 安装、环境变量、REST/SSE API、本地运行 | 模块边界哲学、长篇缺口清单                                         |
+| **本页（agent-learning-guide）**                           | 模块地图、依赖关系、成熟度、读哪份 doc     | 逐步实施 checklist、工具脚本实现细节                               |
+| `docs/*-design.md`                                     | 各模块/横切稳定设计、遗留问题、未来方向      | 操作命令（见 [ci-design.md](./ci-design.md)）、逐步实施 checklist |
+| [tech-selection-design.md](./tech-selection-design.md) | 对外框架对比、引入/替换决策            | 与 README 重复的 API 说明                                   |
 
-- 不是单点 bug，是 **整条链路的方差**（选错 tool、参数 hallucination、过早结束、死循环）
-- 传统软件是「错了必现」；Agent 是 **「看起来能跑，上线才暴雷」**
-
-要补的东西：Guardrail、recursion/timeout、幂等、失败降级、**评测集 + 回归**（你们 README 里 eval 仍偏后置，但生产里它和功能代码同等重要）。
-
-**LearnAgent 对应**：`safety_gate`、~~Run 超时~~、tool audit —— 只解决了 **一小条**；「整体任务成功率稳定 >90%」仍是长期战。
 
 ---
 
-### 2. 上下文与记忆治理（第二难）
+## 2. 架构总览
 
-**问题**：窗口有限，但对话、工具结果、RAG、摘要、checkpoint 全往 context 里塞。
-
-难在：
-
-- **写什么、何时写、读什么、读多少** —— ~~Memory orchestration policy（你们刚做的 v1.1 就在啃这个）~~
-- Working（checkpoint）vs Episodic（EventStore summary）vs Semantic（RAG）**三套历史经常不一致**
-- 「记住了」和「记对了、没污染当前回答」是两回事
-
-**LearnAgent 对应**：Checkpoint + Memory policy + 客户端 messages 三轨 —— 这是典型痛点，不是你们独有。
-
----
-
-### 3. 产品级 Runtime 契约（第三难，框架不教）
-
-**问题**：LangGraph 只管图怎么跑，不管 **thread/run/event/API/cancel/approval** 语义。
-
-难在：
-
-- Run FSM、事件 schema、Timeline 投影、SSE 兼容、多 tab 并发 —— **都要自己设计**
-- Checkpoint 与 EventStore **各管一半**，对齐是架构题不是库能选的
-
-**LearnAgent 对应**：ExecutionEngine + EventStore —— 这正是你们在练的核心；很多 demo 项目 **根本没有这一层**，所以「看起来简单」。
-
----
-
-### 4. 工具与权限治理（安全边界）
-
-**问题**：Agent 能调 API = 能闯祸。
-
-难在：
-
-- 白名单、风险分级、审批、参数校验、结果脱敏、审计可追溯
-- **Run 内自主、Run 级才 HITL** —— 策略要清晰（你刚说的原则）
-- 工具一多，LLM **选错 tool** 的概率上升（注意力稀释）
-
-**LearnAgent 对应**：`ToolRegistry`、`PolicyRegistry`、dangerous POST approval —— 方向对；难的是 **策略持续演进**（PII、输出校验、按租户 tool 集）。
-
----
-
-### 5. 可观测与排障（线上才知道多痛）
-
-**问题**：用户说「它昨天胡说」—— 你怎么复现？
-
-难在：
-
-- `thread_id` / `run_id` / `tool_call_id` / trace 要 **串成一条链**
-- 不能只有日志，要有 **可回放 timeline**（你们 EventStore 的价值在这里）
-- token/cost/latency 与业务指标（任务完成率）要一起看
-
-**LearnAgent 对应**：EventStore + Langfuse —— 关联还没做满（README 里的 observability correlation）。
-
----
-
-### 6. 评测与迭代（决定能不能上生产）
-
-**问题**：改 prompt / 换模型 / 加 tool 后，**有没有变差**？
-
-难在：
-
-- 没有标准答案的任务（开放问答、运维 copilot）很难自动打分
-- 需要 **场景集 + 通过准则 + CI 回归**（你们有 verify 脚本，但是 MVP 级）
-- RAG 还要单独评 recall/precision
-
-很多团队 **功能做完了 30%，评测与迭代做了剩下 70% 还停在 0%**。
-
----
-
-### 7. 相对「没那么难」、但容易占时间的
-
-| 看起来难 | 其实 |
-|----------|------|
-| 接 LLM API | 成熟，文档多 |
-| LangGraph 搭 ReAct 环 | 教程多，1–2 天能跑 |
-| 接 RAG | 模式固定，坑在 **chunk/评测** 不在接库 |
-| Multi-Agent 框架选型 | **难在协作语义和运维**，不在 import CrewAI |
-
----
-
-### 一张优先级（做产品 Agent 时）
+### 2.1 三层控制
 
 ```text
-难且必须长期投入：
-  ① 可靠性 + 评测闭环
-  ② Memory / Context 治理
-  ③ Runtime 契约 + 可观测
-
-难但可阶段性收敛：
-  ④ Tool / 安全治理
-  ⑤ 成本与并发（限流、队列）
-
-相对后置（除非业务需要）：
-  ⑥ Multi-Agent 拆分
-  ⑦ 外部 Memory 服务（Mem0/Zep）
+产品层   ExecutionEngine + EventStore + Timeline     Run FSM、cancel/approve、事件审计
+编排层   LangGraph StateGraph + checkpoint             节点路由、interrupt/resume、messages 合并
+决策层   ChatOpenAI + ToolNode                         生成与 tool_calls（非确定性）
 ```
 
----
+用户一条消息 → 一次 **Run**（产品层）→ `ChatRunner` 驱动图（编排层）→ LLM/工具（决策层）。
 
-### 和你在学的八股怎么对应
-
-| 八股章节 | 难在哪 |
-|----------|--------|
-| Prompt / Context | 不是写文案，是 **窗口经济学** |
-| Memory | **策略** 比存储难 |
-| RAG | **检索质量 + 与 Memory 分工** |
-| Tool / MCP | **治理与审计** |
-| Planning | 计划 **漂移、与执行脱节** |
-| Multi-Agent | **状态一致、调试、成本** |
-| 评测 | 往往 **整个团队最缺的一章** |
-| 安全 | **边界定义** 比实现难 |
-
----
-
-### 面试/自评一句话
-
-> Agent 开发最难的三件事：**让多步行为稳定可预期、让记忆和上下文不打架、让 Run 从 demo 变成可审计的产品 runtime**；框架只解决「能跑一轮」，不解决「能上线、能复盘、能迭代」。
-
----
-
-## LearnAgent 模块成熟度矩阵
-
-按 README §3 / §7 模块，加上几个 **横切能力**（很多项目单独写在 roadmap 外，但决定能不能上线）。评分说明：
-
-- **行业难度 1–5**：做「产品级、可长期维护」时的普遍难度（5 最难）
-- **完成度**：LearnAgent **当前** 离「单用户 MVP 够用 → 可上线雏形」还有多远（不是代码行数）
-
----
-
-### 总览表
-
-| 模块 | 行业难度 | 完成度 | 你已有 | 你还缺什么 |
-|------|:--------:|:------:|--------|------------|
-| **Runtime 契约（EventStore + API）** | 4 | **80%** | thread/run/event、Timeline、Thread 生命周期、REST/SSE/WS、~~event schema v1~~、~~事件分页~~、~~run↔checkpoint 元数据~~、~~archive 清理 checkpoint~~ | UI 长 Run cursor 拉取；完整 checkpoint↔timeline 互跳 |
-| **Execution Engine** | 4 | **55%** | asyncio Run、cancel/approve、SSE、orphan cleanup、~~run timeout~~、~~全局限流~~、~~interrupt + Command(resume)~~、~~waiting_approval rehydrate~~ | ~~并发上限~~、幂等、进程重启后 **running** run 恢复；~~approval interrupt resume（原为整图重跑）~~ |
-| **Memory + Memory Manager** | 5 | **45%** | 三层划分、~~v1.1 policy~~、~~preview API~~、summary 事件 | **working memory 真相源**（checkpoint vs 客户端 messages）；checkpoint **压缩**；向量 episodic；与 checkpoint 一致性校验 |
-| **Guardrail + Policy** | 4 | **35%** | safety_gate、危险 POST 审批、HTTP 白名单、tool 脱敏 | 输入/输出校验、PII/secret 策略、策略版本与审计；~~Run 内自主 / 边界 HITL 的 **策略表文档化**~~（README §6 已更新 approval 语义） |
-| **Tool + ToolRegistry** | 3 | **55%** | Registry、Schema、audit envelope、3 个工具 | **timeout/retry 真正执行**；失败路径审计全覆盖；MCP；按角色/租户 tool 白名单 |
-| **Observability** | 4 | **40%** | EventStore timeline、Langfuse、tool audit | **thread/run/tool_call ↔ trace** 统一；token/cost/latency 进 event 或 metrics；一致性告警 |
-| **Planning** | 4 | **25%** | ReAct 环、observe-only planner、`plan_created` | `plan_updated`、步骤 outcome、Plan-and-Execute；计划与执行 **可对照复盘** |
-| **RAG（Semantic Memory）** | 3 | **50%** | 关键词 + 可选向量、混合检索配置 | 索引/检索 **评测**（RAGAS 等 CI）；与 episodic 注入边界在 prompt 里固化 |
-| **LLM / LLMProvider** | 2 | **60%** | OpenAI-compatible、薄 Provider、~~MAX_LLM_INFLIGHT 限流~~ | fallback、路由、**cost/token 统计**、prompt 版本 |
-| **评测与可靠性（Eval）** | 5 | **15%** | 多个 verify 脚本、部分 phase4 RAG eval、~~verify_session_mvp（timeout/interrupt/并发/rehydrate）~~ | **端到端场景集**、换模型/改 prompt **回归**；任务成功率指标；MVP acceptance 需稳定跑在 learnagent312 |
-| **Multi-Agent / 多租户 / 外部队列** | 4–5 | **0–5%** | 文档与选型 | 故意未做；上生产前再碰 |
-
----
-
-### 雷达图（文字版）
+### 2.2 数据流（简图）
 
 ```text
-                    Eval(15%) ←── 最大缺口
-                       │
-    Guardrail(35%) ────┼──── Memory(45%)
-                       │
-Observability(40%) ────┼──── Execution(55%)
-                       │
-         Planning(25%) ─ Runtime/API(80%) ←── 相对最强
+Client / UI (static/index.html)
+    |
+    |  REST / SSE / WebSocket
+    v
+M01  server.py ........................ API 入口、请求校验
+    |
+    v
+M03  execution_engine.py .............. Run 调度、cancel/approve、流队列
+    |
+    v
+M07  runner.py + event_mapper.py ...... 组装图输入、astream、_emit 事件
+    |                    \
+    |                     +--> M05 contracts/* --> Adapter --> 统一 payload
+    v                    /
+M06  graph.py + nodes.py .............. LangGraph：planner -> assistant <-> tools
+    |
+    +--> Checkpoint SQLite (working memory messages)
+    |
+    +--> M08 LLM (ChatOpenAI) / M11 Tool handlers
+
+M07 / M06 运行时写入 -----> M05 -----> M02 event_store.py (Thread/Run/Event 事实源)
+M04 timeline.py 只读 M02 .......... Timeline 投影（CQRS 读模型）
+
+M09  memory/manager.py
+    +-- episodic 摘要 --> EventStore (memory_* 事件)
+    +-- 压缩策略 ------> Checkpoint (CheckpointCompactor)
+    +-- RAG 检索 -------> M10 rag/ (search_docs，不经 checkpoint 全量存储)
 ```
 
-**结论**：骨架（Runtime + 图 + 工具 + 基础安全）有了；**缺的是「稳、准、可迭代」**——Memory 治理、Eval、Observability 关联、Guardrail 深度。
+### 2.3 四条边界规则
 
----
+1. **产品层（M02–M04、M03）**：Run 状态、Timeline、cancel/approve 以 EventStore 为准；客户端不自行重建 Run 状态机。详见 [runtime-design.md](./runtime-design.md)。
+2. **编排层（M06–M07）**：LangGraph checkpoint 的 `messages` 为 **working memory 真相源**；HTTP `messages[]` 仅传当前轮 user。详见 [memory-checkpoint-design.md](./memory-checkpoint-design.md)。
+3. **契约层（M05）**：跨模块 payload 以 `RuntimeEvent`、`ToolResultModel` 为准；写入前经 Adapter 展平/脱敏。详见 [data-flow-design.md](./data-flow-design.md)。
+4. **审计层（M02）**：不用 EventStore 事件 replay 生成 checkpoint 全量历史；Episodic 摘要仅作 inject，不替代对话正文。
 
-### 分模块：你缺什么（可执行清单）
+### 2.4 Kernel / Capability / Scenario 三层
 
-#### 1. Runtime 契约 — 完成度 80%（难度 4）
+LearnAgent 的长期架构目标：**先搭通用 Agent 范式（Kernel），再插能力包（Capability），最后用场景包（Scenario）做业务定制。**  
+shell / git / MCP 与 RAG / HTTP 同级，都是 Capability 层的 Tool 扩展，**不**改写 Run FSM 或 EventStore 契约。
 
-**已有**：EventStore 事实源、Run FSM、Timeline 投影、Thread active/ended/archived、~~`payload.schema_version: 1`~~、~~事件 cursor 分页~~、~~`run_completed_meta` / `run_checkpoint_meta`~~、~~archive 时 `CheckpointStore.purge_thread`~~。
-
-**缺**：
-- ~~`payload` 无 `schema_version`，演进易碎~~
-- ~~Checkpoint 与 Run **无互指**~~ → `run_checkpoint_meta` + `run_completed_meta` 已写摘要；仍缺 UI 一键跳 graph state
-- ~~事件列表无分页（长 Run 会胀）~~ → API 已支持 `after_id`/`limit`；UI 仍可能一次拉全量
-- ~~Thread archived **不清理** checkpoint~~
-
-**建议**：P3 UI 对长 Run 用 cursor 循环拉 events；Eval 脚本覆盖 checkpoint link。
-
----
-
-#### 2. Execution Engine — 55%（难度 4）
-
-**已有**：单进程 Run、cancel、approval 暂停、cooperative cancel、~~run timeout~~、~~MAX_CONCURRENT_RUNS / MAX_LLM_INFLIGHT~~、~~GraphInterrupted 单路径~~、~~Command(resume=True/False)~~、~~waiting_approval 重启 rehydrate~~。
-
-**缺**：
-- ~~多 tab / 高并发 **无限流**~~
-- 服务重启 **running run 不能 durable resume**（`waiting_approval` 已可 rehydrate）
-- ~~Approval **整图重跑**~~（费钱、timeline 重复、和「Run 内自主」理念不完全一致）
-
-**建议**：~~先 **timeout + MAX_CONCURRENT_RUNS**~~；~~再 PoC LangGraph interrupt 只拦危险 tool~~。
-
----
-
-#### 3. Memory + Memory Manager — 45%（难度 5）⭐ 核心短板
-
-**已有**：~~v1.1 policy~~、episodic 注入、~~`GET .../memory`~~、failed/cancelled 排除。
-
-**缺**（和我们聊过的三轨问题）：
-- 客户端 `messages[]`、Checkpoint、Episodic 摘要 **没有单一真相源**
-- Checkpoint **messages 无限涨**，无压缩
-- Keyword recall 精度有限；无向量 episodic
-- Thread archived ~~不清理~~ checkpoint（Runtime 已 purge；Memory 文档仍建议核对 episodic 边界）
-
-**建议**（优先级最高之一）：
-1. 下轮只收 **最后一条 user message**，history 从 checkpoint 读  
-2. Run 末或 idle 时 **checkpoint 摘要/截断**  
-3. 脚本：checkpoint 条数 vs EventStore token 事件 **一致性检查**
-
----
-
-#### 4. Guardrail — 35%（难度 4）
-
-**已有**：危险 POST + `confirm_dangerous`、路径白名单、审批 Run。
-
-**缺**：
-- 无 **输出** guard（幻觉 API、泄露 cookie 的回复）
-- 无系统化 **PII/secret** 检测（仅 audit sanitizer 一部分）
-- Policy 不可配置/versioned；~~无「Run 内自主、仅边界 HITL」的 **显式策略表**~~
-
-**建议**：把「哪些 tool 永远自动、哪些必须 approval」写成 `PolicyRegistry` 配置 + README 一张表。
-
----
-
-#### 5. Tool — 55%（难度 3）
-
-**已有**：ToolSpec、StructuredTool、audit v1。
-
-**缺**：
-- `timeout_seconds` **未 enforce**
-- 工具失败时的 **统一 error envelope** 给 LLM 仍不完整
-- 无 MCP、无 tool 版本
-
-**建议**：Execution 层统一 tool timeout；补失败 tool 的 verify 用例。
-
----
-
-#### 6. Observability — 40%（难度 4）
-
-**已有**：Langfuse + EventStore 双轨。
-
-**缺**：
-- 双轨 **未关联**（排障时要人工对 id）
-- 无 cost/token **聚合**
-- 无「EventStore vs LangGraph state」不一致 warning
-
-**建议**：run meta 事件写入 `trace_id`；README 已有方向，代码未落地。
-
----
-
-#### 7. Planning — 25%（难度 4）
-
-**已有**：ReAct = 隐式 planning；planner 只打 log 型 `plan_created`。
-
-**缺**：
-- 无显式 plan 步骤、无 `plan_updated`、无步骤成败
-- Timeline 里 **看不出「计划 vs 实际」**
-
-**建议**：MVP 后可做；**不要早于 Memory/Eval**。
-
----
-
-#### 8. RAG — 50%（难度 3）
-
-**已有**：build_index、keyword/vector、混合权重。
-
-**缺**：
-- **检索质量未进 CI 门禁**（有 ragas 脚本但非主线）
-- chunk 策略、top_k 缺 **场景化调参记录**
-
-**建议**：固定 10 条运维问答做 golden set，改 RAG 必跑。
-
----
-
-#### 9. LLM — 60%（难度 2）
-
-**已有**：DeepSeek/OpenAI 兼容、LLMProvider 薄封装、~~LLM inflight 限流~~。
-
-**缺**：fallback、路由、**每次 run 的 token/cost**。
-
-**建议**：与 Observability 一起做，改动小、收益直观。
-
----
-
-#### 10. 评测与可靠性（Eval）— 15%（难度 5）⭐ 最大缺口
-
-**已有**：`verify_*` 脚本（偏组件测试）、~~`verify_session_mvp`（timeout / interrupt resume / 并发 / rehydrate）~~。
-
-**缺**：
-- **没有**「用户问 Java 是否存活 → 必须调 http_get」类 **端到端行为集**
-- 改 graph/prompt/tool **无回归分数**
-- `verify_mvp_runtime_acceptance` 依赖 LLM + 环境，**未形成稳定 CI 习惯**
-
-**建议**：这是「Agent 最难部分」在你项目里的投影——**优先补 5–10 条 golden scenario + PASS/FAIL 汇总**。  
-实施细化见：[docs/eval-implementation-plan.md](./eval-implementation-plan.md)
-
----
-
-### 你还完全没做、但 README 已声明后置的
-
-| 能力 | 难度 | 说明 |
-|------|:----:|------|
-| 多用户 / 多租户 | 5 | `tenant_id`、Memory/RAG 隔离、配额 |
-| 外部队列（Temporal/Celery） | 4 | 长 Run、重启恢复 |
-| Multi-Agent | 4 | Supervisor 子图即可，不必换框架 |
-| Mem0/Zep | 3 | 等 Memory 策略稳定再 PoC |
-| Sandbox（代码/终端） | 5 | 与当前 HTTP tool 模型不同 |
-
-这些 **不是 MVP 缺项**，别焦虑；上 B 端或多 Agent 再上。
-
----
-
-### 建议啃的顺序（结合难度 × 缺口 × 已有基础）
+#### 2.4.1 三层定义
 
 ```text
-第 1 波（把 MVP 变成「能信」）          难度高但你们已有底子
-  ① Eval：golden scenarios + mvp acceptance 稳定 CI
-  ② Memory：checkpoint 为 working memory 真相 + 压缩
-  ③ Execution：~~timeout + 并发上限~~ + tool timeout enforce
-
-第 2 波（能排障、能迭代）
-  ④ Observability：trace_id ↔ run_id 关联 + token/cost
-  ⑤ Guardrail：策略表 + 输出/PII 最小校验
-  ⑥ EventStore：schema version + run↔checkpoint 元数据
-
-第 3 波（增强，非阻塞）
-  ⑦ RAG eval 进 CI
-  ⑧ ~~Approval → LangGraph interrupt~~
-  ⑨ Planning plan_updated / Plan-and-Execute
-  ⑩ LLM fallback / LiteLLM PoC
+┌─────────────────────────────────────────────────────────────┐
+│  Scenario Pack（场景包）— 换业务主要改这里                      │
+│  语料 manifest · tool 白名单 · router 规则 · prompt · eval   │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ 配置 / 加载
+┌───────────────────────────▼─────────────────────────────────┐
+│  Capability Pack（能力包）— 按需启用                            │
+│  RAG · HTTP · shell · git · MCP · （未来）code index …        │
+│  统一走 ToolRegistry → Policy → Handler → ToolResultModel    │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ 注册 / 调用
+┌───────────────────────────▼─────────────────────────────────┐
+│  Kernel（内核）— 跨场景稳定                                     │
+│  Run FSM · LangGraph · EventStore/Timeline · Contracts       │
+│  Policy 框架 · Memory 分层模型 · Eval 门禁                      │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+| 层 | 回答的问题 | 换场景时 | LearnAgent 模块（现状） |
+|----|------------|----------|-------------------------|
+| **Kernel** | 一次 Run 怎么启停、怎么审计、怎么扩展 | **不换** | M02–M07、M05、M12 框架、M09 分层模型、Eval 横切 |
+| **Capability** | 有哪些工具/知识源、怎么执行 | **按需启用** | M10 RAG、M11 Tool handlers、`ToolRegistry` / `ToolSpec` |
+| **Scenario** | 这个业务查什么文档、调什么 API、说什么话 | **主要定制** | 今日：`docs/source/`、水印 router/prompt/eval；目标：`scenarios/<name>/` |
+
+**与 §2.1「三层控制」的关系**：§2.1 是**运行时控制面**（产品 / 编排 / 决策）；§2.4 是**产品化分层**（内核 / 能力 / 场景）。二者正交，不冲突。
+
+**与 §7 八层栈的关系**：L1–L4 多为 Capability（RAG 数据链）+ Contracts；L5–L8 多为 Kernel；Scenario 横切 L1–L7 的配置与 prompt。
+
+#### 2.4.2 通用 Run 循环（Kernel 不变）
+
+```text
+User Input
+  → Run 启动（ExecutionEngine）
+  → Context Assembly（working checkpoint + retrieve + memory inject，budget 截断）  ← 目标：统一 Context Manager
+  → Plan / Route（tool_router / 未来 plan_updated）
+  → LLM → tool_calls
+  → Policy Gate（risk · 审批 · hooks）
+  → Tool Execution → ToolResultModel
+  → Observation → EventStore（tool_* / retrieval_* / memory_*）
+  → （可选）Reflector / Replan
+  → Output（SSE token + done）
+```
+
+Kernel 只保证这条链**可跑、可测、可观测**；具体是 `search_docs` 还是 `run_shell` 由 Capability + Scenario 决定。
+
+#### 2.4.3 Capability 扩展约定
+
+所有外部能力（含 MCP）必须经同一管道，禁止在 Node 里散落裸 HTTP / subprocess：
+
+```text
+ToolSpec(name, args_schema, category, risk_level, requires_approval, timeout_seconds)
+  → PolicyRegistry（白名单 / 审批 / 未来 hooks）
+  → Handler（async coroutine）
+  → ToolResultModel → RuntimeEvent(tool_end)
+```
+
+| Capability 类型 | `category` 示例 | 典型 risk | 代码锚点（现状 / 目标） |
+|-----------------|-----------------|-----------|-------------------------|
+| RAG 检索 | `memory` | low | `rag/` + `search_docs` ✅ |
+| HTTP API | `http` | medium~high | `tools/http_tools.py` ✅ |
+| Shell | `shell` | high | `tools/extensions/shell/` ❌ 待建 |
+| Git | `vcs` | medium~high | `tools/extensions/git/` ❌ 待建 |
+| MCP | `mcp` | 按 server | `tools/extensions/mcp/` ❌ §7.5 PoC |
+
+注册入口：`ToolRegistry.register_async()`（`tools/registry.py`）。今日水印三件套通过 `ToolRegistry.from_agent_tools()` 硬编码；**目标**改为 Scenario 声明启用哪些 Capability，由 loader 批量注册。
+
+#### 2.4.4 Scenario 包目录约定（目标布局）
+
+> **现状**：水印 Demo 配置分散在 `docs/source/`、`agent/tool_router.py`、`agent/prompts.py`、`eval/`。  
+> **目标**：收敛到 `scenarios/<name>/`，Kernel 通过 `SCENARIO` 环境变量（或等价配置）加载。
+
+```text
+scenarios/
+  watermark/                          # 当前 Demo（迁移目标）
+    scenario.yaml                     # 元信息：启用哪些 capability packs
+    docs/
+      docs_manifest.json              # RAG 语料清单（可 symlink 到 docs/source/）
+    policy.yaml                       # tool 白名单、审批规则（或指向 guardrail 配置）
+    prompts/
+      system.md
+      tool_grounded.md
+    router/
+      rules.yaml                      # 或保留 tool_router 的声明式规则
+    memory/
+      policy.yaml                     # recall / inject / TTL 覆盖项
+    eval/
+      golden.json                     # 场景 golden（可引用 eval/golden/）
+      rag_cases.json
+
+  minimal/                            # 最小场景（仅验证 Kernel）
+    scenario.yaml                     # capabilities: [] 或 echo only
+    eval/
+      smoke.json
+
+copilot_agent/                        # Kernel + Capability 实现（不随场景复制）
+  runtime/                            # Run FSM · EventStore · Timeline
+  contracts/                          # RuntimeEvent · ToolResult · validate
+  agent/                              # Graph · runner · nodes
+  memory/                             # 分层记忆实现
+  rag/                                # RAG Capability 实现
+  tools/
+    registry.py                       # ToolSpec 协议
+    http_tools.py                       # HTTP Capability
+    extensions/                       # 未来：shell · git · mcp
+      mcp/
+      shell/
+      git/
+```
+
+**`scenario.yaml` 最小字段（约定，实现待做）**：
+
+```yaml
+name: watermark
+description: Watermark platform docs + API agent
+capabilities:
+  - rag
+  - http
+# 可选：memory_policy: memory/policy.yaml
+# 可选：router: router/rules.yaml
+# 可选：prompts_dir: prompts/
+docs_dir: docs          # 相对本 scenario 目录；或 WATERMARK_DOCS_PATH 覆盖
+eval:
+  golden: eval/golden.json
+  rag_cases: eval/rag_cases.json
+```
+
+**加载规则（约定）**：
+
+1. Kernel 启动时读取 `SCENARIO`（默认 `watermark`），解析 `scenarios/<name>/scenario.yaml`。
+2. 按 `capabilities` 注册 Tool；RAG 使用 scenario 内 `docs/` 或 env 覆盖路径。
+3. Prompt / router / memory 策略**覆盖** Kernel 默认值，不修改 `runtime/`、`contracts/` 源码。
+4. Eval 脚本可通过 `--scenario watermark` 只跑该目录下 case（与 `--profile` 正交）。
+
+#### 2.4.5 场景定制 vs Kernel 改动（决策表）
+
+| 需求 | 应改 Scenario | 应改 Capability | 应改 Kernel |
+|------|---------------|-----------------|-------------|
+| 换文档语料 | ✅ manifest | — | — |
+| 换 API 白名单 | ✅ policy.yaml | ⚠️ http 工具参数 | — |
+| 换意图分类规则 | ✅ router | — | — |
+| 换 SYSTEM_PROMPT | ✅ prompts | — | — |
+| 新增 MCP server | ⚠️ policy 白名单 | ✅ mcp adapter | — |
+| 新增 shell 工具 | ⚠️ policy sandbox | ✅ shell handler | ⚠️ Policy hooks |
+| Run cancel 语义 | — | — | ✅ runtime |
+| 新 Event kind | — | — | ✅ contracts + event_schema |
+
+**原则**：能不进 Kernel 就不进；Capability 只做「一种工具的协议实现」；业务差异进 Scenario。
+
+#### 2.4.6 实现路线图（与 §7 对齐）
+
+| 阶段 | 目标 | 对应 §7 |
+|------|------|---------|
+| **A** | Scenario loader + `scenarios/watermark/` 迁移 | 与 §7.3 并行（Tool 插件化） |
+| **B** | 统一 Context Manager 单入口 | §7.3 L5 |
+| **C** | MCP Capability adapter | §7.5 L6 |
+| **D** | shell / git Capability + `scenarios/coding/` 示例 | §7.5 后独立立项 |
+
+详细任务仍写入各 `*-design.md` 的「八层栈改造分配」；本节只定**分层哲学与目录约定**。
 
 ---
 
-### 一句话：你缺什么
+## 3. 模块一览（14 + 横切）
 
-> **不缺「能跑的 Agent」；缺「能证明没变坏、记忆不打架、出事能查、边界可控」的四件套——Eval、Memory/Checkpoint 统一、Observability 关联、Guardrail 深化。**  
+成熟度 **高 / 中 / 低**；缺口细节见同列设计文档的 **未来优化** / **遗留问题**（`data-flow-design` 无遗留节，见该文档 §8）。
+
+
+| ID  | 模块                 | 代码锚点                                                        | 职责                                   | 不负责              | 成熟度 | 设计文档 · 缺口 §                                                                                                        |
+| --- | ------------------ | ----------------------------------------------------------- | ------------------------------------ | ---------------- | --- | ------------------------------------------------------------------------------------------------------------------ |
+| M01 | API / Server       | `copilot_agent/server.py`                                   | HTTP/SSE/WS、请求校验、挂载 Engine/Runner    | Run FSM、图节点      | 高   | [README](../README.md) §5–6；长 Run/WS → [runtime-design](./runtime-design.md) §8·§9                                 |
+| M02 | Runtime Contract   | `runtime/event_store.py`, `run_state.py`, `event_schema.py` | Thread/Run/Event 事实源、FSM、事件类型        | LLM、工具实现         | 高   | [runtime-design](./runtime-design.md) §8·§9；[data-flow-design](./data-flow-design.md) §8                           |
+| M03 | Execution Engine   | `runtime/execution_engine.py`                               | Run 调度、cancel/approve、超时、流队列、终态触发压缩  | 事件 schema、图逻辑    | 中   | [runtime-design](./runtime-design.md) §8·§9                                                                        |
+| M04 | Timeline 读模型       | `runtime/timeline.py`                                       | events → UI/API timeline 投影          | 写入 EventStore    | 高   | [runtime-design](./runtime-design.md) §6.3、§8·§9                                                                   |
+| M05 | Contracts          | `copilot_agent/contracts/`                                  | Envelope、ToolResult、Adapter、validate | 业务编排             | 中   | [data-flow-design](./data-flow-design.md) §8                                                                       |
+| M06 | Agent Graph        | `agent/graph.py`, `nodes.py`, `state.py`                    | LangGraph 图、路由、`safety_gate`         | REST、Run API     | 中   | [memory-checkpoint-design](./memory-checkpoint-design.md) §8·§9；编排 [tech-selection](./tech-selection-design.md) §4 |
+| M07 | ChatRunner / 流映射   | `agent/runner.py`, `stream/event_mapper.py`                 | 图输入、astream、emit RuntimeEvent        | EventStore SQL   | 中   | 同 M06；事件形状 [data-flow-design](./data-flow-design.md)                                                               |
+| M08 | LLM                | `llm/provider.py`                                           | ChatOpenAI 配置与薄封装                    | Tool、Memory 策略   | 中   | [tech-selection-design](./tech-selection-design.md) §4                                                             |
+| M09 | Memory             | `memory/manager.py`, `policy.py`, `checkpoint_compactor.py` | Episodic 摘要/召回、checkpoint 压缩         | Run 生命周期、RAG 建索引 | 中   | [memory-checkpoint-design](./memory-checkpoint-design.md) §8.5·§9                                                    |
+| M10 | RAG                | `rag/`、`docs/source/`                                      | ingest、结构化 API 元数据、检索、Tool-grounded 注入 | Run/Event、审批     | **中高** | [rag-design](./rag-design.md) §11.0·[tool-grounded-design](./tool-grounded-design.md) §12.1 |
+| M11 | Tool               | `tools/`, `agent/tool_handlers.py`                          | 注册、白名单 HTTP、handlers                 | 危险策略判定（归 M12）    | 中   | [data-flow-design](./data-flow-design.md) §8；[tech-selection](./tech-selection-design.md) §4                       |
+| M12 | Guardrail / Policy | `policy/registry.py`, `nodes` safety_gate                   | 风险分级、审批、危险 POST 拦截                   | 工具 HTTP 实现       | 低   | [guardrail-policy-design](./guardrail-policy-design.md) §10·§11                                                    |
+| M13 | Observability      | `observability/langfuse_tracer.py`                          | Langfuse trace/span、日志               | EventStore 写入    | 低   | [observability-design](./observability-design.md) §9·§10                                                           |
+| M14 | Session 凭据         | `conversation_store.py`                                     | 按 thread 缓存 WMSESSIONID（内存 TTL）      | 多租户认证            | 中   | **本页 M14 说明**（无 design doc）                                                                                        |
+
+
+**横切**
+
+
+| 名称        | 锚点                             | 边界               | 成熟度 | 设计文档 · 缺口 §                                                             |
+| --------- | ------------------------------ | ---------------- | --- | ----------------------------------------------------------------------- |
+| Eval / 回归 | `scripts/verify_*.py`, `eval/` | 验证行为与契约，不实现产品逻辑  | 中   | [eval-design](./eval-design.md) §7·§8；[ci-design](./ci-design.md) §2–§5 |
+| UI 控制台    | `static/index.html`            | 本地 Timeline/审批调试 | —   | —                                                                       |
+| 配置        | `settings.py`                  | 环境变量聚合，不含业务规则    | —   | —                                                                       |
+
+
+**非 MVP（刻意后置）**：Planning（[tech-selection](./tech-selection-design.md) §4）、Multi-Agent、外部队列（Temporal/Celery）、Mem0/Zep、多租户。
+
+**M14 说明**（无独立 `*-design.md`）：`ConversationCookieStore` 在进程内按 `conversation_id`（即 `thread_id`）保存水印平台登录 Cookie，供 `http_get`/`http_post` 带会话访问；TTL 由配置控制，**不**落盘、**不**替代平台账号体系。排障时与 M11 白名单、M12 审批分开查。
+
+---
+
+## 4. 模块依赖（允许方向）
+
+```text
+M01 → M03 → M07 → M06 → (LLM M08, Tool M11 via graph)
+M07 → M05 → M02
+M07 → M09 → M02, checkpoint
+M11 → M12（策略查询）
+M07 → M13（trace）
+M11,M07 → M14（登录态 cookie）
+M04 只读 M02
+```
+
+**禁止**：M02 调用 M07；M10 写入 Run FSM；M12 在 `tools/http_tools` 外重复实现 HTTP。
+
+---
+
+## 5. 横切：Eval
+
+- **数据集**：`eval/phase4-eval-cases.json`（**20** 条 docs + api/safety 期望）、`eval/golden/runtime-golden-scenarios.json`（Run 事件契约）
+- **聚合入口**：`scripts/verify_eval_suite.py --profile {core|rag|full}`
+- **设计**：[eval-design.md](./eval-design.md)
+- **CI**：[ci-design.md](./ci-design.md)
+
+成熟度 **中**：core 含 contract + runtime + golden + memory-checkpoint；仍缺 Promptfoo 驱动真实 Agent E2E、LLM judge 夜跑。
+
+---
+
+## 6. 文档索引
+
+
+| 你想…                         | 文档                                                           | 主题（写什么）                                        |
+| --------------------------- | ------------------------------------------------------------ | ---------------------------------------------- |
+| 跑起来、调 API                   | [README.md](../README.md)                                    | 安装、环境变量、REST/SSE API、本地运行                      |
+| 模块边界、成熟度、**八层栈改造顺序** | **本页** §3–§4、**§7** | 14 模块地图、依赖、按层波次索引 |
+| **Kernel / Capability / Scenario 分层** | **本页** **§2.4** | 通用范式、目录约定、与八层栈关系 |
+| M14 登录 Cookie（无 design doc） | **本页** §3 **M14 说明**                                         | 进程内 WMSESSIONID、TTL、与 M11/M12 分工               |
+| Run/Thread、cancel/approve   | [runtime-design.md](./runtime-design.md)                     | FSM、ExecutionEngine、Timeline、审批续跑              |
+| 事件/工具 payload 契约            | [data-flow-design.md](./data-flow-design.md)                 | RuntimeEvent、ToolResult、Adapter、SSE/EventStore |
+| Memory 与 checkpoint         | [memory-checkpoint-design.md](./memory-checkpoint-design.md) | Working memory 真相源、压缩、episodic                 |
+| RAG、search_docs、Tool-grounded、检索评测 | [rag-design.md](./rag-design.md) ·[tool-grounded-design.md](./tool-grounded-design.md) | §0 状态表、ingest、分层评测、verify 命令 |
+| Guardrail、审批、HTTP 白名单       | [guardrail-policy-design.md](./guardrail-policy-design.md)   | Policy、safety_gate、白名单、与 Run 协作                |
+| 排障、Langfuse、ID 关联           | [observability-design.md](./observability-design.md)         | EventStore 产品轨 + Langfuse、trace 关联             |
+| Eval 分层与 golden             | [eval-design.md](./eval-design.md)                           | profile、golden、聚合 summary                      |
+| CI 失败怎么查                    | [ci-design.md](./ci-design.md)                               | `agent-ci` / `eval-ci`、本地复现                    |
+| 框架选型、主线与优化方向                | [tech-selection-design.md](./tech-selection-design.md) §3–§4 | 对外框架对比、当前选择与优化方向                               |
+| Demo 验收与产品场景                | [demo-requirements-design.md](./demo-requirements-design.md) | 水印任务 Agent + 文档问答验收                            |
+
+
+**待补（可选）**：`api-design.md`（REST 字段若需从 README 抽离时再写）。
+
+---
+
+## 7. 建议改造顺序（八层栈）
+
+总路线图按 **Ingestion → Preprocess → Schema Extraction → Pydantic Validation → Agent State → Tool Execution → Output → Storage/Audit** 八层组织；**产品化分层**见 **§2.4 Kernel / Capability / Scenario**。  
+**本页只写波次、依赖与文档索引**；具体任务、验收命令、代码锚点见各 `*-design.md` 的 **「八层栈改造分配」** 小节。
+
+### 7.0 八层栈 ↔ LearnAgent 映射
+
+```text
+数据源          LearnAgent 现状                          主文档
+────────────────────────────────────────────────────────────────────────
+L1 Ingestion    md manifest + upload；`IngestSource`；env 语料路径   rag-design §11.0
+                ❌ 网页/DB 同步（§7.5）
+L2 Preprocess   md 分块；BM25/向量；memory embedding    rag-design §5；memory §4.5
+                ❌ OCR/PDF/HTML 通用流水线
+L3 Schema       api_parse；memory llm_extractor          rag-design §4.4；memory §4.5
+                ❌ 通用 Extract→Record 中间层
+L4 Pydantic     RuntimeEvent/ToolResult；FastAPI 入参    data-flow-design §2
+                ⚠️ memory/RAG 部分 loose payload
+L5 Agent State  checkpoint；tool_route；episodic/LTM     memory-checkpoint；tool-grounded
+                ❌ plan_updated / 显式 Planning
+L6 Tool Exec    search_docs + 白名单 HTTP + 审批          tool-grounded；guardrail-policy
+                ❌ MCP/DB/代码/邮件
+L7 Output       SSE token + ToolMessage 证据              data-flow-design §2
+                ❌ 最终回答固定 JSON schema
+L8 Storage      EventStore + Timeline + eval              runtime；observability；eval
+                ⚠️ trace_id/cost 未闭环；无 GDPR 删除
+```
+
+### 7.1 已落地基线（2026-05）
+
+| 层 | 已交付 | 验收 |
+|----|--------|------|
+| L1–L2 | 9 篇 `docs/source/` ingest、热更新、BM25+RRF+可选向量 | `verify_phase4_ragas.py`，[rag-design §0](./rag-design.md) |
+| L3 | API 契约 `api_parse`；Memory 规则/LLM 抽取 + pending | `verify_rag_api_ingest.py`，`verify_memory_production_v2.py` |
+| L4 | `RuntimeEvent`/`ToolResultModel` + Adapter 链 | `verify_contract_events.py`，[data-flow §2](./data-flow-design.md) |
+| L5 | checkpoint 真相源；tool_router；episodic + `memory_items` | `verify_memory_checkpoint_consistency.py` |
+| L6 | Tool-grounded 路由；path 注入；诊断模板；审批 | `verify_tool_router.py`，`--profile e2e` |
+| L7 | 流式 NL + `retrieval_completed` 溯源；L4-lite | `verify_citation_l4.py` |
+| L8 | EventStore/Timeline；`checkpoint_compacted`；core/rag/e2e eval | `verify_eval_suite.py` |
+
+详情：[rag-design §0](./rag-design.md)、[tool-grounded §0](./tool-grounded-design.md)、[memory-checkpoint §0](./memory-checkpoint-design.md)、[demo-requirements §0](./demo-requirements-design.md)。
+
+---
+
+### 7.2 第 1 波 — 数据前段（L1–L4）✅ 已完成（2026-05-21）
+
+**目标**：把「文档 RAG 垂直切片」扩展为可复用的 **接入 → 预处理 → 抽取 → 校验** 流水线，仍不阻塞 Agent 主链路。
+
+| 层 | 改造项 | 状态 | 设计文档 |
+|----|--------|------|----------|
+| L1 | `IngestSource` 抽象（`FileIngestSource`；Url/Api 占位） | ✅ | [rag-design §11.0](./rag-design.md) |
+| L1 | `WATERMARK_DOCS_PATH` 接生产 `backend-java/docs` | ✅ 已支持 | [rag-design §11.0](./rag-design.md) |
+| L1 | `POST /v1/rag/upload` + reload | ✅ | [rag-design §11.0](./rag-design.md) |
+| L2 | `response_fields` JSON 块解析 | ✅ | [rag-design §11.0](./rag-design.md) |
+| L2 | 动态 top-k / `RAG_CONTEXT_BUDGET_CHARS` | ✅ | [rag-design §11.0](./rag-design.md) |
+| L2 | `docs_manifest.json` + glob 扩面 | ✅ | [rag-design §11.0](./rag-design.md) |
+| L3 | 统一 `ExtractedRecord`（`contracts/extract.py`） | ✅ | [data-flow §8.1](./data-flow-design.md) |
+| L4 | `memory_*` Pydantic 子模型 | ✅ | [data-flow §8.1](./data-flow-design.md) |
+| L4 | `retrieval_completed` 严格校验 | ✅ 基线已有 | [data-flow §8.1](./data-flow-design.md) |
+| L4 | `GET /events?validated=1` | ✅ | [data-flow §8.1](./data-flow-design.md) |
+
+**验收**：`verify_extract_validate.py`、`verify_events_validated.py`、`verify_rag_api_ingest.py`（含 response_fields）、`verify_rag_retrieval_quality.py`（budget packing）；`--profile rag` 见 [eval-design §7.5](./eval-design.md)。
+
+---
+
+### 7.3 第 2 波 — 决策与执行（L5–L6）
+
+**目标**：从「规则 Tool-grounded」进化为 **可观测规划 + 可扩展工具**，Demo 可 `--mode live`。
+
+| 层 | 改造项 | 设计文档 |
+|----|--------|----------|
+| L5 | 检索 path merge 进 `tool_route`；`plan_updated` / 步骤 outcome PoC | [tool-grounded §12.1](./tool-grounded-design.md)、[tech-selection §4](./tech-selection-design.md) |
+| L5 | Memory 续轮 inject 去重收尾；episodic 向量索引（可选） | [memory §8.5](./memory-checkpoint-design.md) |
+| L6 | `timeout_seconds` 执行层强制；策略表 YAML 版本化 | [guardrail §10.5](./guardrail-policy-design.md) |
+| L6 | 真实 LLM E2E（`verify_demo_golden_e2e.py --mode live`） | [tool-grounded §12.1](./tool-grounded-design.md)、[eval §7.5](./eval-design.md) |
+
+**横切验收**：`--profile e2e` proxy 保持 PASS；live 模式有 key 时夜跑。见 [demo-requirements §6](./demo-requirements-design.md)。
+
+---
+
+### 7.4 第 3 波 — 输出与审计闭环（L7–L8）
+
+**目标**：结构化交付 + 生产级追踪/回放。
+
+| 层 | 改造项 | 设计文档 |
+|----|--------|----------|
+| L7 | 可选 `FinalAnswerModel`（NL + citations + structured fields） | [data-flow §8.1](./data-flow-design.md) |
+| L7 | 输出 Guard（secret/PII 模式检测） | [guardrail §10.5](./guardrail-policy-design.md) |
+| L8 | `trace_id` 写入 EventStore；generation span；token/cost 进 `run_completed_meta` | [observability §9.6](./observability-design.md) |
+| L8 | 失败 run 一键导出 timeline；RAGAS 夜跑趋势 | [eval §7.5](./eval-design.md)、[observability §9.6](./observability-design.md) |
+| L8 | `running`/`queued` durable resume 或外部队列 PoC | [runtime §8.1](./runtime-design.md) |
+
+---
+
+### 7.5 第 4 波 — 平台扩展（非 Demo 阻塞）
+
+| 层 | 改造项 | 设计文档 |
+|----|--------|----------|
+| L1 | 网页/DB 同步 ingest | [rag-design §11.0](./rag-design.md) |
+| L3–L4 | 多租户 `tenant_id` + 服务端 `user_id` 鉴权 | [memory §8.5](./memory-checkpoint-design.md)、[guardrail §10.5](./guardrail-policy-design.md) |
+| L6 | MCP registry PoC；LiteLLM fallback | [guardrail §10.5](./guardrail-policy-design.md)、[tech-selection §4](./tech-selection-design.md) |
+| L8 | Memory GDPR 删除 API；OpenTelemetry 双写 | [memory §8.5](./memory-checkpoint-design.md)、[observability §9.6](./observability-design.md) |
+| — | Multi-Agent、外部队列 Temporal | [tech-selection §4](./tech-selection-design.md) |
+
+---
+
+### 7.6 改造原则
+
+1. **按层验收**：每波只动 1–2 个层，避免同时改 ingest + 编排 + 观测导致回归难定位。  
+2. **文档下沉**：本页 §7 只保留波次索引；新增任务必须写入对应 design doc 的「八层栈改造分配」。  
+3. **Eval 门禁**：每层至少一条 `verify_*` 或 eval case 扩展，见 [eval-design](./eval-design.md)。  
+4. **Demo 优先**：第 1–2 波服务「生产文档 + live E2E」；第 4 波按需立项。
 

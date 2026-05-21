@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-EVENT_SCHEMA_VERSION = 1
+from copilot_agent.contracts.envelope import (
+    EVENT_SCHEMA_VERSION,
+    envelope_payload,
+    payload_schema_version,
+)
 
 EVENT_RUN_CREATED = "run_created"
 EVENT_RUN_STARTED = "run_started"
@@ -22,6 +26,8 @@ EVENT_DONE = "done"
 EVENT_ERROR = "error"
 EVENT_MEMORY_RUN_SUMMARY = "memory_run_summary"
 EVENT_MEMORY_THREAD_SUMMARY = "memory_thread_summary"
+EVENT_CHECKPOINT_COMPACTED = "checkpoint_compacted"
+EVENT_RETRIEVAL_COMPLETED = "retrieval_completed"
 
 KNOWN_EVENT_TYPES = frozenset(
     {
@@ -43,22 +49,14 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_ERROR,
         EVENT_MEMORY_RUN_SUMMARY,
         EVENT_MEMORY_THREAD_SUMMARY,
+        EVENT_CHECKPOINT_COMPACTED,
+        EVENT_RETRIEVAL_COMPLETED,
     }
 )
 
-
-def envelope_payload(event_type: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    data = dict(payload or {})
-    if "schema_version" not in data:
-        data["schema_version"] = EVENT_SCHEMA_VERSION
-    return data
-
-
-def payload_schema_version(payload: dict[str, Any] | None) -> int:
-    if not isinstance(payload, dict):
-        return 0
-    raw = payload.get("schema_version")
-    try:
-        return int(raw) if raw is not None else 0
-    except (TypeError, ValueError):
-        return 0
+__all__ = [
+    "EVENT_SCHEMA_VERSION",
+    "KNOWN_EVENT_TYPES",
+    "envelope_payload",
+    "payload_schema_version",
+]

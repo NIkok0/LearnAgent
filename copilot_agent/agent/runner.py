@@ -9,15 +9,20 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from copilot_agent.agent.graph import build_agent_graph
-from copilot_agent.agent.nodes import AgentNodes, memory_context_messages
+from copilot_agent.agent.nodes import AgentNodes
 from copilot_agent.agent.prompts import DANGEROUS_JOB_PATH, MAX_ROUNDS, SYSTEM_PROMPT
-from copilot_agent.agent.message_utils import last_user_content
+from copilot_agent.agent.message_utils import current_turn_messages, last_user_content
 from copilot_agent.agent.stream.event_mapper import GraphEventMapper
-from copilot_agent.agent.stream.sse import format_sse
+from copilot_agent.contracts.adapters.event_store import EventStoreAdapter
+from copilot_agent.contracts.adapters.sse import SseAdapter
+from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.agent.tool_handlers import ToolHandlers
 from copilot_agent.conversation_store import ConversationCookieStore
 from copilot_agent.llm import LLMProvider
 from copilot_agent.memory import MemoryManager
+from copilot_agent.memory.manager import CHECKPOINT_COMPACTED_EVENT
+from copilot_agent.memory.checkpoint_compactor import CheckpointCompactor
+from copilot_agent.memory.prompt_inject import build_graph_turn_messages
 from copilot_agent.observability import end_chat_trace, flush_langfuse, start_chat_trace
 from copilot_agent.policy import PolicyRegistry
 from copilot_agent.rag import RagStore
@@ -58,13 +63,14 @@ class ChatRunner:
         policy_registry: PolicyRegistry | None = None,
     ) -> None:
         self._cookies = cookie_store
+        self._llm_provider = llm_provider or LLMProvider()
         self._memory = memory or MemoryManager(
             rag_store=rag_store,
             event_store=event_store,
             checkpoint_path=settings.agent_checkpoint_path,
+            llm_provider=self._llm_provider,
         )
         self._http = http or WatermarkHttpTools()
-        self._llm_provider = llm_provider or LLMProvider()
         self._tool_handlers = ToolHandlers(memory=self._memory, http=self._http, cookies=self._cookies)
         self._tool_registry = self._build_tool_registry()
         self._policy = policy_registry or PolicyRegistry(self._tool_registry)
@@ -89,6 +95,7 @@ class ChatRunner:
             tool_registry=self._tool_registry,
             checkpoint_reader=CheckpointReader(self._graph),
         )
+        self._checkpoint_compactor = CheckpointCompactor(self._graph, policy=self._memory.policy)
 
     @property
     def memory(self) -> MemoryManager:
@@ -114,19 +121,24 @@ class ChatRunner:
             model=settings.openai_model,
         )
         try:
-            goal = last_user_content(messages)
+            turn_messages = current_turn_messages(messages)
+            goal = last_user_content(turn_messages)
             memory_context = self._memory.build_context(
                 thread_id=conversation_id,
                 run_id=run_id,
-                messages=messages,
+                messages=turn_messages,
                 goal=goal,
             )
             if resume is None:
-                lc_messages = [
-                    SystemMessage(content=SYSTEM_PROMPT),
-                    *memory_context_messages(memory_context.as_dict()),
-                    *self._to_lc_messages(messages),
-                ]
+                lc_turn = self._to_lc_messages(turn_messages)
+                lc_messages = await build_graph_turn_messages(
+                    graph=self._graph,
+                    thread_id=conversation_id,
+                    system_prompt=SYSTEM_PROMPT,
+                    memory_context=memory_context.as_dict(),
+                    turn_messages=lc_turn,
+                    policy=self._memory.policy,
+                )
                 graph_input = {"messages": lc_messages}
             else:
                 graph_input = Command(resume=resume)
@@ -136,23 +148,32 @@ class ChatRunner:
                     "thread_id": conversation_id,
                     "conversation_id": conversation_id,
                     "run_id": run_id,
-                    "input_messages": messages,
+                    "input_messages": turn_messages,
                     "confirm_dangerous": confirm_dangerous,
                     "allow_job_post": settings.copilot_allow_job_post,
                     "trace": trace,
                 },
             }
             last_output = ""
-            async for domain_event in self._mapper.map(
+            async for runtime_event in self._mapper.map(
                 graph=self._graph,
                 graph_input=graph_input,
                 graph_config=graph_config,
                 thread_id=conversation_id,
                 run_id=run_id,
             ):
-                if domain_event["type"] == "token":
-                    last_output += str(domain_event["payload"].get("text", ""))
-                yield self._emit(conversation_id, run_id, domain_event["type"], domain_event["payload"])
+                if runtime_event.kind == "token":
+                    text = runtime_event.content or str(runtime_event.data.get("text", ""))
+                    last_output += str(text)
+                if not runtime_event.correlation.thread_id:
+                    runtime_event = runtime_event.model_copy(
+                        update={
+                            "correlation": runtime_event.correlation.model_copy(
+                                update={"thread_id": conversation_id, "run_id": run_id}
+                            )
+                        }
+                    )
+                yield self._emit(runtime_event)
             end_chat_trace(trace, output_preview=last_output)
         except Exception as e:
             end_chat_trace(trace, error=str(e))
@@ -160,14 +181,29 @@ class ChatRunner:
         finally:
             flush_langfuse()
 
-    def _emit(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> str:
-        self._memory.append_event(thread_id, run_id, event_type, payload)
-        return format_sse(event_type, payload)
+    def _emit(self, event: RuntimeEvent) -> str:
+        EventStoreAdapter.append_memory(self._memory, event)
+        return SseAdapter.encode(event)
 
     def finalize_memory(self, thread_id: str, run_id: str, *, messages: list[dict[str, Any]] | None = None) -> None:
-        fallback_goal = last_user_content(messages or [])
+        turn_messages = current_turn_messages(messages or [])
+        fallback_goal = last_user_content(turn_messages)
         self._memory.summarize_run(thread_id, run_id, fallback_goal=fallback_goal)
         self._memory.update_thread_summary(thread_id, run_id)
+
+    async def compact_checkpoint(self, thread_id: str, *, run_id: str | None = None) -> dict[str, Any]:
+        result = await self._checkpoint_compactor.compact_if_needed(thread_id)
+        if result.get("compacted") and settings.memory_emit_checkpoint_compacted:
+            effective_run_id = run_id
+            if not effective_run_id and self._memory.event_store is not None:
+                effective_run_id = self._memory.event_store.latest_run_id(thread_id)
+            if effective_run_id:
+                payload = {
+                    **result,
+                    "checkpoint_path": self._memory.checkpoint_path,
+                }
+                self._memory.append_event(thread_id, effective_run_id, CHECKPOINT_COMPACTED_EVENT, payload)
+        return result
 
     async def aclose(self) -> None:
         checkpointer = getattr(self._graph, "checkpointer", None)

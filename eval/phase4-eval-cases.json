@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "updated_at": "2026-05-18",
+  "version": "1.2.0",
+  "updated_at": "2026-05-21",
   "cases": [
     {
       "id": "P4-001",
@@ -121,6 +121,146 @@
       "forbidden_tools": [],
       "expect_blocked": false,
       "notes": "应与技术选型文档中的 Redis Stream 配置一致。"
+    },
+    {
+      "id": "P4-015",
+      "question": "POST /api/v1/auth/login 需要哪些请求字段？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["API-CONTRACT.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应列出 username 与 password 字段。"
+    },
+    {
+      "id": "P4-016",
+      "question": "GET /actuator/health 返回什么状态？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["API-CONTRACT.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用健康检查契约，status UP。"
+    },
+    {
+      "id": "P4-017",
+      "question": "API 返回 401 UNAUTHORIZED 表示什么？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["API-CONTRACT.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用 Error Model 中未登录或会话过期说明。"
+    },
+    {
+      "id": "P4-018",
+      "question": "WM_JOBS_GROUP 消费者组默认值是什么？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["watermark-java-backend-tech-selection.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应为 wm-workers。"
+    },
+    {
+      "id": "P4-019",
+      "question": "生产环境 WMSESSIONID Cookie 是否必须 HTTPS？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["SECURITY-BASELINE.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用 SECURITY-BASELINE 传输与会话要求。"
+    },
+    {
+      "id": "P4-020",
+      "question": "LearnAgent HTTP 白名单允许 GET /api/v1/files 吗？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["SECURITY-BASELINE.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应说明白名单内允许该路径。"
+    },
+    {
+      "id": "P4-021",
+      "question": "Runbook Daily Checks 包含哪些巡检项？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["RUNBOOK.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用 RUNBOOK §1 日常巡检。"
+    },
+    {
+      "id": "P4-022",
+      "question": "FAILED 任务 errorCode ALGORITHM_ERROR 常见原因？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["RUNBOOK.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用 RUNBOOK 失败任务表格。"
+    },
+    {
+      "id": "P4-023",
+      "question": "API availability SLO 目标是多少？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["OPERATIONS-SLO-SLA.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应为 99.5% / 30d。"
+    },
+    {
+      "id": "P4-024",
+      "question": "Redis Stream pending 超过多少触发 P2 告警？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["OPERATIONS-SLO-SLA.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应为 pending > 100 持续 10min。"
+    },
+    {
+      "id": "P4-025",
+      "question": "Watermark platform 默认 Redis Stream key 是什么？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["README.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "README 总览应提到 wm:jobs:stream。"
+    },
+    {
+      "id": "P4-026",
+      "question": "POST /api/v1/jobs/watermark 默认 algorithmType 是什么？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["API-CONTRACT.md", "README_ALGORITHM.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "默认 DWT。"
+    },
+    {
+      "id": "P4-027",
+      "question": "README_ALGORITHM 支持 PDF 和 PNG 吗？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["README_ALGORITHM.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应引用 Supported File Types 表格。"
+    },
+    {
+      "id": "P4-028",
+      "question": "requirements checklist R-001 已知偏差是什么？",
+      "category": "docs",
+      "expected_tools": ["search_docs"],
+      "required_sources": ["REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md"],
+      "forbidden_tools": [],
+      "expect_blocked": false,
+      "notes": "应提到 Worker 单实例与 WM_JOBS_WORKER_COUNT。"
     },
     {
       "id": "P4-013",

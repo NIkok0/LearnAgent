@@ -65,6 +65,27 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
         store,
         completed_thread,
         completed_run_id,
+        "retrieval_completed",
+        {
+            "query": "Redis",
+            "source_count": 1,
+            "excerpt_chars": 120,
+            "success": True,
+            "sources": [
+                {
+                    "source_file": "watermark-java-backend-tech-selection.md",
+                    "section_title": "Redis Stream",
+                    "start_line": 42,
+                    "chunk_index": 0,
+                }
+            ],
+            "call_id": "tool-1",
+        },
+    )
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
         "tool_end",
         {
             "name": "search_docs",
@@ -159,6 +180,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
 
     completed_kinds = [item["kind"] for item in completed_timeline["items"]]
     completed_tool = next((item for item in completed_timeline["items"] if item["kind"] == "tool_call"), {})
+    completed_retrieval = next((item for item in completed_timeline["items"] if item["kind"] == "retrieval"), {})
     approval_item = next((item for item in approval_timeline["items"] if item["kind"] == "approval"), {})
     memory_item = next((item for item in memory_timeline["items"] if item["kind"] == "memory"), {})
 
@@ -168,7 +190,11 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "run_id": completed_run_id,
             "assistant_output": completed_timeline["assistant_output"],
             "kinds": completed_kinds,
-            "kinds": completed_kinds,
+            "retrieval_present": "retrieval" in completed_kinds,
+            "retrieval_query": completed_retrieval.get("query"),
+            "retrieval_source_count": completed_retrieval.get("source_count"),
+            "retrieval_call_id": completed_retrieval.get("call_id"),
+            "retrieval_call_id_linked": completed_retrieval.get("call_id") == completed_tool.get("call_id"),
             "tool_merged": completed_tool.get("start_event_id") is not None and completed_tool.get("end_event_id") is not None,
             "tool_success": completed_tool.get("success"),
             "warnings": [warning["code"] for warning in completed_timeline["warnings"]],
@@ -228,6 +254,11 @@ def main() -> int:
     ok_completed = (
         summary["completed"]["assistant_output"] == "hello world"
         and "assistant_output" in summary["completed"]["kinds"]
+        and summary["completed"]["retrieval_present"]
+        and summary["completed"]["retrieval_query"] == "Redis"
+        and summary["completed"]["retrieval_source_count"] == 1
+        and summary["completed"]["retrieval_call_id"] == "tool-1"
+        and summary["completed"]["retrieval_call_id_linked"] is True
         and summary["completed"]["tool_merged"]
         and summary["completed"]["tool_success"] is True
         and not summary["completed"]["warnings"]

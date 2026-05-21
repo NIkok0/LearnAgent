@@ -1,4 +1,4 @@
-# Agent Runtime 技术选型对比
+# LearnAgent 技术选型设计
 
 > 调研状态：阶段性调研，日期为 2026-05-19。本文用于指导 LearnAgent 下一阶段架构演进，不等价于完整 benchmark、源码级审计或长期维护成本评估。
 
@@ -140,68 +140,42 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | LangGraph frontend HITL patterns | approval UI 思路 | 与 LangGraph interrupt 匹配 | 当前 UI 是自建 runtime 控制台 | API 映射 | 参考 |
 | 当前 timeline UI | 本地 run 创建、投影 timeline 查看、cancel、approve、reject | 贴合 EventStore 和 `TimelineProjector` | 还不是完整产品 UI | timeline 交互和 WebSocket | 持续演进 |
 
-## 4. LearnAgent 当前选择
+## 4. LearnAgent 当前选择与优化方向
 
-| 模块 | 当前选择 | 判断 |
+> 对照代码与各 `*-design.md`（截至 2026-05）。「当前选择」为**已接入主线**；「优化方向」为下一阶段演进，不再写「保持/下一步」式判断。
+
+| 模块 | 当前选择（已落地） | 优化方向 |
 |---|---|---|
-| Agent orchestration | LangGraph StateGraph | 保持主线 |
-| LLM | `ChatOpenAI` + `LLMProvider` | 先保留 OpenAI-compatible，后续评估 LiteLLM |
-| Tool | LangChain `StructuredTool` + `ToolRegistry` | 保持 ToolNode 兼容，继续补 tool governance |
-| Runtime | FastAPI + `ExecutionEngine` + SQLite EventStore | 短期最匹配本地单用户 runtime |
-| Memory | checkpoint + RAG + EventStore + `MemoryManager` v1 summary | 下一步补 episodic recall、compression |
-| Policy | `PolicyRegistry` + whitelist + approval | 下一步补策略 schema、输入/输出校验、PII/secret 检测 |
-| Observability | EventStore timeline + Langfuse | 下一步补 trace correlation 和 metrics |
-| UI/control | REST + SSE + projected timeline UI | WebSocket 放到 runtime contract 稳定之后 |
+| Agent orchestration | LangGraph `StateGraph`（`assistant → safety_gate → tools`）；危险工具 `interrupt()` + `Command(resume)` 续跑 | 显式 `plan_updated` / 步骤 outcome；Plan-and-Execute PoC；Multi-Agent 非 MVP |
+| 数据流契约 | `contracts/`：`RuntimeEvent` envelope、`ToolResultModel`、Adapter（SSE/EventStore/HTTP/RAG）、`validate` | 更多 `kind` 的 Pydantic 子模型；可选 `GET /events?validated=1`；见 [data-flow-design.md](./data-flow-design.md) §8 |
+| LLM | `ChatOpenAI`（OpenAI-compatible）+ 薄 `LLMProvider`；`MAX_LLM_INFLIGHT` 限流 | LiteLLM PoC（路由/fallback）；token/cost 写入 run 事件或 metrics |
+| Tool | `StructuredTool` + `ToolNode` + `ToolRegistry`；`tool_start/tool_end` 审计 v1、脱敏 | `timeout_seconds` 执行层强制；失败路径统一 envelope；MCP registry PoC |
+| Runtime | FastAPI + `ExecutionEngine` + SQLite EventStore；`run_state` FSM、`TimelineProjector`；超时/并发槽、`waiting_approval` rehydrate；`schema_version: 1`、事件分页、`run_*_meta` | `running`/`queued` 重启 durable resume；Run 幂等键；见 [runtime-design.md](./runtime-design.md) §8–9 |
+| Memory | LangGraph checkpoint + RAG + EventStore `memory_*` 摘要；v1.1 policy（keyword episodic、budget、conflict）；`current_turn_messages`；`CheckpointCompactor` | 向量 episodic；续轮去重 System/episodic 注入；可选 LLM 压缩摘要；见 [memory-checkpoint-design.md](./memory-checkpoint-design.md) §8 |
+| RAG | 9 篇 Demo 知识源 + BM25/RRF/可选向量；结构化 API ingest；`search_docs` + path 注入 + `retrieval_completed.call_id`；Tool-grounded 规则路由；proxy 20+8 case + L4-lite | RAGAS 夜跑趋势进 CI；`response_fields` JSON 解析；生产语料替换；见 [rag-design.md](./rag-design.md) §10 |
+| Policy | `PolicyRegistry` + HTTP 白名单 + `safety_gate` + Run 级 approve/reject | 策略表版本化与文档；输入/输出/PII/secret；Presidio 或 Guardrails 输出校验 PoC |
+| Observability | EventStore 为 timeline 事实源；Langfuse trace/span（LLM/tool） | `trace_id` 与 `run_id`/`tool_call_id` 写入事件；token/cost/latency 聚合；OpenTelemetry 生产阶段 |
+| UI / 控制通道 | REST + SSE（`/v1/chat` 兼容）；`/ui` timeline；`GET /timeline`；`WS /v1/runs/{id}/ws` 回放 | WS 重连与增量事件协议；长 Run 默认 cursor 拉取；完整产品 UI 后置 |
+| Eval（横切） | `verify_eval_suite --profile core`（contract、runtime、golden、memory-checkpoint 等）；本地 `--profile rag`（6 套件）、`--profile e2e`（Demo 1–6 golden proxy） | 真实 LLM E2E（`--mode live`）；RAGAS 夜跑趋势；见 [eval-design.md](./eval-design.md) §7–8 |
 
-## 5. 缺口与需设计能力
+## 5. 需自建的产品语义与项目实现
 
-这些不是“开源没有实现”，而是 LearnAgent 必须自己定义的产品语义层：
+这些能力开源框架不会替 LearnAgent 定稿。下表四列对照：**为何要自建**、**最小设计目标（应达成什么）**、**仓库里现在做到哪一步**（细节见对应 `*-design.md`）。
 
-| 需设计能力 | 为什么不能直接交给框架 | 最小设计目标 |
-|---|---|---|
-| Runtime event contract | LangGraph、Temporal、Celery 都有状态，但事件类型、payload、REST/SSE 兼容性是 LearnAgent 自己的 API contract | 固定 run/event 状态机、payload schema、回放规则 |
-| Approval/cancel semantics | 框架支持 interrupt/revoke，但 approve/reject/cancel 如何映射到 run 状态和 timeline 需要项目定义 | `approval_required`、`approval_resolved`、`cancel_requested`、`cancelled` 一致落库 |
-| Tool governance schema | 工具框架只解决调用，不解决业务风险等级、权限、审计字段 | `ToolSpec`、risk、category、approval、timeout、audit metadata |
-| Tool result protocol | 各工具返回结构不同，LangChain 不强制统一审计格式 | 统一 success/error、duration、sanitized args/result、call id |
-| Memory orchestration policy | Memory 框架提供存储和召回，但不决定何时写、何时读、何时摘要、如何避免污染上下文 | thread/run summary、episodic search、working memory compression |
-| Trace correlation | Langfuse/LangSmith/OpenTelemetry 能 trace，但跨 SQLite EventStore、SSE、logs 的 ID 体系要统一 | `thread_id/run_id/tool_call_id/trace_id/span_id` 映射 |
-| Sandbox policy | Docker/E2B/gVisor/Firecracker 提供隔离，但工具权限、文件挂载、命令审计、结果脱敏是项目语义 | 文件/终端工具的 permission、resource limit、audit event |
-
-## 6. MVP 后续优化与决策清单
-
-当前目标是先快速跑通单用户本地 MVP，再进行迭代。高优先级问题优先服务端到端可用性、可复盘性和工具可信度；外部 memory、外部队列、多用户权限暂不作为 MVP 阻塞项。
-
-| 优先级 | 方向 | 下一步动作 | 验收标准 |
+| 需设计能力 | 为什么不能直接交给框架 | 最小设计目标 | 项目实现情况 |
 |---|---|---|---|
-| 高 | Runtime / Timeline 闭环 | 做端到端 MVP 验收：创建 thread/run、观察 SSE/UI projected timeline、cancel、approve/reject、查询 raw events | 不依赖外部队列；EventStore 中 run lifecycle、tool audit、memory summary 都可回放；`TimelineProjector` 能输出聚合 timeline 和一致性 warnings |
-| 高 | Memory v1 迭代 | v1.1 landed: policy recall/budget/conflict, failed/cancelled exclusion, memory preview API/UI | 向量 episodic、working memory compression；暂不接外部 memory 服务 |
-| 高 | Tool audit / result consistency | 固化 `tool_start/tool_end` 字段检查，补充失败工具调用的审计验证 | 每次工具调用都有 call id、category、risk、sanitized args/result、success/error |
-| 中 | Approval/cancel 语义 | 保持当前重新执行式 approval，补充文档和回归；LangGraph node-level resume 放到后续 PoC | 当前 approve/reject/cancel 行为稳定、可解释、timeline 可复盘 |
-| 中 | Observability correlation | 继续以 EventStore 为事实源，设计 `thread_id/run_id/tool_call_id` 到 trace/span 的映射 | 同一 run 可从 timeline 定位工具调用和错误；完整 metrics dashboard 后置 |
-| 中 | LiteLLM | 做 provider PoC，验证 DeepSeek/OpenAI fallback 和 cost callback | token/cost/latency 能写入 run event 或 metrics |
-| 中 | Guardrail 方案 | 对比 OpenAI Agents guardrails、NeMo Guardrails、Presidio | 能覆盖输入、工具参数、输出、PII/secret 四类策略 |
-| 低 | Memory 外部方案 | 分别验证 Zep/Mem0 与当前 RAG/EventStore 的集成方式 | 能按 thread_id 写入/召回，不污染当前 prompt |
-| 低 | 外部任务队列 | 对比 Temporal/Celery 与当前 `ExecutionEngine` 的替换成本 | 保留现有 REST/SSE/event API 的前提下可迁移 |
-| 低 | Sandbox | 验证 Docker/E2B 对文件/终端工具的隔离和审计 | 能限制路径、网络、时间、输出大小，并写入 tool audit |
+| Runtime 事件契约 | LangGraph/Temporal 有状态，但 REST/SSE/timeline 的事件类型与 payload 是本项目 API | 固定 Run/Event 状态机；payload schema 与版本；可回放、可分页查询 | **已实现**：`run_state.py` FSM；`event_store.py`；`event_schema.py`；`schema_version: 1`、`after_id` 分页；`RuntimeEvent` + `validate`；`TimelineProjector`；SSE 与落库同源。见 [runtime-design.md](./runtime-design.md)、[data-flow-design.md](./data-flow-design.md) |
+| Approval / cancel 语义 | 框架有 interrupt/revoke，但 approve/reject/cancel 与 Run 行、timeline 的映射需自建 | `approval_required`、`approval_resolved`、`cancel_requested`、`cancelled` 与 Run 状态一致落库并可复盘 | **已实现**：见 [guardrail-policy-design.md](./guardrail-policy-design.md) §5 + [runtime-design.md](./runtime-design.md)。**未实现**：`running`/`queued` 重启后续跑 |
+| Tool 治理 schema | 工具框架不管业务风险等级、审批规则、审计元数据 | `ToolSpec` 含 risk、category、approval 规则、timeout、audit 字段；与 Policy 联动 | **已实现**：见 [guardrail-policy-design.md](./guardrail-policy-design.md) §3–§7。**未实现**：`timeout_seconds` 执行层强制；策略版本；按租户裁剪 tool 集 |
+| Tool 结果协议 | 各工具返回结构不一，LangChain 不强制审计格式 | 统一 `success`/`error`、`duration_ms`、脱敏 args/result、`tool_call_id` 进 timeline | **已实现**：`ToolResultModel` + Adapter；`tool_start`/`tool_end` + `sanitize`；`verify_tool_audit_v1`。**未实现**：工具级 retry；MCP |
+| Memory 编排策略 | 框架不管何时写摘要、何时召回、如何压缩 working memory | thread/run 摘要；episodic 可控召回；working memory 单一真相源与压缩 | **已实现**：`memory_*` 事件；`policy.py` 召回/预算/冲突；`current_turn_messages`；`CheckpointCompactor`；memory preview API。**未实现**：向量 episodic；LLM 压缩；续轮去重 System 注入。见 [memory-checkpoint-design.md](./memory-checkpoint-design.md) |
+| RAG / 文档问答 | 框架不管业务文档集、引用溯源与检索评测 | 可配置知识源；混合检索；检索依据进 timeline；离线 required_source 指标 | **已实现（proxy 验收）**：9 篇 `docs/source/` ingest；BM25+RRF+可选向量；API 契约结构化 parse；`suggested_api_paths` 注入；20 docs + 8 api/safety eval；L4-lite citation。见 [rag-design.md](./rag-design.md)、[tool-grounded-design.md](./tool-grounded-design.md)。**未实现**：RAGAS PR 硬门禁；`response_fields` JSON 解析；生产语料 |
+| Trace 关联 | Langfuse 等与 EventStore 是两套 ID，需项目打通 | `thread_id`/`run_id`/`tool_call_id`/`trace_id`/`span_id` 可互查 | **部分实现**：见 [observability-design.md](./observability-design.md)。**未实现**：`trace_id` 落库、generation span 接线、token/cost 聚合 |
+| Sandbox 策略 | 容器只提供隔离，权限/挂载/审计语义仍要自建 | 文件/终端类工具的 permission、资源上限、审计事件 | **未实现**：无沙箱工具；仅有 HTTP 白名单、cookie 脱敏、危险 POST 闸门。Docker/E2B 为后续 PoC |
 
-Eval 落地实施与文件级任务分解见：[docs/eval-implementation-plan.md](./eval-implementation-plan.md)。
+| 模块边界与改造优先级见 [agent-learning-guide.md](./agent-learning-guide.md) §3、**§7（八层栈）**。分项设计见 [runtime-design.md](./runtime-design.md)、[rag-design.md](./rag-design.md)、[guardrail-policy-design.md](./guardrail-policy-design.md)、[observability-design.md](./observability-design.md)、[memory-checkpoint-design.md](./memory-checkpoint-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)。
 
-## 7. Completed Module Gaps And Optimization Directions
-
-Current MVP direction is still local single-user runtime first. The following table records what has already landed, what is still insufficient, and what should be optimized later.
-
-| Module | Landed | Current gap / risk | Later optimization |
-|---|---|---|---|
-| EventStore | SQLite thread/run/event source of truth and raw event replay | Payload schema is still convention-based; no schema version or pagination | Add event schema/version, pagination, migration rules, and optional projection cache |
-| ExecutionEngine | Local `asyncio.Task` run lifecycle, cancel, approval, SSE compatibility, run timeout, global concurrency cap, selective `waiting_approval` rehydrate on restart | Active runs are in-process only; `running`/`queued` runs fail on restart; no retry/idempotency yet | Add retry/idempotency, then evaluate Temporal/Celery/LangGraph full durable execution |
-| TimelineProjector | CQRS read model projecting raw events into UI timeline and warnings | Projection is computed on read; warning rules are still minimal | Add read model cache, pagination, richer consistency checks, and UI filters |
-| MemoryManager v1.1 | LangGraph checkpoint + RAG + EventStore summary + keyword episodic recall + inject budget/conflict policy + preview API | No vector episodic recall; no working-memory compression; deterministic keyword recall only | Add vector episodic index, working memory compression, and LLM long-term extraction PoC |
-| ToolRegistry / Tool Audit v1 | `ToolSpec`, `ToolResult` audit envelope, sanitizer, `tool_start/tool_end` contract | `timeout_seconds` is metadata only; retry/timeout enforcement, tool versioning, MCP mapping, and LLM-facing result envelope are not complete | Add execution policy, timeout/retry enforcement, tool versioning, MCP adapter PoC, and stronger audit schema checks |
-| PolicyRegistry | Dangerous tool approval and HTTP whitelist checks | Policy scope is narrow; no input/output/PII/secret policy versioning | Design policy schema and decision audit, then evaluate Presidio/OPA/Guardrails integration |
-| LLMProvider | OpenAI-compatible `ChatOpenAI` thin adapter | No fallback, routing, token/cost accounting | Add provider events and metrics; evaluate LiteLLM PoC |
-| Planning observe node | `plan_created` observe-only event | Not true Plan-and-Execute; no plan step outcome | Design plan step schema, `plan_updated`, and step result projection |
-
-## 参考资料
+## 6. 参考资料
 
 - [LangGraph interrupts / human-in-the-loop](https://docs.langchain.com/oss/python/langgraph/human-in-the-loop)
 - [LangGraph durable execution](https://docs.langchain.com/oss/python/langgraph/durable-execution)

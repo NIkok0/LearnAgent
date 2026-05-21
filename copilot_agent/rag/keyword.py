@@ -1,45 +1,38 @@
 from __future__ import annotations
 
-import re
-
 from copilot_agent.rag.schema import DocChunk
+from copilot_agent.rag.tokenize import token_set
 
-_token_re = re.compile(r"[A-Za-z0-9_./:-]{2,}")
 
-
-def _tokens(q: str) -> set[str]:
-    return {t.lower() for t in _token_re.findall(q)}
+def _score_chunk(chunk: DocChunk, qt: set[str]) -> float:
+    low = chunk.text.lower()
+    score = float(sum(low.count(t) * (3 if len(t) > 4 else 1) for t in qt))
+    if score == 0:
+        score = float(sum(1 for t in qt if t in low or t in chunk.text))
+    return score
 
 
 def keyword_search(chunks: list[DocChunk], query: str, top_k: int = 6) -> list[DocChunk]:
-    qt = _tokens(query)
+    qt = token_set(query)
     if not qt:
-        return chunks[:top_k]
-    scored: list[tuple[int, DocChunk]] = []
+        return []
+    scored: list[tuple[float, DocChunk]] = []
     for c in chunks:
-        low = c.text.lower()
-        score = sum(low.count(t) * (3 if len(t) > 4 else 1) for t in qt)
-        if score == 0:
-            score = sum(1 for t in qt if t in low)
-        scored.append((score, c))
+        score = _score_chunk(c, qt)
+        if score > 0:
+            scored.append((score, c))
     scored.sort(key=lambda x: (-x[0], x[1].source, x[1].start_line))
-    out = [c for s, c in scored if s > 0][:top_k]
-    if not out:
-        return chunks[:top_k]
-    return out
+    return [c for _, c in scored[:top_k]]
 
 
 def keyword_scores(chunks: list[DocChunk], query: str) -> dict[tuple[str, int], float]:
     """Return normalized keyword scores keyed by (source, start_line)."""
-    qt = _tokens(query)
+    qt = token_set(query)
     if not qt:
         return {}
     raw: dict[tuple[str, int], float] = {}
     for c in chunks:
-        low = c.text.lower()
-        score = float(sum(low.count(t) * (3 if len(t) > 4 else 1) for t in qt))
-        if score == 0:
-            score = float(sum(1 for t in qt if t in low))
+        score = _score_chunk(c, qt)
         if score > 0:
             raw[c.key] = score
     if not raw:

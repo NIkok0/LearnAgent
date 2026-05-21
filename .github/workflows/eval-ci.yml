@@ -67,6 +67,7 @@ jobs:
               f"- failed_suites: {', '.join(payload.get('failed_suites', [])) or '(none)'}",
               f"- failed_scenarios: {', '.join(payload.get('failed_scenarios', [])) or '(none)'}",
               f"- runtime_contract_breaks: {', '.join(payload.get('runtime_contract_breaks', [])) or '(none)'}",
+              f"- contract_schema_ok: {payload.get('contract_schema_ok')}",
           ]
           summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
           summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -132,6 +133,7 @@ jobs:
               f"- failed_suites: {', '.join(failed) if failed else '(none)'}",
               f"- failed_scenarios: {', '.join(payload.get('failed_scenarios', [])) or '(none)'}",
               f"- runtime_contract_breaks: {', '.join(payload.get('runtime_contract_breaks', [])) or '(none)'}",
+              f"- contract_schema_ok: {payload.get('contract_schema_ok')}",
               f"- rag_metrics: {json.dumps(rag_metrics, ensure_ascii=False)}",
           ]
           summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])

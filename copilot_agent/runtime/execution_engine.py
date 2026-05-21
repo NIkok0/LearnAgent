@@ -15,6 +15,8 @@ from copilot_agent.runtime.event_store import (
     RunConcurrencyLimitError,
     TERMINAL_RUN_STATUSES,
 )
+from copilot_agent.contracts.adapters.sse import SseAdapter
+from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
 
 if TYPE_CHECKING:
@@ -220,12 +222,28 @@ class ExecutionEngine:
             self._events.complete_run(run_id)
         except TimeoutError:
             message = f"run timed out after {self._run_timeout_seconds} seconds"
-            await self._emit(managed, "error", {"error": message, "reason": "run_timeout"})
+            await self._emit_runtime(
+                managed,
+                RuntimeEvent.from_payload(
+                    "error",
+                    {"error": message, "reason": "run_timeout"},
+                    thread_id=managed.thread_id,
+                    run_id=managed.run_id,
+                ),
+            )
             self._events.complete_run(run_id, error=message)
         except asyncio.CancelledError:
             self._mark_cancelled(managed)
         except Exception as e:
-            await self._emit(managed, "error", {"error": str(e)})
+            await self._emit_runtime(
+                managed,
+                RuntimeEvent.from_payload(
+                    "error",
+                    {"error": str(e)},
+                    thread_id=managed.thread_id,
+                    run_id=managed.run_id,
+                ),
+            )
             self._events.complete_run(run_id, error=str(e))
         finally:
             if managed.stream_queue is not None:
@@ -234,7 +252,7 @@ class ExecutionEngine:
                 self._release_run_slot()
                 managed.slot_acquired = False
             if self._is_terminal(run_id):
-                self._finalize_memory(managed)
+                await self._finalize_memory(managed)
                 async with self._lock:
                     self._runs.pop(run_id, None)
 
@@ -259,12 +277,28 @@ class ExecutionEngine:
             self._append_checkpoint_meta(managed)
         except TimeoutError:
             message = f"run timed out after {self._run_timeout_seconds} seconds"
-            await self._emit(managed, "error", {"error": message, "reason": "run_timeout"})
+            await self._emit_runtime(
+                managed,
+                RuntimeEvent.from_payload(
+                    "error",
+                    {"error": message, "reason": "run_timeout"},
+                    thread_id=managed.thread_id,
+                    run_id=managed.run_id,
+                ),
+            )
             self._events.complete_run(run_id, error=message)
         except asyncio.CancelledError:
             self._mark_cancelled(managed)
         except Exception as e:
-            await self._emit(managed, "error", {"error": str(e)})
+            await self._emit_runtime(
+                managed,
+                RuntimeEvent.from_payload(
+                    "error",
+                    {"error": str(e)},
+                    thread_id=managed.thread_id,
+                    run_id=managed.run_id,
+                ),
+            )
             self._events.complete_run(run_id, error=str(e))
         finally:
             if managed.stream_queue is not None:
@@ -273,7 +307,7 @@ class ExecutionEngine:
                 self._release_run_slot()
                 managed.slot_acquired = False
             if self._is_terminal(run_id):
-                self._finalize_memory(managed)
+                await self._finalize_memory(managed)
                 async with self._lock:
                     self._runs.pop(run_id, None)
 
@@ -292,10 +326,15 @@ class ExecutionEngine:
         async with asyncio.timeout(self._run_timeout_seconds):
             await self._run_once(managed, confirm_dangerous=confirm_dangerous, resume=resume)
 
-    async def _emit(self, managed: ManagedRun, event_type: str, payload: dict[str, Any]) -> None:
-        self._events.append_event(managed.thread_id, managed.run_id, event_type, payload)
+    async def _emit_runtime(self, managed: ManagedRun, event: RuntimeEvent) -> None:
+        self._events.append_event(
+            managed.thread_id,
+            managed.run_id,
+            event.kind,
+            event.to_store_payload(),
+        )
         if managed.stream_queue is not None:
-            await managed.stream_queue.put(_sse(event_type, payload))
+            await managed.stream_queue.put(SseAdapter.encode(event))
 
     def _append_checkpoint_meta(self, managed: ManagedRun) -> None:
         payload = managed.interrupt_payload or {}
@@ -327,12 +366,18 @@ class ExecutionEngine:
         run = self._events.get_run(run_id) or {}
         return str(run.get("status", "")) in TERMINAL_RUN_STATUSES
 
-    def _finalize_memory(self, managed: ManagedRun) -> None:
+    async def _finalize_memory(self, managed: ManagedRun) -> None:
         finalize = getattr(self._runner, "finalize_memory", None)
-        if not callable(finalize):
+        if callable(finalize):
+            try:
+                finalize(managed.thread_id, managed.run_id, messages=managed.messages)
+            except Exception:
+                return
+        compact = getattr(self._runner, "compact_checkpoint", None)
+        if not callable(compact):
             return
         try:
-            finalize(managed.thread_id, managed.run_id, messages=managed.messages)
+            await compact(managed.thread_id, run_id=managed.run_id)
         except Exception:
             return
 
@@ -381,6 +426,3 @@ class ExecutionEngine:
                     return summary
         return {}
 
-
-def _sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
