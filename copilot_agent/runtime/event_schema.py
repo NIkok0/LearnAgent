@@ -14,6 +14,7 @@ EVENT_TOKEN = "token"
 EVENT_ASSISTANT_STATE = "assistant_state"
 EVENT_TOOL_START = "tool_start"
 EVENT_TOOL_END = "tool_end"
+EVENT_TOOL_SIDE_EFFECT_RECORDED = "tool_side_effect_recorded"
 EVENT_APPROVAL_REQUIRED = "approval_required"
 EVENT_APPROVAL_RESOLVED = "approval_resolved"
 EVENT_RUN_CHECKPOINT_META = "run_checkpoint_meta"
@@ -49,6 +50,7 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_ASSISTANT_STATE,
         EVENT_TOOL_START,
         EVENT_TOOL_END,
+        EVENT_TOOL_SIDE_EFFECT_RECORDED,
         EVENT_APPROVAL_REQUIRED,
         EVENT_APPROVAL_RESOLVED,
         EVENT_RUN_CHECKPOINT_META,
@@ -84,6 +86,7 @@ __all__ = [
     "envelope_payload",
     "payload_schema_version",
     "EVENT_OUTPUT_GUARD_CHECKED",
+    "EVENT_TOOL_SIDE_EFFECT_RECORDED",
     "EVENT_LLM_GENERATION",
     "EVENT_RUN_FAILED_META",
     "EVENT_RUN_CONSISTENCY_CHECKED",

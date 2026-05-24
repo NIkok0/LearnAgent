@@ -24,10 +24,12 @@ from copilot_agent.runtime.event_schema import (
     EVENT_RUN_COMPLETED_META,
     EVENT_RUN_CONSISTENCY_CHECKED,
     EVENT_RUN_FAILED_META,
+    EVENT_TOOL_SIDE_EFFECT_RECORDED,
 )
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
+from copilot_agent.tools.audit import build_tool_side_effect_payload
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,6 +47,13 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _call_arg(call: dict[str, Any], key: str) -> Any:
+    args = call.get("args")
+    if isinstance(args, dict):
+        return args.get(key)
+    return None
 
 
 @dataclass
@@ -222,6 +231,7 @@ class ExecutionEngine:
                 "checkpoint_resume": True,
             },
         )
+        self._append_blocked_side_effects_for_rejection(managed)
         if managed.rehydrated or managed.task is None or managed.task.done():
             await self._start_approval_continuation(managed)
         else:
@@ -497,6 +507,51 @@ class ExecutionEngine:
                 "resume_supported": bool(managed.checkpoint_pending),
             },
         )
+
+    def _append_blocked_side_effects_for_rejection(self, managed: ManagedRun) -> None:
+        existing_call_ids = {
+            str((event.get("payload") or {}).get("call_id") or "")
+            for event in self._events.list_run_events(managed.run_id)
+            if event.get("type") == EVENT_TOOL_SIDE_EFFECT_RECORDED
+        }
+        for call in (managed.interrupt_payload or {}).get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            name = str(call.get("name") or "")
+            call_id = str(call.get("id") or "").strip()
+            if not call_id or call_id in existing_call_ids:
+                continue
+            start_payload = {
+                "name": name,
+                "call_id": call_id,
+                "category": "http" if name == "http_post" else "",
+                "risk_level": "high" if name == "http_post" else "",
+                "requires_approval": True,
+                "arguments": call.get("args") if isinstance(call.get("args"), dict) else {},
+                "idempotency_key": _call_arg(call, "idempotency_key"),
+            }
+            end_payload = {
+                "name": name,
+                "call_id": call_id,
+                "success": False,
+                "error": "tool execution was blocked by approval rejection",
+                "idempotency_key": start_payload.get("idempotency_key"),
+                "result": {"success": False, "error": "approval rejected", "metadata": {}},
+            }
+            payload = build_tool_side_effect_payload(
+                tool_start_payload=start_payload,
+                tool_end_payload=end_payload,
+                reason="approval_rejected",
+                approval_status="rejected",
+            )
+            if payload is None:
+                continue
+            self._events.append_event(
+                managed.thread_id,
+                managed.run_id,
+                EVENT_TOOL_SIDE_EFFECT_RECORDED,
+                payload,
+            )
 
     def _mark_cancelled(self, managed: ManagedRun) -> None:
             self._events.append_event(managed.thread_id, managed.run_id, "cancelled", {})

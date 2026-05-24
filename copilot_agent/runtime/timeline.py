@@ -289,6 +289,43 @@ class TimelineProjector:
                 items.append(item)
                 continue
 
+            if event_type == "tool_side_effect_recorded":
+                side_effect_status = str(payload.get("side_effect_status") or "")
+                items.append(
+                    {
+                        "kind": "side_effect",
+                        "title": "Tool side effect",
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "tool_name": payload.get("tool_name"),
+                        "call_id": payload.get("call_id"),
+                        "method": payload.get("method"),
+                        "path": payload.get("path"),
+                        "risk_level": payload.get("risk_level"),
+                        "requires_approval": bool(payload.get("requires_approval", False)),
+                        "approval_status": payload.get("approval_status"),
+                        "side_effect_status": side_effect_status,
+                        "status_code": payload.get("status_code"),
+                        "idempotency_key": payload.get("idempotency_key"),
+                        "idempotency_reused": bool(payload.get("idempotency_reused", False)),
+                        "compensatable": bool(payload.get("compensatable", False)),
+                        "reason": payload.get("reason"),
+                        "payload": payload,
+                    }
+                )
+                if side_effect_status == "unknown":
+                    warnings.append(
+                        {
+                            "code": "side_effect_unknown",
+                            "message": "write tool side effect could not be confirmed",
+                            "event_id": event_id,
+                            "call_id": payload.get("call_id"),
+                            "tool": payload.get("tool_name"),
+                            "reason": payload.get("reason"),
+                        }
+                    )
+                continue
+
             if event_type in {"assistant_state", "context_built"}:
                 title = "Context assembled" if event_type == "context_built" else event_type
                 items.append(
@@ -647,6 +684,7 @@ def _debugger_summary(
     plan_items = [item for item in items if item.get("kind") == "plan"]
     final_answer_items = [item for item in items if item.get("kind") == "final_answer"]
     output_guard_items = [item for item in items if item.get("kind") == "output_guard"]
+    side_effect_items = [item for item in items if item.get("kind") == "side_effect"]
     observability = _observability_summary(events)
     cost = _cost_summary(events)
     checkpoint = _checkpoint_summary(
@@ -672,6 +710,14 @@ def _debugger_summary(
             "failed": sum(1 for item in tool_items if item.get("success") is False),
             "missing_end": sum(1 for item in tool_items if item.get("end_event_id") is None),
         },
+        "side_effects": {
+            "total": len(side_effect_items),
+            "unknown": sum(1 for item in side_effect_items if item.get("side_effect_status") == "unknown"),
+        },
+        "side_effect_count": len(side_effect_items),
+        "unknown_side_effect_count": sum(
+            1 for item in side_effect_items if item.get("side_effect_status") == "unknown"
+        ),
         "approval": {
             "count": len(approval_items),
             "waiting": any(item.get("status") == "waiting" for item in approval_items),

@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.side_effects import build_side_effect_read_model  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 
@@ -37,11 +38,15 @@ def build_debug_bundle(
     thread = store.get_thread(thread_id) if thread_id else None
     events = store.list_run_events(run_id)
     timeline = TimelineProjector().project_run(run, events)
+    side_effects = build_side_effect_read_model(run, events)
     return {
         "run": run,
         "thread": thread,
         "events": events,
         "timeline": timeline,
+        "side_effects": side_effects["side_effects"],
+        "side_effect_summary": side_effects["summary"],
+        "side_effect_warnings": side_effects["warnings"],
         "latest_run_consistency": _latest_payload(events, "run_consistency_checked"),
         "latest_checkpoint_consistency": _latest_payload(events, "checkpoint_consistency_checked"),
         "checkpoint_raw": inspect_checkpoint_sqlite(checkpoint_path, thread_id=thread_id),

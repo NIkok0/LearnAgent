@@ -42,6 +42,11 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_tool_execution_reliability.py",
     ),
     SuiteSpec(
+        suite_name="tool_side_effect_ledger_v1",
+        script="scripts/verify_tool_side_effect_ledger_v1.py",
+        args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
+    ),
+    SuiteSpec(
         suite_name="eval_cases_contract",
         script="scripts/verify_eval_cases_contract.py",
     ),
@@ -100,6 +105,16 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="tool_execution_reliability",
         script="scripts/verify_tool_execution_reliability.py",
+    ),
+    SuiteSpec(
+        suite_name="tool_side_effect_ledger_v1",
+        script="scripts/verify_tool_side_effect_ledger_v1.py",
+        args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="tool_side_effect_read_model_v1",
+        script="scripts/verify_tool_side_effect_read_model_v1.py",
+        args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
     ),
     SuiteSpec(
         suite_name="eval_cases_contract",
@@ -467,6 +482,16 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
             SuiteSpec(
                 suite_name="tool_execution_reliability",
                 script="scripts/verify_tool_execution_reliability.py",
+            ),
+            SuiteSpec(
+                suite_name="tool_side_effect_ledger_v1",
+                script="scripts/verify_tool_side_effect_ledger_v1.py",
+                args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
+            ),
+            SuiteSpec(
+                suite_name="tool_side_effect_read_model_v1",
+                script="scripts/verify_tool_side_effect_read_model_v1.py",
+                args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
             ),
             SuiteSpec(
                 suite_name="policy_aware_rag_v1",

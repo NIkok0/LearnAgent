@@ -47,6 +47,7 @@ from copilot_agent.runtime.event_store import (
     ThreadNotActiveError,
 )
 from copilot_agent.runtime.execution_engine import ExecutionEngine
+from copilot_agent.runtime.side_effects import build_side_effect_read_model
 from copilot_agent.runtime.thread_checkpoint import archive_thread_and_purge_checkpoint
 from copilot_agent.runtime.thread_lifecycle import ThreadLifecycleCleaner
 from copilot_agent.runtime.timeline import TimelineProjector
@@ -554,6 +555,15 @@ def get_run_timeline(run_id: str) -> dict[str, object]:
         "timeline": timeline_projector.project_run(run, events),
         "events": events,
     }
+
+
+@app.get("/v1/runs/{run_id}/side-effects")
+def get_run_side_effects(run_id: str) -> dict[str, object]:
+    run = event_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    events = event_store.list_run_events(run_id)
+    return build_side_effect_read_model(run, events)
 
 
 @app.websocket("/v1/runs/{run_id}/ws")

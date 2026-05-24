@@ -31,10 +31,15 @@ from copilot_agent.runtime.event_schema import (
     EVENT_LLM_GENERATION,
     EVENT_OUTPUT_GUARD_CHECKED,
     EVENT_RUN_COMPLETED_META,
+    EVENT_TOOL_SIDE_EFFECT_RECORDED,
 )
 from copilot_agent.runtime.execution_engine import CheckpointSyncFailed, GraphInterrupted
 from copilot_agent.settings import settings
-from copilot_agent.tools.audit import build_tool_end_payload, build_tool_start_payload
+from copilot_agent.tools.audit import (
+    build_tool_end_payload,
+    build_tool_side_effect_payload,
+    build_tool_start_payload,
+)
 from copilot_agent.tools.registry import ToolRegistry
 
 
@@ -43,6 +48,7 @@ class _ToolTracker:
     started_at: dict[str, float] = field(default_factory=dict)
     start_names: dict[str, str] = field(default_factory=dict)
     start_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
+    start_payloads: dict[str, dict[str, Any]] = field(default_factory=dict)
     end_emitted: set[str] = field(default_factory=set)
 
 
@@ -290,19 +296,22 @@ class GraphEventMapper:
                 metadata = _tool_audit_metadata(spec, args if isinstance(args, dict) else {})
                 if call_id:
                     tracker.start_meta[call_id] = metadata
+                start_payload = build_tool_start_payload(
+                    name=name,
+                    call_id=call_id,
+                    category=str(metadata.get("category", "")),
+                    risk_level=str(metadata.get("risk_level", "")),
+                    requires_approval=bool(metadata.get("requires_approval", False)),
+                    arguments=args,
+                    timeout_seconds=metadata.get("timeout_seconds"),
+                    max_retries=metadata.get("max_retries"),
+                    idempotency_key=metadata.get("idempotency_key"),
+                )
+                if call_id:
+                    tracker.start_payloads[call_id] = start_payload
                 yield _runtime_event(
                     "tool_start",
-                    build_tool_start_payload(
-                        name=name,
-                        call_id=call_id,
-                        category=str(metadata.get("category", "")),
-                        risk_level=str(metadata.get("risk_level", "")),
-                        requires_approval=bool(metadata.get("requires_approval", False)),
-                        arguments=args,
-                        timeout_seconds=metadata.get("timeout_seconds"),
-                        max_retries=metadata.get("max_retries"),
-                        idempotency_key=metadata.get("idempotency_key"),
-                    ),
+                    start_payload,
                     thread_id=thread_id,
                     run_id=run_id,
                     trace_id=trace_id,
@@ -322,24 +331,39 @@ class GraphEventMapper:
                 result = (event.get("data") or {}).get("output", {})
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
                 metadata = tracker.start_meta.pop(call_id, {}) if call_id else {}
+                start_payload = tracker.start_payloads.pop(call_id, {}) if call_id else {}
+                end_payload = build_tool_end_payload(
+                    name=name,
+                    call_id=call_id,
+                    result=result,
+                    duration_ms=duration_ms,
+                    retry_count=metadata.get("retry_count"),
+                    attempt=metadata.get("attempt"),
+                    max_attempts=metadata.get("max_attempts"),
+                    timeout_seconds=metadata.get("timeout_seconds"),
+                    idempotency_key=metadata.get("idempotency_key"),
+                )
                 yield _runtime_event(
                     "tool_end",
-                    build_tool_end_payload(
-                        name=name,
-                        call_id=call_id,
-                        result=result,
-                        duration_ms=duration_ms,
-                        retry_count=metadata.get("retry_count"),
-                        attempt=metadata.get("attempt"),
-                        max_attempts=metadata.get("max_attempts"),
-                        timeout_seconds=metadata.get("timeout_seconds"),
-                        idempotency_key=metadata.get("idempotency_key"),
-                    ),
+                    end_payload,
                     thread_id=thread_id,
                     run_id=run_id,
                     trace_id=trace_id,
                     tool_call_id=call_id,
                 )
+                side_effect_payload = build_tool_side_effect_payload(
+                    tool_start_payload=start_payload,
+                    tool_end_payload=end_payload,
+                )
+                if side_effect_payload is not None:
+                    yield _runtime_event(
+                        EVENT_TOOL_SIDE_EFFECT_RECORDED,
+                        side_effect_payload,
+                        thread_id=thread_id,
+                        run_id=run_id,
+                        trace_id=trace_id,
+                        tool_call_id=call_id,
+                    )
                 clear_tool_call_context()
                 continue
 
@@ -353,33 +377,48 @@ class GraphEventMapper:
                     name = tracker.start_names.pop(call_id, "")
                 started_at = tracker.started_at.pop(call_id, None) if call_id else None
                 metadata = tracker.start_meta.pop(call_id, {}) if call_id else {}
+                start_payload = tracker.start_payloads.pop(call_id, {}) if call_id else {}
                 error_value = (event.get("data") or {}).get("error")
                 duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
                 if call_id:
                     tracker.end_emitted.add(call_id)
                 retry_count = _retry_count_from_error(error_value, metadata)
                 result = _tool_error_result(error_value)
+                end_payload = build_tool_end_payload(
+                    name=name,
+                    call_id=call_id,
+                    result=result,
+                    duration_ms=duration_ms,
+                    success=False,
+                    error=str(error_value or "tool execution failed"),
+                    error_type=type(error_value).__name__ if error_value is not None else "ToolExecutionError",
+                    retry_count=retry_count,
+                    attempt=getattr(error_value, "attempt", None) or metadata.get("attempt"),
+                    max_attempts=getattr(error_value, "max_attempts", None) or metadata.get("max_attempts"),
+                    timeout_seconds=metadata.get("timeout_seconds"),
+                    idempotency_key=metadata.get("idempotency_key"),
+                )
                 yield _runtime_event(
                     "tool_end",
-                    build_tool_end_payload(
-                        name=name,
-                        call_id=call_id,
-                        result=result,
-                        duration_ms=duration_ms,
-                        success=False,
-                        error=str(error_value or "tool execution failed"),
-                        error_type=type(error_value).__name__ if error_value is not None else "ToolExecutionError",
-                        retry_count=retry_count,
-                        attempt=getattr(error_value, "attempt", None) or metadata.get("attempt"),
-                        max_attempts=getattr(error_value, "max_attempts", None) or metadata.get("max_attempts"),
-                        timeout_seconds=metadata.get("timeout_seconds"),
-                        idempotency_key=metadata.get("idempotency_key"),
-                    ),
+                    end_payload,
                     thread_id=thread_id,
                     run_id=run_id,
                     trace_id=trace_id,
                     tool_call_id=call_id,
                 )
+                side_effect_payload = build_tool_side_effect_payload(
+                    tool_start_payload=start_payload,
+                    tool_end_payload=end_payload,
+                )
+                if side_effect_payload is not None:
+                    yield _runtime_event(
+                        EVENT_TOOL_SIDE_EFFECT_RECORDED,
+                        side_effect_payload,
+                        thread_id=thread_id,
+                        run_id=run_id,
+                        trace_id=trace_id,
+                        tool_call_id=call_id,
+                    )
                 clear_tool_call_context()
                 continue
 
@@ -525,6 +564,7 @@ class GraphEventMapper:
             started_at = tracker.started_at.pop(call_id, None)
             duration_ms = int((time.perf_counter() - started_at) * 1000) if started_at else None
             metadata = tracker.start_meta.pop(call_id, {})
+            start_payload = tracker.start_payloads.pop(call_id, {})
             end_payload = build_tool_end_payload(
                 name=name,
                 call_id=call_id,
@@ -550,6 +590,21 @@ class GraphEventMapper:
                     tool_call_id=call_id,
                 )
             )
+            side_effect_payload = build_tool_side_effect_payload(
+                tool_start_payload=start_payload,
+                tool_end_payload=end_payload,
+            )
+            if side_effect_payload is not None:
+                out.append(
+                    _runtime_event(
+                        EVENT_TOOL_SIDE_EFFECT_RECORDED,
+                        side_effect_payload,
+                        thread_id=thread_id,
+                        run_id=run_id,
+                        trace_id=trace_id,
+                        tool_call_id=call_id,
+                    )
+                )
         return out
 
 
