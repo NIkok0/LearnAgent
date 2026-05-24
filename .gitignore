@@ -3,5 +3,7 @@
 __pycache__/
 *.pyc
 storage/
+artifacts/eval/
+artifacts/runtime/
 artifacts/phase3/
 artifacts/phase4/
