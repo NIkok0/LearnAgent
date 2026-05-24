@@ -10,3 +10,4 @@ from typing_extensions import Annotated, NotRequired, TypedDict
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     tool_route: NotRequired[dict[str, Any]]
+    plan: NotRequired[dict[str, Any]]

@@ -10,6 +10,7 @@ from copilot_agent.rag.docs_resolver import resolve_docs_source
 from copilot_agent.rag.api_parse import parse_api_section
 from copilot_agent.rag.ingest_source import FileIngestSource, IngestSource
 from copilot_agent.rag.schema import DocChunk
+from copilot_agent.rag.security import resolve_authority
 
 log = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ def _append_chunk(
             pii_level=str(security.get("pii_level") or "none"),
             source_hash=str(security.get("source_hash") or ""),
             retention_policy=str(security.get("retention_policy") or "default"),
+            authority=resolve_authority(doc_type=doc_type, security_meta=security),
         )
     )
 

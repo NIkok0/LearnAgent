@@ -90,6 +90,20 @@ def main() -> int:
     )
     _assert("store search returns route", detailed.route.mode in {"sparse", "dense", "hybrid"})
 
+    from copilot_agent.rag.query_rewrite import configure_rag_rules  # noqa: WPS433
+    from copilot_agent.settings import settings  # noqa: WPS433
+
+    configure_rag_rules(None)
+    settings.rag_query_rewrite_enabled = False
+    no_rewrite_store = build_rag_store()
+    p4_005_sources = {h.source for h in no_rewrite_store.search("需求检查表里有哪些已知偏差或风险点？", top_k=6)}
+    _assert(
+        "p4-005 chinese question without rewrite",
+        "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md" in p4_005_sources,
+    )
+    apply_scenario_environment(load_scenario("watermark"))
+    settings.rag_query_rewrite_enabled = True
+
     print("verify_rag_retrieval_quality=PASS")
     return 0
 

@@ -29,7 +29,7 @@
 |------|------|-----------------|
 | 问题类型五分类（knowledge / live_status / troubleshooting / dangerous_execute / safety_reject） | ✅ 已实现 | `scenario/router/` + `RouterEngine` |
 | Planner 注入 Tool routing SystemMessage | ✅ 已实现 | `ContextManager.plan_route()` → `nodes.planner` |
-| `plan_created` 事件含 `tool_route` | ✅ 已实现 | `strategy: react_with_safety_gate` |
+| `plan_created` 事件含 `tool_route` | ✅ 已实现 | `strategy: route_first_react` |
 | `AgentState.tool_route` 跨节点传递 | ✅ 已实现 | `agent/state.py`；assemble 写入 `graph_config.tool_route` |
 | safety_gate 路由强制（`tool_allowed`） | ✅ 已实现 | `AGENT_TOOL_ROUTE_ENFORCE=true` |
 | Policy + **required_scopes** + 审批与路由双层闸门 | ✅ 已实现 | `policy/registry.py` + `safety_gate`；见 [guardrail-policy-design.md](./guardrail-policy-design.md) |
@@ -364,7 +364,7 @@ Tool routing plan for this user turn (follow before choosing tools):
 ```text
 plan_created
 ├── goal: str
-├── strategy: "react_with_safety_gate"   # Context Manager assemble 路径
+├── strategy: "route_first_react"        # route-first planner + ReAct executor
 ├── tool_route: ToolRoute.as_dict()      # 与 assemble 内 route 一致
 └── available_tools: ToolSpec.public_dict[]
 ```
@@ -574,7 +574,7 @@ python scripts/verify_demo_golden_e2e.py
 | **LLM 意图分类** | 泛化好 | 波动、需 judge | §5 目标 |
 | **Plan-and-Execute** | 多步任务清晰 | 复杂度高 | 远期（tech-selection §4） |
 
-当前 **planner 节点名** 保留，但实现是 **deterministic router** 而非 LLM 规划；`plan_created.strategy=react_with_safety_gate` 反映「路由 + ReAct」而非完整 Plan-and-Execute。
+当前 **planner 节点名** 保留，但实现是 **route-first deterministic planner** 而非 LLM Planner；`plan_created.strategy=route_first_react` 反映「规则路由 + ReAct 执行」，并已有轻量 `plan_updated` / step outcome，但仍不是完整 Plan-and-Execute。
 
 ---
 

@@ -9,6 +9,12 @@ class CheckpointReader:
     def __init__(self, graph: Any) -> None:
         self._graph = graph
 
+    async def state_values(self, thread_id: str) -> dict[str, Any]:
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await self._graph.aget_state(config)
+        values = getattr(state, "values", None) or {}
+        return values if isinstance(values, dict) else {}
+
     async def snapshot(self, thread_id: str) -> dict[str, Any]:
         config = {"configurable": {"thread_id": thread_id}}
         state = await self._graph.aget_state(config)

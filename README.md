@@ -68,6 +68,12 @@ AGENT_EVENT_STORE_PATH=storage/learnagent-events.sqlite
 
 事件 payload 使用 JSON 存储，对外 API 返回时解析为 `payload` 对象。新事件默认带 `schema_version: 1` envelope。
 
+当前一致性能力：
+
+- `events.sequence` 为每个 run 提供单调递增顺序，timeline 读取按 `sequence,id` 排序。
+- `tool_end.call_id` 已做幂等保护，重复写入返回已有事件。
+- `run_failed_meta`、`run_consistency_checked`、`checkpoint_sync_failed` 已落地，便于失败 run 回溯。
+
 ### LangGraph Agent Loop
 
 当前 graph 结构：
@@ -78,7 +84,7 @@ planner -> assistant -> safety_gate -> tools -> assistant
 
 说明：
 
-- `planner` 是 observe-only 节点，写入 `plan_created` 事件，不额外调用 LLM。
+- `planner` 是 route-first planner，基于场景路由写入 `plan_created`，并在工具结果后写入轻量 `plan_updated`；当前不是 LLM Planner / 完整 Plan-and-Execute。
 - `assistant` 负责调用 LLM，并可生成文本或 tool calls。
 - `safety_gate` 负责危险工具审批和拦截。
 - `tools` 由 LangGraph `ToolNode` 执行。
@@ -215,6 +221,7 @@ copilot_agent/policy/registry.py
 - EventStore timeline 是 runtime 事实源。
 - `TimelineProjector` 将 raw events 投影为 UI/API 可读 timeline。
 - Langfuse trace/span 可选。
+- `trace_id` 已写入 `RuntimeEvent.correlation`，token usage 可进入 `run_completed_meta`。
 - Python logging。
 - tool_start/tool_end 工具审计。
 - run checkpoint meta 和 completed meta。
@@ -517,6 +524,9 @@ conda run -n learnagent312 python scripts/verify_policy_credentials.py
 conda run -n learnagent312 python scripts/verify_context_manager.py
 conda run -n learnagent312 python scripts/verify_deepseek_provider.py
 conda run -n learnagent312 python scripts/smoke_chat_api.py --message "hello agent"
+
+# Optional live provider acceptance, not default CI.
+conda run -n learnagent312 python scripts/verify_live_llm_e2e_acceptance.py --require-live --message "hello agent"
 ```
 
 ---

@@ -85,6 +85,16 @@ def _get_client() -> Any | None:
     return _client
 
 
+def resolve_trace_id(trace: Any | None, *, thread_id: str, run_id: str | None) -> str:
+    if trace is not None:
+        for attr in ("id", "trace_id"):
+            value = getattr(trace, attr, None)
+            if value:
+                return str(value)
+    suffix = run_id or "unknown"
+    return f"local-{thread_id}-{suffix}"
+
+
 def start_chat_trace(
     *,
     conversation_id: str,

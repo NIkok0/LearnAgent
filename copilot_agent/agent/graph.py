@@ -59,6 +59,16 @@ def _build_checkpointer(checkpoint_path: str, *, async_checkpoint: bool = False)
     return SqliteSaver(conn)
 
 
+async def close_graph_checkpointer(graph) -> None:
+    """Close LearnAgent-owned async checkpoint resources on compiled graphs."""
+    if graph is None:
+        return
+    checkpointer = getattr(graph, "checkpointer", None)
+    conn = getattr(checkpointer, "_learnagent_conn", None)
+    if conn is not None and hasattr(conn, "close"):
+        await conn.close()
+
+
 def build_agent_graph(
     planner_node,
     assistant_node,

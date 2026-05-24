@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
+from copilot_agent.tools.registry import ToolExecutionError, ToolExecutionTimeout, ToolRegistry  # noqa: E402
 
 
 class EmptyArgs(BaseModel):
@@ -85,25 +85,41 @@ async def verify() -> dict[str, Any]:
     tools = {tool.name: tool for tool in registry.tools()}
     retry_result = await tools["flaky_read"].ainvoke({})
     timeout_error = ""
+    timeout_attempt = None
+    timeout_max_attempts = None
     try:
         await tools["slow_read"].ainvoke({})
     except Exception as exc:
         timeout_error = str(exc)
+        timeout_attempt = getattr(exc, "attempt", None)
+        timeout_max_attempts = getattr(exc, "max_attempts", None)
     write_error = ""
+    write_attempt = None
+    write_max_attempts = None
     try:
         await tools["write_tool"].ainvoke(
             {"path": "/write", "json_body": {"x": 1}, "idempotency_key": "idem-123"}
         )
     except Exception as exc:
         write_error = str(exc)
+        write_attempt = getattr(exc, "attempt", None)
+        write_max_attempts = getattr(exc, "max_attempts", None)
 
     write_spec = registry.get_spec("write_tool")
+    retry_metadata = retry_result.get("metadata") if isinstance(retry_result.get("metadata"), dict) else {}
     return {
         "retry_result": retry_result,
+        "retry_metadata": retry_metadata,
         "retry_calls": retry_calls["count"],
         "timeout_error": timeout_error,
+        "timeout_attempt": timeout_attempt,
+        "timeout_max_attempts": timeout_max_attempts,
+        "timeout_error_type": ToolExecutionTimeout.__name__,
         "write_calls": write_calls["count"],
         "write_error": write_error,
+        "write_attempt": write_attempt,
+        "write_max_attempts": write_max_attempts,
+        "write_error_type": ToolExecutionError.__name__,
         "write_public_spec": write_spec.public_dict({"idempotency_key": "idem-123"}) if write_spec else {},
         "tool_count": len(registry.tools()),
     }
@@ -122,8 +138,12 @@ def main() -> int:
     summary = asyncio.run(verify())
     checks = {
         "read_retried_once": summary["retry_calls"] == 2 and summary["retry_result"].get("attempt") == 2,
+        "success_attempt_metadata": summary["retry_metadata"].get("attempt") == 2
+        and summary["retry_metadata"].get("retry_count") == 1,
         "timeout_enforced": "timed out" in summary["timeout_error"],
+        "timeout_attempt_metadata": summary["timeout_attempt"] == 1 and summary["timeout_max_attempts"] == 1,
         "write_not_retried": summary["write_calls"] == 1 and "write failed" in summary["write_error"],
+        "write_attempt_metadata": summary["write_attempt"] == 1 and summary["write_max_attempts"] == 1,
         "idempotency_declared": summary["write_public_spec"].get("idempotency_key_field") == "idempotency_key",
         "retry_declared": summary["write_public_spec"].get("max_retries") == 0,
     }

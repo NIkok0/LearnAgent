@@ -4,7 +4,7 @@ from langchain_core.messages import SystemMessage
 
 from copilot_agent.context.constants import RAG_PRERETRIEVAL_PREFIX
 from copilot_agent.context.retrieval import enrich_retrieval_payload
-from copilot_agent.contracts.retrieval import RetrievalRequest
+from copilot_agent.rag.request_context import build_retrieval_request, retrieval_defaults_from_scenario
 from copilot_agent.memory import MemoryManager
 from copilot_agent.rag.context_guard import build_guarded_context
 from copilot_agent.rag.schema import DocChunk, dynamic_search_top_k
@@ -36,6 +36,7 @@ def preretrieve_docs(
     route: ToolRoute,
     budget_chars: int,
     thread_id: str = "",
+    retrieval_defaults: dict[str, object] | None = None,
 ) -> tuple[list[DocChunk], SystemMessage | None, list[dict[str, object]], dict[str, object]]:
     if not query.strip() or not should_preretrieve(route):
         return [], None, [], {"enabled": False}
@@ -43,13 +44,12 @@ def preretrieve_docs(
     rag_budget = preretrieve_budget_chars(total_budget=budget_chars)
     top_k = dynamic_search_top_k(budget_chars=rag_budget, ceiling=6)
     user_id = memory.resolve_user_id(thread_id) if thread_id else "local_user"
-    request = RetrievalRequest(
-        tenant_id="default",
-        user_id=user_id,
+    defaults = dict(retrieval_defaults or {})
+    request = build_retrieval_request(
         query=query,
+        ctx=defaults,
+        user_id=user_id,
         purpose="preretrieval_context",
-        max_classification="internal",
-        allowed_scopes=[f"user:{user_id}", "tenant:default"],
     )
     result, policy_result = memory.policy_aware_search_docs(request, top_k=top_k)
     hits = list(result.chunks)

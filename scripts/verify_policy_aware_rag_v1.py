@@ -45,6 +45,71 @@ def _chunk(
     )
 
 
+def _mock_vector_index(chunks: list[DocChunk]):
+    class _Node:
+        def __init__(self, chunk: DocChunk, score: float) -> None:
+            self.node = type("MetaNode", (), {"metadata": {
+                "source": chunk.source,
+                "start_line": chunk.start_line,
+                "chunk_id": chunk.chunk_id,
+                "tenant_id": chunk.tenant_id,
+            }})()
+            self.score = score
+
+    class _Retriever:
+        def __init__(self) -> None:
+            self._nodes = [_Node(chunk, 0.9 - index * 0.1) for index, chunk in enumerate(chunks)]
+
+        def retrieve(self, query: str):
+            return self._nodes
+
+    class _Index:
+        def as_retriever(self, similarity_top_k: int = 12):
+            return _Retriever()
+
+    return _Index()
+
+
+def _verify_policy_vector_coexistence() -> dict[str, bool]:
+    allowed = _chunk(
+        "vector-allowed.md",
+        "redis stream vector allowed runbook",
+        tenant_id="tenant-a",
+        acl=["user:alice"],
+        start_line=1,
+    )
+    blocked = _chunk(
+        "vector-blocked.md",
+        "redis stream vector blocked tenant b",
+        tenant_id="tenant-b",
+        acl=["user:alice"],
+        start_line=2,
+    )
+    store = RagStore([allowed, blocked], vector_index=_mock_vector_index([allowed, blocked]))
+    request = RetrievalRequest(
+        tenant_id="tenant-a",
+        user_id="alice",
+        query="redis stream vector runbook",
+        allowed_scopes=["user:alice"],
+        max_classification="internal",
+        purpose="agent_context",
+    )
+    detailed, _ = store.policy_aware_search(request, top_k=4)
+    vector_scores = store._vector_scores("redis stream vector runbook")
+    scoped = RagStore(
+        [allowed],
+        vector_index=store._vector_index,
+        vector_chunk_allowlist={allowed.chunk_id},
+        vector_metadata_filter={"tenant_id": "tenant-a"},
+    )
+    scoped_scores = scoped._vector_scores("redis stream vector runbook")
+    return {
+        "policy_prefilter_keeps_vector_path": len(detailed.chunks) == 1 and detailed.chunks[0].source == "vector-allowed.md",
+        "vector_allowlist_filters_blocked": allowed.key in scoped_scores and blocked.key not in scoped_scores,
+        "parent_vector_index_present": store._vector_index is not None and vector_scores.get(allowed.key, 0) > 0,
+    }
+
+
 def main() -> int:
     secret_text = "SECRET_TOKEN_SHOULD_NOT_APPEAR"
     store = RagStore(
@@ -132,7 +197,11 @@ def main() -> int:
         "audit_has_policy_trace": bool(validated.get("policy_trace_id")),
         "audit_has_no_raw_secret": secret_text not in encoded_payload and not audit_payload_has_secret(validated),
         "query_hash_present": bool(validated.get("query_hash")) and request.query not in str(validated.get("query_hash")),
+        "audit_has_tenant_id": validated.get("tenant_id") == "tenant-a",
     }
+
+    vector_checks = _verify_policy_vector_coexistence()
+    checks.update(vector_checks)
     overall = all(checks.values())
     print(f"checks={json.dumps(checks, ensure_ascii=False, sort_keys=True)}")
     print(f"blocked_count={policy_result.blocked_count}")

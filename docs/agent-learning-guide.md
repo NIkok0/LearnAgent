@@ -116,8 +116,8 @@ shell / git / MCP 与 RAG / HTTP 同级，都是 Capability 层 Tool 扩展，**
 ┌─────────────────────────────────────────────────────────────┐
 │  Scenario（业务配置层）— 声明式 overlay，不执行代码            │
 │  prompt · policy allowlist · router rules · docs 绑定       │
-│  HTTP path 白名单 · credential binding 引用 · budget/eval   │
-│  只能收紧 Kernel 默认策略，不能放宽安全边界                    │
+│  HTTP path 白名单 · credential binding 引用 · budget/eval    │
+│                                                             │
 └───────────────────────────┬─────────────────────────────────┘
                             │ 只读加载 / 覆盖
 ┌───────────────────────────▼─────────────────────────────────┐
@@ -289,7 +289,7 @@ budgets: { max_context_chars: 14000, ... }
 | 新增 shell 工具                 | ⚠️ policy sandbox 配置    | ✅ shell handler（待建）       | ⚠️ PolicyGate / sandbox hooks |
 | Run cancel 语义               | —                       | —                             | ✅ runtime                     |
 | 新 Event kind                | —                       | —                             | ✅ contracts + event_schema    |
-| EventStore/checkpoint 失败一致性 | —                       | —                             | ⚠️ 目标已定义（§2.6）；见 **§7 L8**、§2.8 |
+| EventStore/checkpoint 失败一致性 | —                       | —                             | ✅ v1 已落地；剩余 durable resume 见 **§2.8** |
 | Credential binding + scope   | ✅ `resources.credential_*` | ✅ `ToolSpec.required_scopes` | ✅ `CredentialManager` + PolicyGate 裁决 + `credential_binding_audit` |
 | 多租户 / 加密 credential       | ⚠️ `tenant_id` 字段预留   | —                             | ⚠️ MVP 进程内 memory；长期见 **§2.8** |
 
@@ -306,7 +306,7 @@ budgets: { max_context_chars: 14000, ... }
 | **C**  | PolicyGate kernel 化：allow/ask/deny、scenario allowlist、**required_scopes** | ✅ `PolicyRegistry` + `nodes.safety_gate` |
 | **C′** | K/C/S 代码分层：`kernel/bootstrap` + `tools/capability/`*          | ✅ 2026-05                                                  |
 | **C″** | Scenario 声明式 tool router：`router/rules.yaml` + `RouterEngine` | ✅ 2026-05                                                  |
-| **D**  | EventStore/checkpoint 失败一致性与 idempotency                      | §7 L8、[runtime-design](./runtime-design.md) |
+| **D**  | EventStore/checkpoint 失败一致性与 idempotency                      | ✅ v1；[runtime-design](./runtime-design.md) |
 | **E**  | MCP Capability adapter + Scenario 外置 server                     | ✅ `tools/extensions/mcp/` + `scenarios/watermark/mcp/` + `config/watermark-mcp.yaml` |
 | **F**  | shell / git Capability + `scenarios/coding/` 示例               | §7 L6、§2.8 |
 | **G**  | M14 Credential/Session + M12 scope 裁决                         | ✅ MVP；长期加密/多租户见 **§2.8** |
@@ -471,8 +471,9 @@ EventStore 通过 credential_binding_audit 只记录 binding id / scope / action
 |---|---|---|
 | 真实 LLM E2E（`verify_demo_golden_e2e.py --mode live`） | ❌ | [tool-design §5](./tool-design.md) |
 | RAGAS 作为 PR 硬门禁 | ❌ | [eval-design §0](./eval-design.md)、[rag-design §11.2](./rag-design.md) |
-| `trace_id` / generation span / token-cost 闭环 | ❌ | [observability §0](./observability-design.md) |
-| EventStore/checkpoint **失败一致性**（sequence、`last_successful_event_id`） | ⚠️ | **本页 §2.6**、[runtime §7.3](./runtime-design.md) |
+| `trace_id` / token usage 基础关联 | ✅ | [observability §0](./observability-design.md) |
+| generation span / cost 聚合 | ❌ | [observability §0](./observability-design.md) |
+| EventStore/checkpoint **失败一致性 v1**（sequence、`tool_end` 幂等、`last_successful_event_id`） | ✅ | **本页 §2.6**、[runtime §7.3](./runtime-design.md) |
 | `running`/`queued` **durable resume** | ❌ | [runtime §8.1](./runtime-design.md) |
 | 策略表 YAML 版本化 + `policy_version` 事件 | ❌ | [guardrail §10.5](./guardrail-policy-design.md) |
 | 输出 Guard（secret/PII 模式检测） | ❌ | [guardrail §10.2](./guardrail-policy-design.md) |
@@ -590,9 +591,9 @@ M04 只读 M02
 | **L5** Agent State | checkpoint、路由、上下文装配 | ⚠️ | LangGraph checkpoint；规则 `tool_router`；**Context Manager** + `ContextBundle`；episodic/LTM inject | [context-manager §0](./context-manager-design.md)、[memory-checkpoint §0](./memory-checkpoint-design.md)、[tool-design §0](./tool-design.md) |
 | **L6** Tool Exec | 受控工具、Policy、MCP | ⚠️ | `search_docs` + Scenario HTTP 白名单；PolicyGate + **required_scopes**；MCP adapter + Scenario `mcp/` | [tool-design §0](./tool-design.md)、[guardrail §0](./guardrail-policy-design.md) |
 | **L7** Output | 流式输出、引用、结构化交付 | ⚠️ | SSE token + ToolMessage；`retrieval_completed` 溯源；L4-lite citation | [data-flow §0](./data-flow-design.md)、[tool-design §0](./tool-design.md) |
-| **L8** Storage/Audit | EventStore、Timeline、eval、一致性 | ⚠️ | EventStore + Timeline；`checkpoint_compacted`；`credential_binding_audit`；eval suite（core + rag PR CI） | [runtime §0](./runtime-design.md)、[observability §0](./observability-design.md)、[eval-design §0](./eval-design.md) |
+| **L8** Storage/Audit | EventStore、Timeline、eval、一致性 | ⚠️ | EventStore + Timeline；run-local `sequence`；`tool_end` 幂等；`run_failed_meta` / `checkpoint_sync_failed`；`checkpoint_compacted`；`credential_binding_audit`；eval suite（core + rag PR CI） | [runtime §0](./runtime-design.md)、[observability §0](./observability-design.md)、[eval-design §0](./eval-design.md) |
 
 **图例**：✅ Demo 基线已闭环；⚠️ 主路径可用，仍有 §2.8 / design doc 待办。
 
 **L1–L4 未做（远期）**：网页/DB 同步 ingest、PDF/OCR/HTML 通用预处理流水线。  
-**L5–L8 主要待办**：`plan_updated` / live LLM E2E、path merge 进 `tool_route`、`timeout_seconds` 强制、策略表 YAML、`FinalAnswerModel`、失败一致性、`trace_id`/cost、durable resume — 详见 **§2.8** 与各 design doc。
+**L5–L8 主要待办**：`plan_updated` / live LLM E2E、path merge 进 `tool_route`、`timeout_seconds` 强制、策略表 YAML、`FinalAnswerModel`、generation span/cost、durable resume — 详见 **§2.8** 与各 design doc。

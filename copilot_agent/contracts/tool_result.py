@@ -108,11 +108,13 @@ class ToolResultModel(BaseModel):
             {
                 "excerpts_markdown": sanitized.get("excerpts_markdown"),
                 "sources": sanitized.get("sources") or [],
+                "citations": sanitized.get("citations") or [],
                 "suggested_api_paths": sanitized.get("suggested_api_paths") or [],
             }
         )
         metadata = {
             "sources": typed.sources,
+            "citations": [item.model_dump(exclude_none=True) for item in typed.citations],
             "excerpt_chars": len(str(typed.excerpts_markdown or "")),
             "suggested_api_paths": [item.model_dump(exclude_none=True) for item in typed.suggested_api_paths],
         }
@@ -205,6 +207,8 @@ class ToolResultModel(BaseModel):
                     model = cls.from_search_docs(value, duration_ms=duration_ms)
                 else:
                     model = cls.from_http_result(value, duration_ms=duration_ms, sanitized_args=sanitized_args)
+                if isinstance(value.get("metadata"), dict):
+                    model = model.model_copy(update={"metadata": {**model.metadata, **value["metadata"]}})
                 if error is not None:
                     return model.model_copy(update={"success": False, "error": error})
                 return model

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.eval.citation import evaluate_citation  # noqa: E402
+from copilot_agent.eval.citation import evaluate_citation, evaluate_structured_citations  # noqa: E402
 
 
 def main() -> int:
@@ -33,12 +33,25 @@ def main() -> int:
         retrieval_sources=["DEPLOY-SERVER.md"],
         required_sources=["DEPLOY-SERVER.md"],
     )
+    structured = evaluate_structured_citations(
+        citations=[
+            {
+                "source_file": "API-CONTRACT.md",
+                "heading_path": "Auth",
+                "start_line": 12,
+                "chunk_id": "API-CONTRACT.md:12:abc",
+                "authority": 95,
+            }
+        ],
+        required_sources=["API-CONTRACT.md"],
+    )
 
     checks = {
         "good_answer_passes": good.passed,
         "bad_answer_fails": not bad.passed,
         "required_coverage_good": good.required_source_coverage == 1.0,
         "missing_required_bad": "DEPLOY-SERVER.md" in bad.missing_required,
+        "structured_citations_pass": structured.passed and structured.required_source_coverage == 1.0,
     }
     passed = all(checks.values())
     summary = {
@@ -47,6 +60,7 @@ def main() -> int:
         "checks": checks,
         "good": good.as_dict(),
         "bad": bad.as_dict(),
+        "structured": structured.as_dict(),
     }
 
     summary_path = Path(args.summary_json).resolve()

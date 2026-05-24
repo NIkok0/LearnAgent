@@ -23,7 +23,7 @@
 | `response_fields` JSON 块解析 | ✅ 已实现 | `api_parse._parse_response_json_blocks` |
 | `POST /v1/rag/upload` + manifest 注册 | ✅ 已实现 | `server.py`，`docs_manifest.register_uploaded_file` |
 | 动态 context budget / top-k | ✅ 已实现 | `schema.select_chunks_for_budget`，`RAG_CONTEXT_BUDGET_CHARS` |
-| 关键词检索（ASCII + CJK token） | ✅ 已实现 | `rag/keyword.py`，`rag/tokenize.py` |
+| 关键词检索（ASCII + CJK token + 长句 2-gram） | ✅ 已实现 | `rag/keyword.py`，`rag/tokenize.py` |
 | BM25 稀疏检索 | ✅ 已实现 | `rag/bm25.py` |
 | RRF 多路融合（keyword + BM25 + vector） | ✅ 已实现，默认开启 | `rag/fusion.py`，`RAG_USE_RRF=true` |
 | 查询改写（口语 → 平台术语） | ✅ 已实现 | `rag/query_rewrite.py`，`RAG_QUERY_REWRITE_ENABLED` |
@@ -36,15 +36,27 @@
 | `retrieval_completed.call_id` 与 `search_docs` tool 关联 | ✅ 已实现 | `agent/tool_call_context.py`，`event_mapper.py` |
 | 检索 → API path / 字段 hints 注入 tool 结果 | ✅ 已实现 | `rag/api_paths.py`，`suggested_api_paths` / `api_field_hints` |
 | Timeline `kind: retrieval` 投影 | ✅ 已实现 | `runtime/timeline.py` |
-| 离线 proxy 检索评测（20 docs case） | ✅ 已实现 | `eval/phase4-eval-cases.json`，`verify_phase4_ragas.py` |
+| 离线 proxy 检索评测（20 docs case + gold chunk） | ✅ 已实现 | `eval/phase4-eval-cases.json`，`verify_phase4_ragas.py` |
+| PR / Nightly 检索 profile 分离 | ✅ 已实现 | PR：`--disable-vector`；Nightly：`phase4_ragas_nightly` + `bge-small-zh-v1.5` |
 | 测试知识库（虚构 Demo 内容） | ✅ 已实现 | `scenarios/watermark/docs/`（Scenario 语料；非 Kernel 源码） |
 | 热更新（watch + `POST /v1/rag/reload`） | ✅ 已实现 | `rag/reload.py`，两阶段 reload |
 | 向量增量 upsert（按文件 manifest） | ✅ 已实现 | `rag/manifest.py`，`sync_vector_index` |
 | Rerank / Cross-encoder 精排 | ⚠️ 可选 | `rag/rerank.py`，`RAG_RERANK_ENABLED=false` 默认关 |
-| 分层评测（Recall@k / faithfulness / E2E） | ⚠️ 部分 | L1 proxy ✅；L4-lite ✅；L5 proxy ✅；L3 RAGAS 可选 |
+| 分层评测（Recall@k / faithfulness / E2E） | ⚠️ 部分 | L1 proxy + **gold_chunk Recall@k/MRR** ✅；L4-lite ✅；L5 proxy ✅；L3 RAGAS 可选 |
 | Tool-grounded 编排（先 RAG 再 API） | ✅ 已实现 | [tool-design.md](./tool-design.md) |
-| 上传新 md / 多租户 collection | ⚠️ 部分 | upload ✅；多租户 collection 仍 ❌ |
-| RAGAS 作为 PR 硬门禁 | ❌ 未实现 | proxy 为主，RAGAS 可选 |
+| 上传新 md / 多租户 collection | ⚠️ 部分 | upload ✅ + **doc_security** 字段 ✅；MVP **单 collection + metadata 过滤** ✅ |
+| `doc_security` manifest（tenant / acl / classification / authority） | ✅ 已实现 | `docs_manifest.json` → `DocChunk`；`rag/security.py` |
+| Policy-aware 检索（tenant / ACL / classification） | ✅ 已实现 | `rag/policy_filter.py`，`policy_aware_search` |
+| Policy 预过滤 + 向量路径共存 | ✅ 已实现 | `RagStore._vector_chunk_allowlist`；Chroma metadata `tenant_id` / `authority` |
+| Scenario `default_tenant_id` → runner / preretrieval | ✅ 已实现 | `scenario/schema.py`，`request_context.py`，`runner.py` |
+| Credential + `rag_allowed_scopes` → `allowed_scopes` | ✅ 已实现 | `merge_retrieval_scopes()`；`watermark.yaml` `group:ops/security` |
+| Scenario `rag_embedding_model`（中文向量默认） | ✅ 已实现 | `bootstrap._apply_rag_runtime_settings`；`BAAI/bge-small-zh-v1.5` |
+| Authority 冲突裁决（boost + heading dedup） | ✅ 已实现 | `fusion.apply_authority_boost`，`dedup_chunks` 保留最高 authority |
+| RAGAS 作为 PR 硬门禁 | ❌ 未实现 | Nightly E2E RAGAS ✅；PR 仍 proxy-only |
+| L7 结构化 citations（`SearchDocsToolData.citations`） | ✅ 已实现 | `tool_data.CitationItem`，`rag/citations.py`，`tool_handlers` |
+| L2 上下文质量指标（overlap / truncation） | ✅ 已实现 | `eval/context_quality.py`，`phase4_ragas` proxy_metrics |
+| RAG E2E 生成评测（retrieve → LLM → RAGAS） | ✅ Nightly | `eval/rag_e2e.py`，`verify_rag_e2e_ragas.py` |
+| RAG metrics 历史趋势 / 回归检测 | ✅ Nightly | `rag_metrics/history/`，`eval/rag_metrics_trend.py` |
 
 **成熟度**：**高** — ingest/manifest/response JSON/budget/ExtractedRecord 已闭环；**真实 LLM E2E** 仍待 [guide §2.8](./agent-learning-guide.md) / [tool-design §5](./tool-design.md)。
 
@@ -95,7 +107,7 @@
   采集 / 解析 / 清洗          → 仅 Markdown 白名单（§4.6）
   分块 chunking               → ingest.load_chunks（§4.3）
   向量化 + 索引               → sync_vector_index + rag_manifest（§7）
-  元数据治理                  → doc_type ✅；版本/权威级别 ❌（§4.7）
+  元数据治理                  → doc_type ✅；**doc_security / authority** ✅（§4.6–§4.7）
 
 【在线问答】
   Query 理解 / 改写           → query_rewrite（§5.1）
@@ -254,25 +266,27 @@ API endpoint 存在时，块头追加 `| {method} {path}`，便于 LLM 与 Tool-
 | 能力 | 现状 | 目标 / 缺口 |
 |------|------|-------------|
 | 输入格式 | 仅 Markdown（`.md`） | PDF / HTML / OpenAPI YAML（远期） |
-| 文件发现 | ✅ Scenario `docs_manifest.json` + glob | 多租户 collection |
-| 结构化字段 | ✅ endpoint / request / response / error_codes | 版本号、authority |
-| 增量 ingest | ✅ 热 reload + upload API | — |
-| 多租户 | 单 collection `wm_docs` | 按 tenant / env 隔离 collection |
+| 文件发现 | ✅ Scenario `docs_manifest.json` + glob | 多租户 **独立 collection**（远期） |
+| 结构化字段 | ✅ endpoint / request / response / error_codes / **authority** | 版本号 superseded 标记 |
+| 增量 ingest | ✅ 热 reload + upload API（含 **tenant / acl / classification** form） | — |
+| 多租户 | ✅ 单 collection `wm_docs` + **Chroma metadata + policy pre-filter** | 按 tenant 独立 collection（远期） |
 
 **当前约束**：新增 md 优先改 Scenario **`docs_manifest.json`** 或 `POST /v1/rag/upload`；Kernel 无固定文件名列表。
 
-### 4.7 知识冲突与优先级（规划）
+### 4.7 知识冲突与优先级
 
-Demo 文档可能出现 **同一事实多处描述**（如 Runbook vs API 契约、旧版 README vs 新 DEPLOY）。当前实现 **不做** 冲突检测或权威裁决：
+Demo 文档可能出现 **同一事实多处描述**（如 Runbook vs API 契约、旧版 README vs 新 DEPLOY）。Wave B 起引入 **authority** 参与打分与同 heading dedup：
 
 | 场景 | 当前行为 | 规划方向 |
 |------|----------|----------|
-| 多 chunk 内容矛盾 | 全部进入 top-k，由 LLM 自行取舍 | authority 字段 + 冲突规则（高权威覆盖） |
+| 多 chunk 内容矛盾 | 同 `(source, heading_path)` 保留 **最高 authority** chunk | 跨 source 冲突检测（远期） |
 | 文档 vs 实时 API | Prompt 要求 API 优先；无代码强制 | Tool-grounded 节点：API 结果覆盖文档陈述 |
 | 旧版段落未删除 | 仍可被检索命中 | `updated_at` + 版本过滤；ingest 时标记 superseded |
-| `doc_type` 优先级 | 未参与打分 | `requirements` / `api_contract` > `overview`（§11.2） |
+| `doc_type` / authority 优先级 | ✅ `DOC_TYPE_BOOST` + `apply_authority_boost` | 可配置 per-scenario 权重 |
 
-**产品原则（目标）**：可引用 > 可检索 > 可生成；冲突时 Timeline 应能展示「依据哪份文档」，而非静默合并。
+**实现锚点**：`DocChunk.authority`（manifest `doc_security` 或 doc_type 默认）；`fusion.apply_authority_boost`；`dedup_chunks` 按 authority 裁决。
+
+**产品原则**：可引用 > 可检索 > 可生成；冲突时 Timeline 展示 `RetrievalSourceItem.authority`，便于审计依据来源。
 
 ---
 
@@ -382,7 +396,7 @@ Handler 返回 LLM 的字段经 `ToolResultModel.from_search_docs`：`excerpts_m
 | 稠密召回 | Embedding + ANN | 可选 Chroma + bge-small-en | 默认启用、中英混合模型 |
 | 多路融合 | RRF / 学习排序 | **路由加权 RRF** + doc_type boost ✅ | 学习排序 |
 | 精排 Rerank | Cross-encoder | ✅ 可选（默认关） | 夜跑 profile 默认开 |
-| 元数据过滤 | doc_type / 时间 / 租户 | boost ✅；无 hard filter | authority 过滤 |
+| 元数据过滤 | doc_type / 时间 / 租户 | ✅ policy pre-filter + vector metadata（Wave B） | 时间/superseded 过滤 |
 | Fallback | 改写后重试 | keyword_search 末级兜底 | 向量默认兜底策略 |
 
 ### 5.8 上下文打包（Context Packing）
@@ -395,7 +409,7 @@ Handler 返回 LLM 的字段经 `ToolResultModel.from_search_docs`：`excerpts_m
 | 去重 | ✅ `(source, heading_path)` dedup | 文本相似度 dedup |
 | 长度 | `max_chars=RAG_CONTEXT_BUDGET_CHARS`（默认 14000）+ `select_chunks_for_budget` | 无「证据摘要」层 |
 | 结构 | 块头含 source / heading / doc_type | 无「证据摘要」层；全文 chunk 直塞 |
-| 引用 | prompt 要求 cite 文件名；L4-lite 评测 | 结构化 citation 字段、E2E LLM judge |
+| 引用 | prompt 要求 cite 文件名；L4-lite 评测 | ✅ **结构化 `citations[]`** + L4 heuristic | E2E LLM judge |
 
 **与 checkpoint 边界**：打包结果进入 tool message，**不**写入 LangGraph checkpoint 全文；`retrieval_completed` 事件保留结构化 sources 供 Timeline 审计。
 
@@ -576,10 +590,10 @@ CI 行为见 [ci-design.md](./ci-design.md)；RAG 代理指标见 `phase4_ragas`
 
 | 层级 | 指标 | 现状 | 目标 |
 |------|------|------|------|
-| L1 检索 | Recall@k、MRR、required_source 命中 | ✅ proxy（`required_source_*`） | gold chunk_id 级 Recall@k |
-| L2 上下文 | 摘录是否含答案句、重复率 | ❌ 未测 | chunk overlap / dedup 门禁 |
-| L3 生成 | faithfulness、answer relevancy | ⚠️ 可选 RAGAS（非 PR 硬门禁） | 夜跑入库 + 阈值告警 |
-| L4 引用 | citation accuracy、文件名对齐 | ✅ L4-lite（`verify_citation_l4.py`） | E2E LLM judge + 章节级对齐 |
+| L1 检索 | Recall@k、MRR、required_source 命中 | ✅ proxy（`required_source_*` + **`gold_chunk_recall_at_k` / MRR**） | chunk_id 级更细标注 |
+| L2 上下文 | 摘录是否含答案句、重复率 | ✅ overlap / truncation proxy | chunk 答案句标注 |
+| L3 生成 | faithfulness、answer relevancy | ✅ Nightly E2E RAGAS（`verify_rag_e2e_ragas`） | PR 硬门禁仍 ❌ |
+| L4 引用 | citation accuracy、文件名对齐 | ✅ L4-lite + **structured citations** | E2E LLM judge + 章节级对齐 |
 | L5 Agent E2E | tool 选择、先 RAG 后 API | ✅ proxy（28 case + Demo 6 golden） | 真实 LLM 轨迹 |
 
 **原则**：L1 + L4-lite + L5 proxy 已纳入 `--profile rag|e2e`；L3 RAGAS 仍非 PR 硬门禁。
@@ -588,23 +602,24 @@ L5 工具轨迹、Demo golden 脚本分工见 [tool-design §3.9](./tool-design.
 
 ### 9.5 数据集规范（扩展方向）
 
-当前 `phase4-eval-cases.json` docs case 字段：
+当前 `phase4-eval-cases.json` docs case 字段（v1.3.0）：
 
 ```json
 {
   "question": "...",
   "required_sources": ["DEPLOY-SERVER.md"],
-  "expected_tools": ["search_docs"]
+  "expected_tools": ["search_docs"],
+  "question_type": "factual",
+  "gold_chunks": [{"source": "DEPLOY-SERVER.md", "start_line": 38}],
+  "must_not_sources": []
 }
 ```
 
-**建议补充**（尚未写入 eval 文件）：
-
-| 字段 | 用途 |
-|------|------|
-| `gold_chunk_ids` 或 `(source, start_line)` | L1 Recall@k / MRR |
-| `question_type` | `factual` / `procedural` / `troubleshooting` / `api_lookup` |
-| `must_not_sources` | 负样本：不应召回的文档 |
+| 字段 | 用途 | 状态 |
+|------|------|------|
+| `gold_chunks`（`source` + `start_line`） | L1 Recall@k / MRR | ✅ Wave A |
+| `question_type` | `factual` / `procedural` / `troubleshooting` / `api_lookup` | ✅ Wave A |
+| `must_not_sources` | 负样本：不应召回的文档 | ✅ Wave A（可选） |
 | `requires_api_after_rag` | E2E：排障类应先 `search_docs` 再 `http_get` |
 
 问题类型分布目标：事实查表 ~40%、流程 ~30%、排障 ~20%、API 契约 ~10%，与 Demo 文档类型对齐。
@@ -650,7 +665,10 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **2** | L2 | 向量默认 profile 分离；RAGAS 夜跑 `rag_metrics` 趋势 | `--profile full --enable-ragas` |
+| **A** | L2 | ~~向量 PR/Nightly profile 分离；gold chunk 指标；CJK bigram~~ | ✅ `phase4_ragas_nightly` + `rag_metrics/` |
+| **B** | L1–L2 | ~~doc_security ingest；tenant 贯通；policy+vector 共存；authority dedup~~ | ✅ `verify_rag_doc_security_ingest` + `verify_policy_aware_rag_v1` |
+| **C** | L2–L3–L7–L8 | ~~structured citations；L2 context metrics；RAG E2E RAGAS；metrics history~~ | ✅ `verify_rag_e2e_ragas` + `rag_metrics/history/` |
+| **2** | L2 | RAGAS 夜跑 faithfulness 趋势告警 | `--profile full` + `rag_e2e_ragas` |
 | **4** | L1 | 网页 crawl / DB 同步 ingest | 立项后单独立项 |
 | **4** | L2 | PDF/HTML/OCR preprocess 插件 | 非 MVP |
 
@@ -662,13 +680,13 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 ### 11.2 检索质量
 
-§11.2 前六项 **已实现**（2026-05）：`query_rewrite`、`tokenize`（CJK）、BM25、RRF、`doc_type boost`、`dedup_chunks`。验收：`python scripts/verify_rag_retrieval_quality.py` + `verify_phase4_ragas.py`。
+§11.2 前六项 **已实现**（2026-05）：`query_rewrite`、`tokenize`（CJK + 长句 2-gram）、BM25、RRF、`doc_type boost`、`dedup_chunks`。验收：`python scripts/verify_rag_retrieval_quality.py` + `verify_phase4_ragas.py`。
 
 **仍待做**：
 
 1. ~~**动态 top-k** — 按 context 预算截断（§5.8）。~~ ✅ Wave1
 2. **LLM 查询改写** — 替代/补充规则表。
-3. **向量默认启用 + 中英混合 embedding** — CI 与本地 profile 分离；夜跑 `rag_metrics` 趋势 JSON。
+3. ~~**向量 Nightly profile + 中文 embedding**~~ ✅ Wave A（PR 仍 `--disable-vector`；Nightly `BAAI/bge-small-zh-v1.5` + rerank）
 
 ### 11.3 Tool-grounded 编排
 

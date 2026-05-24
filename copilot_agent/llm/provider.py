@@ -20,17 +20,17 @@ from copilot_agent.settings import settings
 
 log = logging.getLogger(__name__)
 
-_llm_inflight_semaphore: asyncio.Semaphore | None = None
+_llm_inflight_sem: asyncio.Semaphore | None = None
 
 
 def _llm_inflight_semaphore() -> asyncio.Semaphore | None:
-    global _llm_inflight_semaphore
+    global _llm_inflight_sem
     limit = int(settings.max_llm_inflight)
     if limit <= 0:
         return None
-    if _llm_inflight_semaphore is None:
-        _llm_inflight_semaphore = asyncio.Semaphore(max(1, limit))
-    return _llm_inflight_semaphore
+    if _llm_inflight_sem is None:
+        _llm_inflight_sem = asyncio.Semaphore(max(1, limit))
+    return _llm_inflight_sem
 
 
 class _InflightLimitedModel:

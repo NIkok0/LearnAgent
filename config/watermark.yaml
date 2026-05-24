@@ -47,6 +47,12 @@ resources:
     - http:read
     - http:write
   docs_fallback: scenarios/watermark/docs
+  default_tenant_id: default
+  default_max_classification: internal
+  rag_allowed_scopes:
+    - group:ops
+    - group:security
+  rag_embedding_model: BAAI/bge-small-zh-v1.5
   rag_rules: config/watermark-rag.yaml
   diagnosis: config/watermark-diagnosis.yaml
   http_get_actuator_paths:

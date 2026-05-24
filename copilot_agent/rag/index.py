@@ -41,6 +41,9 @@ def _chunk_metadata(chunk: DocChunk) -> dict[str, str | int]:
         "doc_type": chunk.doc_type or "doc",
         "chunk_id": chunk.chunk_id,
         "chunk_index": int(chunk.chunk_index),
+        "tenant_id": chunk.tenant_id or "default",
+        "classification": chunk.classification or "internal",
+        "authority": int(getattr(chunk, "authority", 50) or 50),
     }
     if chunk.updated_at:
         meta["updated_at"] = chunk.updated_at
@@ -75,6 +78,24 @@ def _delete_chunk_ids(collection: Any, chunk_ids: list[str]) -> None:
     batch = 500
     for i in range(0, len(chunk_ids), batch):
         collection.delete(ids=chunk_ids[i : i + batch])
+
+
+def delete_vector_chunks(source_file: str) -> int:
+    """Delete persisted vector rows for one source file using the vector manifest."""
+    manifest = load_manifest()
+    chunk_ids = remove_file_entry(manifest, source_file)
+    if not chunk_ids:
+        save_manifest(manifest)
+        return 0
+    try:
+        import chromadb
+    except ImportError as exc:
+        raise RuntimeError("chromadb is required to delete vector chunks") from exc
+    client = chromadb.PersistentClient(path=str(chroma_dir()))
+    collection = client.get_or_create_collection("wm_docs")
+    _delete_chunk_ids(collection, chunk_ids)
+    save_manifest(manifest)
+    return len(chunk_ids)
 
 
 def _upsert_chunks(collection: Any, embed_model: Any, chunks: list[DocChunk]) -> int:

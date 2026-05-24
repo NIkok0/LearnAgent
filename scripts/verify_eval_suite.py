@@ -141,6 +141,33 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
     ),
     SuiteSpec(
+        suite_name="runtime_durability_v1",
+        script="scripts/verify_runtime_durability_v1.py",
+        args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="checkpoint_consistency_v2",
+        script="scripts/verify_checkpoint_consistency_v2.py",
+        args=(
+            "--event-store-path",
+            "storage/verify-checkpoint-consistency-events.sqlite",
+            "--checkpoint-path",
+            "storage/verify-checkpoint-consistency-checkpoints.sqlite",
+        ),
+    ),
+    SuiteSpec(
+        suite_name="observability_provider",
+        script="scripts/verify_observability_provider.py",
+    ),
+    SuiteSpec(
+        suite_name="observability_cost_v1",
+        script="scripts/verify_observability_cost_v1.py",
+    ),
+    SuiteSpec(
+        suite_name="final_answer_l7",
+        script="scripts/verify_final_answer_l7.py",
+    ),
+    SuiteSpec(
         suite_name="hitl_checkpoint_resume",
         script="scripts/verify_hitl_checkpoint_resume.py",
         args=("--event-store-path", "storage/verify-hitl-checkpoint-resume.sqlite"),
@@ -185,6 +212,37 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         suite_name="runtime_execution_engine",
         script="scripts/verify_runtime_execution_engine.py",
         args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="runtime_durability_v1",
+        script="scripts/verify_runtime_durability_v1.py",
+        args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="checkpoint_consistency_v2",
+        script="scripts/verify_checkpoint_consistency_v2.py",
+        args=(
+            "--event-store-path",
+            "storage/verify-checkpoint-consistency-events.sqlite",
+            "--checkpoint-path",
+            "storage/verify-checkpoint-consistency-checkpoints.sqlite",
+        ),
+    ),
+    SuiteSpec(
+        suite_name="observability_correlation",
+        script="scripts/verify_observability_correlation.py",
+    ),
+    SuiteSpec(
+        suite_name="observability_provider",
+        script="scripts/verify_observability_provider.py",
+    ),
+    SuiteSpec(
+        suite_name="observability_cost_v1",
+        script="scripts/verify_observability_cost_v1.py",
+    ),
+    SuiteSpec(
+        suite_name="plan_module",
+        script="scripts/verify_plan_module.py",
     ),
     SuiteSpec(
         suite_name="hitl_checkpoint_resume",
@@ -235,6 +293,26 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         rag_related=True,
     ),
     SuiteSpec(
+        suite_name="rag_doc_security_ingest",
+        script="scripts/verify_rag_doc_security_ingest.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_authority_dedup",
+        script="scripts/verify_rag_authority_dedup.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_retrieval_scopes",
+        script="scripts/verify_rag_retrieval_scopes.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_document_lifecycle_v1",
+        script="scripts/verify_rag_document_lifecycle_v1.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
         suite_name="private_rag_context_guard_v1",
         script="scripts/verify_private_rag_context_guard_v1.py",
         rag_related=True,
@@ -281,6 +359,16 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         rag_related=True,
     ),
     SuiteSpec(
+        suite_name="final_answer_l7",
+        script="scripts/verify_final_answer_l7.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="tool_message_policy",
+        script="scripts/verify_tool_message_policy.py",
+        rag_related=True,
+    ),
+    SuiteSpec(
         suite_name="diagnosis_template",
         script="scripts/verify_diagnosis_template.py",
         rag_related=True,
@@ -298,6 +386,38 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="rag_rerank",
         script="scripts/verify_rag_rerank.py",
+        rag_related=True,
+    ),
+)
+
+RAG_NIGHTLY_SUITES: tuple[SuiteSpec, ...] = (
+    SuiteSpec(
+        suite_name="phase4_ragas_nightly",
+        script="scripts/verify_phase4_ragas.py",
+        args=(
+            "--mode",
+            "proxy",
+            "--enable-vector",
+            "--allow-vector-skip",
+            "--write-rag-metrics",
+            "artifacts/eval/rag_metrics/nightly-latest.json",
+            "--metrics-profile",
+            "nightly",
+            "--summary-json",
+            "artifacts/phase4/phase4-ragas-nightly-summary.json",
+        ),
+        rag_related=True,
+    ),
+    SuiteSpec(
+        suite_name="rag_e2e_ragas",
+        script="scripts/verify_rag_e2e_ragas.py",
+        args=(
+            "--limit",
+            "8",
+            "--allow-missing-key",
+            "--summary-json",
+            "artifacts/eval/rag_metrics/e2e-latest.json",
+        ),
         rag_related=True,
     ),
 )
@@ -325,9 +445,53 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
     return {
         "core-fast": CORE_FAST_SUITES,
         "core": CORE_SUITES,
+        "infra": (
+            SuiteSpec(
+                suite_name="runtime_durability_v1",
+                script="scripts/verify_runtime_durability_v1.py",
+                args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
+            ),
+            SuiteSpec(
+                suite_name="runtime_execution_engine",
+                script="scripts/verify_runtime_execution_engine.py",
+                args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
+            ),
+            SuiteSpec(
+                suite_name="observability_provider",
+                script="scripts/verify_observability_provider.py",
+            ),
+            SuiteSpec(
+                suite_name="observability_cost_v1",
+                script="scripts/verify_observability_cost_v1.py",
+            ),
+            SuiteSpec(
+                suite_name="tool_execution_reliability",
+                script="scripts/verify_tool_execution_reliability.py",
+            ),
+            SuiteSpec(
+                suite_name="policy_aware_rag_v1",
+                script="scripts/verify_policy_aware_rag_v1.py",
+                rag_related=True,
+            ),
+            SuiteSpec(
+                suite_name="private_rag_context_guard_v1",
+                script="scripts/verify_private_rag_context_guard_v1.py",
+                rag_related=True,
+            ),
+            SuiteSpec(
+                suite_name="private_rag_output_guard_v1",
+                script="scripts/verify_private_rag_output_guard_v1.py",
+                rag_related=True,
+            ),
+            SuiteSpec(
+                suite_name="final_answer_l7",
+                script="scripts/verify_final_answer_l7.py",
+                rag_related=True,
+            ),
+        ),
         "rag": rag,
         "e2e": E2E_SUITES,
-        "full": CORE_SUITES + rag + E2E_SUITES,
+        "full": CORE_SUITES + rag + RAG_NIGHTLY_SUITES + E2E_SUITES,
     }
 
 
@@ -432,7 +596,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run aggregated eval suite profiles.")
     parser.add_argument(
         "--profile",
-        choices=["core-fast", "core", "rag", "e2e", "full"],
+        choices=["core-fast", "core", "infra", "rag", "e2e", "full"],
         default="core",
         help="Which suite profile to execute.",
     )
@@ -463,6 +627,12 @@ def main() -> int:
         start = time.perf_counter()
         cmd = [sys.executable, str((ROOT / spec.script).resolve()), *spec.args]
         env = dict(os.environ)
+        if spec.rag_related:
+            env.setdefault("SCENARIO", "watermark")
+        if spec.suite_name == "phase4_ragas_nightly":
+            env["RAG_USE_VECTOR"] = "true"
+            env["RAG_RERANK_ENABLED"] = "true"
+            env["RAG_EMBEDDING_MODEL"] = "BAAI/bge-small-zh-v1.5"
         if spec.rag_related:
             env.setdefault("SCENARIO", "watermark")
         try:
@@ -573,20 +743,45 @@ def main() -> int:
         if checks.get("contract_schema_ok") is False:
             contract_schema_ok = False
     rag_metrics: dict[str, Any] = {}
-    for item in results:
-        if item["suite_name"] != "phase4_ragas":
-            continue
-        metrics_json = item.get("summary_json")
-        if not metrics_json:
-            continue
+    nightly_metrics_path = ROOT / "artifacts/eval/rag_metrics/nightly-latest.json"
+    if nightly_metrics_path.is_file():
         try:
-            payload = json.loads(Path(str(metrics_json)).read_text(encoding="utf-8"))
+            nightly_payload = json.loads(nightly_metrics_path.read_text(encoding="utf-8"))
+            if isinstance(nightly_payload.get("proxy_metrics"), dict):
+                rag_metrics = nightly_payload["proxy_metrics"]
+                rag_metrics["profile"] = nightly_payload.get("profile", "nightly")
         except Exception:
-            continue
-        proxy_metrics = payload.get("proxy_metrics")
-        if isinstance(proxy_metrics, dict):
-            rag_metrics = proxy_metrics
-        break
+            pass
+    if not rag_metrics:
+        for item in results:
+            if item["suite_name"] not in {"phase4_ragas", "phase4_ragas_nightly"}:
+                continue
+            metrics_json = item.get("summary_json")
+            if not metrics_json:
+                continue
+            try:
+                payload = json.loads(Path(str(metrics_json)).read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            proxy_metrics = payload.get("proxy_metrics")
+            if isinstance(proxy_metrics, dict):
+                rag_metrics = proxy_metrics
+            if item["suite_name"] == "phase4_ragas_nightly":
+                break
+            if item["suite_name"] == "phase4_ragas":
+                rag_metrics = proxy_metrics if isinstance(proxy_metrics, dict) else rag_metrics
+
+    rag_regression: dict[str, Any] = {}
+    if rag_metrics:
+        from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression  # noqa: WPS433
+
+        rag_regression = detect_gold_recall_regression(
+            current=rag_metrics,
+            history_dir=ROOT / "artifacts/eval/rag_metrics/history",
+            profile_prefix="nightly",
+        )
+        if rag_regression.get("regression"):
+            overall_pass = False
 
     out = {
         "profile": args.profile,
@@ -599,6 +794,7 @@ def main() -> int:
         "failed_scenarios": failed_scenarios,
         "runtime_contract_breaks": runtime_contract_breaks,
         "rag_metrics": rag_metrics,
+        "rag_regression": rag_regression,
         "contract_schema_ok": contract_schema_ok,
         "contract_metrics": contract_metrics,
         "duration_total_ms": duration_total_ms,
@@ -619,6 +815,7 @@ def main() -> int:
     print(f"contract_schema_ok={out['contract_schema_ok']}")
     print(f"contract_metrics={json.dumps(out['contract_metrics'], ensure_ascii=False)}")
     print(f"rag_metrics={json.dumps(out['rag_metrics'], ensure_ascii=False)}")
+    print(f"rag_regression={json.dumps(out.get('rag_regression', {}), ensure_ascii=False)}")
     print(f"duration_total_ms={out['duration_total_ms']}")
     print(f"slow_suites={json.dumps(out['slow_suites'], ensure_ascii=False)}")
     print(f"summary_json={summary_path}")

@@ -118,8 +118,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install -r requirements-vector.txt
 
       - name: Run eval full profile
+        env:
+          RAG_USE_VECTOR: "true"
+          RAG_RERANK_ENABLED: "true"
+          RAG_EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             python scripts/verify_eval_suite.py --profile full --enable-ragas
@@ -142,6 +147,10 @@ jobs:
           payload = json.loads(p.read_text(encoding="utf-8"))
           failed = payload.get("failed_suites", [])
           rag_metrics = payload.get("rag_metrics", {})
+          nightly_metrics_path = Path("artifacts/eval/rag_metrics/nightly-latest.json")
+          nightly_payload = {}
+          if nightly_metrics_path.is_file():
+              nightly_payload = json.loads(nightly_metrics_path.read_text(encoding="utf-8"))
           lines = [
               "## Eval Full Summary",
               f"- overall_pass: {payload.get('overall_pass')}",
@@ -153,6 +162,9 @@ jobs:
               f"- runtime_contract_breaks: {', '.join(payload.get('runtime_contract_breaks', [])) or '(none)'}",
               f"- contract_schema_ok: {payload.get('contract_schema_ok')}",
               f"- rag_metrics: {json.dumps(rag_metrics, ensure_ascii=False)}",
+              f"- nightly_embedding_model: {nightly_payload.get('embedding_model', 'n/a')}",
+              f"- nightly_vector_enabled: {nightly_payload.get('vector_enabled')}",
+              f"- nightly_rerank_enabled: {nightly_payload.get('rerank_enabled')}",
           ]
           summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
           summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -165,6 +177,7 @@ jobs:
           name: eval-full-artifacts
           path: |
             artifacts/eval/eval-suite-summary.json
+            artifacts/eval/rag_metrics/
             artifacts/runtime/*.json
             artifacts/phase4/*.json
           if-no-files-found: warn

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -51,6 +52,13 @@ class RunConcurrencyLimitError(RuntimeError):
     def __init__(self, limit: int) -> None:
         self.limit = limit
         super().__init__(f"max concurrent runs ({limit}) reached")
+
+
+class IdempotencyConflictError(RuntimeError):
+    def __init__(self, thread_id: str, idempotency_key: str) -> None:
+        self.thread_id = thread_id
+        self.idempotency_key = idempotency_key
+        super().__init__("idempotency key conflict")
 
 
 def utc_now_iso() -> str:
@@ -122,6 +130,49 @@ class EventStore:
                 """
             )
             self._migrate_threads(conn)
+            self._migrate_runs(conn)
+            self._migrate_events(conn)
+
+    def _migrate_runs(self, conn: sqlite3.Connection) -> None:
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "idempotency_key" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN idempotency_key TEXT NULL")
+        if "idempotency_payload_hash" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN idempotency_payload_hash TEXT NULL")
+        if "recovered_at" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN recovered_at TEXT NULL")
+        if "recovery_reason" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN recovery_reason TEXT NULL")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_runs_thread_id_idempotency
+                ON runs(thread_id, idempotency_key)
+            """
+        )
+
+    def _migrate_events(self, conn: sqlite3.Connection) -> None:
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(events)").fetchall()}
+        if "sequence" not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN sequence INTEGER")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence, id)"
+        )
+        rows = conn.execute(
+            """
+            SELECT id, run_id
+            FROM events
+            WHERE sequence IS NULL
+            ORDER BY run_id ASC, id ASC
+            """
+        ).fetchall()
+        if not rows:
+            return
+        next_seq: dict[str, int] = {}
+        for row in rows:
+            run_id = str(row["run_id"])
+            seq = next_seq.get(run_id, 0) + 1
+            next_seq[run_id] = seq
+            conn.execute("UPDATE events SET sequence = ? WHERE id = ?", (seq, int(row["id"])))
 
     def _migrate_threads(self, conn: sqlite3.Connection) -> None:
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(threads)").fetchall()}
@@ -333,9 +384,19 @@ class EventStore:
     def archive_ended_threads_older_than(self, ttl_seconds: int | float, *, limit: int = 100) -> list[dict[str, Any]]:
         return self.archive_ended_threads_before(utc_iso_before(ttl_seconds), limit=limit)
 
-    def create_run(self, thread_id: str, *, run_id: str | None = None, status: str = RUN_STATUS_QUEUED) -> dict[str, Any]:
+    def create_run(
+        self,
+        thread_id: str,
+        *,
+        run_id: str | None = None,
+        status: str = RUN_STATUS_QUEUED,
+        idempotency_key: str | None = None,
+        idempotency_payload_hash: str | None = None,
+    ) -> dict[str, Any]:
         validate_run_status(status)
         run_id = run_id or str(uuid4())
+        idempotency_key = (idempotency_key or "").strip() or None
+        idempotency_payload_hash = (idempotency_payload_hash or "").strip() or None
         now = utc_now_iso()
         with self._lock, self._connect() as conn:
             thread = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
@@ -355,6 +416,22 @@ class EventStore:
                 thread_status = str(thread["status"])
             if thread_status != THREAD_STATUS_ACTIVE:
                 raise ThreadNotActiveError(thread_id, thread_status)
+
+            if idempotency_key:
+                existing = conn.execute(
+                    """
+                    SELECT * FROM runs
+                    WHERE thread_id = ? AND idempotency_key = ?
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    """,
+                    (thread_id, idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    existing_hash = str(existing["idempotency_payload_hash"] or "")
+                    if existing_hash and idempotency_payload_hash and existing_hash != idempotency_payload_hash:
+                        raise IdempotencyConflictError(thread_id, idempotency_key)
+                    return _row_to_dict(existing)
 
             active_run = conn.execute(
                 """
@@ -377,10 +454,13 @@ class EventStore:
 
             conn.execute(
                 """
-                INSERT INTO runs (id, thread_id, status, created_at, completed_at, error)
-                VALUES (?, ?, ?, ?, NULL, NULL)
+                INSERT INTO runs (
+                    id, thread_id, status, created_at, completed_at, error,
+                    idempotency_key, idempotency_payload_hash, recovered_at, recovery_reason
+                )
+                VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, NULL, NULL)
                 """,
-                (run_id, thread_id, status, now),
+                (run_id, thread_id, status, now, idempotency_key, idempotency_payload_hash),
             )
             conn.execute(
                 "UPDATE threads SET last_interaction_at = ?, updated_at = ? WHERE id = ?",
@@ -389,23 +469,88 @@ class EventStore:
             row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
         return _row_to_dict(row)
 
+    def idempotency_payload_hash(self, payload: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
     def append_event(self, thread_id: str, run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if event_type == "tool_end":
+            call_id = str((payload or {}).get("call_id") or "").strip()
+            if call_id:
+                existing = self.find_tool_end_event(run_id, call_id)
+                if existing is not None:
+                    return existing
         now = utc_now_iso()
         stored_payload = envelope_payload(event_type, payload)
         payload_json = json.dumps(stored_payload, ensure_ascii=False)
         with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            sequence = int(row["max_seq"] or 0) + 1 if row is not None else 1
             cur = conn.execute(
                 """
-                INSERT INTO events (thread_id, run_id, type, payload_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO events (thread_id, run_id, type, payload_json, created_at, sequence)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (thread_id, run_id, event_type, payload_json, now),
+                (thread_id, run_id, event_type, payload_json, now, sequence),
             )
             conn.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
             row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
         event = _event_row_to_dict(row)
         self._notify(event)
         return event
+
+    def find_tool_end_event(self, run_id: str, call_id: str) -> dict[str, Any] | None:
+        if not call_id.strip():
+            return None
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM events
+                WHERE run_id = ? AND type = 'tool_end'
+                ORDER BY sequence ASC, id ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        for row in rows:
+            event = _event_row_to_dict(row)
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get("call_id") or "") == call_id:
+                return event
+        return None
+
+    def find_successful_tool_end_by_idempotency(
+        self,
+        run_id: str,
+        *,
+        tool_name: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        key = idempotency_key.strip()
+        if not key:
+            return None
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM events
+                WHERE run_id = ? AND type = 'tool_end'
+                ORDER BY sequence ASC, id ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        for row in rows:
+            event = _event_row_to_dict(row)
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get("name") or "") != tool_name:
+                continue
+            if str(payload.get("idempotency_key") or "") != key:
+                continue
+            if payload.get("success") is True:
+                return event
+        return None
 
     def update_run_status(self, run_id: str, status: str, *, error: str | None = None, completed: bool = False) -> dict[str, Any]:
         validate_run_status(status)
@@ -430,6 +575,21 @@ class EventStore:
             run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
             conn.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, run["thread_id"]))
         return _row_to_dict(run)
+
+    def mark_run_recovered(self, run_id: str, *, reason: str) -> dict[str, Any]:
+        now = utc_now_iso()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET recovered_at = COALESCE(recovered_at, ?),
+                    recovery_reason = COALESCE(recovery_reason, ?)
+                WHERE id = ?
+                """,
+                (now, reason, run_id),
+            )
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        return _row_to_dict(row)
 
     def complete_run(self, run_id: str, *, error: str | None = None) -> dict[str, Any]:
         status = RUN_STATUS_FAILED if error else RUN_STATUS_COMPLETED
@@ -545,12 +705,22 @@ class EventStore:
     def latest_run_event_id(self, run_id: str) -> int | None:
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                "SELECT id FROM events WHERE run_id = ? ORDER BY id DESC LIMIT 1",
+                "SELECT id FROM events WHERE run_id = ? ORDER BY sequence DESC, id DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
         if row is None:
             return None
         return int(row["id"])
+
+    def latest_run_sequence(self, run_id: str) -> int | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT sequence FROM events WHERE run_id = ? ORDER BY sequence DESC, id DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        if row is None or row["sequence"] is None:
+            return None
+        return int(row["sequence"])
 
     def list_events_page(
         self,
@@ -594,7 +764,7 @@ class EventStore:
         if after_id is not None:
             sql += " AND id > ?"
             params.append(int(after_id))
-        sql += " ORDER BY id ASC"
+        sql += " ORDER BY sequence ASC, id ASC"
         if limit is not None:
             sql += " LIMIT ?"
             params.append(int(limit))

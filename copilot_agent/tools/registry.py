@@ -8,6 +8,8 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
+from copilot_agent.agent.tool_message_policy import summarize_tool_llm_payload
+
 ApprovalRule = bool | Callable[[dict[str, Any]], bool]
 
 
@@ -178,7 +180,17 @@ def _wrap_tool_coroutine(coroutine: Callable[..., Any], spec: ToolSpec) -> Calla
         last_error: BaseException | None = None
         for attempt in range(1, attempts + 1):
             try:
-                return await asyncio.wait_for(coroutine(**kwargs), timeout=spec.timeout_seconds)
+                result = await asyncio.wait_for(coroutine(**kwargs), timeout=spec.timeout_seconds)
+                payload = summarize_tool_llm_payload(spec.name, result)
+                if isinstance(payload, dict):
+                    metadata = payload.get("metadata")
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    metadata.setdefault("attempt", attempt)
+                    metadata.setdefault("max_attempts", attempts)
+                    metadata.setdefault("retry_count", attempt - 1)
+                    payload["metadata"] = metadata
+                return payload
             except asyncio.TimeoutError as exc:
                 last_error = ToolExecutionTimeout(
                     tool_name=spec.name,
@@ -187,7 +199,12 @@ def _wrap_tool_coroutine(coroutine: Callable[..., Any], spec: ToolSpec) -> Calla
                     max_attempts=attempts,
                 )
             except Exception as exc:
-                last_error = exc
+                last_error = ToolExecutionError(
+                    tool_name=spec.name,
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    cause=exc,
+                )
             if attempt >= attempts:
                 break
             await asyncio.sleep(min(0.1 * attempt, 0.5))
@@ -207,4 +224,15 @@ class ToolExecutionTimeout(TimeoutError):
         super().__init__(
             f"tool {tool_name} timed out after {timeout_seconds}s "
             f"(attempt {attempt}/{max_attempts})"
+        )
+
+
+class ToolExecutionError(RuntimeError):
+    def __init__(self, *, tool_name: str, attempt: int, max_attempts: int, cause: BaseException) -> None:
+        self.tool_name = tool_name
+        self.attempt = attempt
+        self.max_attempts = max_attempts
+        self.cause = cause
+        super().__init__(
+            f"tool {tool_name} failed on attempt {attempt}/{max_attempts}: {cause}"
         )

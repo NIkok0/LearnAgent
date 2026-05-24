@@ -14,7 +14,9 @@
 | K/C/S Contract 套件 | ✅ | 9 项在 `CONTRACT_SUITES` |
 | L5 工具轨迹 | ✅ | `phase4_tool_trajectory`（28 case） |
 | Demo golden proxy | ✅ | `--profile e2e` |
-| RAGAS PR 硬门禁 | ❌ | 见 [guide §2.8](./agent-learning-guide.md) |
+| RAGAS PR 硬门禁 | ❌ | Nightly E2E RAGAS ✅（`verify_rag_e2e_ragas`）；PR 仍 proxy |
+| RAG E2E 生成评测 | ✅ Nightly | `verify_rag_e2e_ragas.py` + `e2e-latest.json` |
+| RAG metrics 趋势 | ✅ Nightly | `rag_metrics/history/` + gold recall 回归检测 |
 | 真实 LLM E2E | ❌ | 见 [guide §2.8](./agent-learning-guide.md) |
 | Promptfoo 编排 | ❌ | 见 [guide §2.8](./agent-learning-guide.md) |
 
@@ -47,7 +49,7 @@
  Runtime 核心       Runtime/Memory        ingest/citation
  Phase3/4 部分      Golden + Legacy       hot_reload/rerank
                          │
-                    e2e (1) ──► full (33) = core + rag + e2e
+                    e2e (1) ──► full (39) = core + rag + nightly + e2e
 ```
 
 ---
@@ -58,9 +60,9 @@
 |---|---:|---|---|
 | `core-fast` | 13 | 本地快检 | ❌ |
 | `core` | 21 | Contract + Runtime + Memory + Golden + Legacy | ✅ PR |
-| `rag` | 11 | RAG + Tool-grounded + L5 轨迹 | ✅ PR |
+| `rag` | 15 | RAG + Tool-grounded + L5 轨迹 | ✅ PR |
 | `e2e` | 1 | Demo 1–6 golden proxy | Nightly（full） |
-| `full` | 33 | 发版 / 夜跑 | ✅ schedule |
+| `full` | 39 | 发版 / 夜跑（含 `phase4_ragas_nightly` + **`rag_e2e_ragas`**） | ✅ schedule |
 
 **套件枚举与本地命令**（SSOT）：[ci-design.md](./ci-design.md) §3–§7；最短操作入口：[README.md](../README.md) §6。
 
@@ -105,7 +107,7 @@ EventStore、Timeline、ExecutionEngine、Session、Memory 的确定性行为：
 
 | 类型 | 代表套件 | 与单测脚本关系 |
 |---|---|---|
-| 检索质量 | `phase4_ragas`、`rag_retrieval_quality` | 后者含 query router 权重 |
+| 检索质量 | `phase4_ragas`、`phase4_ragas_nightly`、`rag_retrieval_quality` | PR 稀疏；Nightly 向量+rerank |
 | 路由分类 | `tool_router` | 28 case，**不跑图** |
 | 工具轨迹 | `phase4_tool_trajectory` | 28 case，**跑完整 L5 图** |
 | Ingest / 引用 | `rag_api_ingest`、`citation_l4` | |
@@ -146,7 +148,7 @@ EventStore、Timeline、ExecutionEngine、Session、Memory 的确定性行为：
 | `skipped_suites` | SKIP 套件名 |
 | `contract_schema_ok` | Contract 套件 schema 通过 |
 | `contract_metrics` | 各 Contract 套件 checks |
-| `rag_metrics` | `phase4_ragas` 的 proxy/RAGAS 指标 |
+| `rag_metrics` | `phase4_ragas` proxy 指标；Nightly 优先读 `artifacts/eval/rag_metrics/nightly-latest.json` |
 | `runtime_contract_breaks` | runtime_* / session_mvp 失败 |
 | `eval_suite` | 控制台总判定 `PASS|FAIL` |
 
@@ -163,10 +165,20 @@ PR 跑两次 profile 时，rag 使用独立路径：`artifacts/eval/eval-rag-sum
 
 ### 6.1 Phase4（`eval/phase4-eval-cases.json`）
 
-28 条：20 docs + 5 api + 3 safety。字段：
+28 条：20 docs + 5 api + 3 safety。docs case 扩展字段（v1.3.0）：
 
 - `expected_tools` / `forbidden_tools` / `required_sources`
 - `expect_blocked`
+- `question_type` / `gold_chunks` / `must_not_sources`（docs only）
+
+**L1 proxy 指标**（`verify_phase4_ragas.py`）：
+
+| 指标 | 阈值（PR 稀疏路） |
+|------|-------------------|
+| `required_source_full_match_rate` | ≥ 0.6 |
+| `retrieval_hit_rate` | ≥ 0.9 |
+| `gold_chunk_recall_at_k_avg` | ≥ 0.8（有 gold_chunks 时） |
+| `must_not_violation_rate` | == 0（有 must_not 时） |
 
 用于：`phase4_dataset`、`eval_cases_contract`、`tool_router`、`phase4_tool_trajectory`、`phase4_ragas`。
 
@@ -204,6 +216,7 @@ Demo 1–6；由 `demo_golden_e2e`（e2e profile）校验。
 | 项 | 说明 |
 |---|---|
 | `verify_mvp_runtime_acceptance` | 未纳入 eval_suite；需 API key |
+| `verify_live_llm_e2e_acceptance` | 可选手工验收；`hello agent -> token -> done -> llm_generation -> run_completed_meta -> timeline`；不进默认 CI |
 | `session_mvp` 耗时长 | core 可达数分钟 |
 
 ---

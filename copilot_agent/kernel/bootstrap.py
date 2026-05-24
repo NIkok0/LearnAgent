@@ -71,7 +71,12 @@ def build_kernel_components(
         session_cookie_name=scenario.resources.credential_cookie_name,
         path_policy=path_policy,
     )
-    tool_handlers = ToolHandlers(memory=memory, http=http, cookies=deps.credential_manager)
+    tool_handlers = ToolHandlers(
+        memory=memory,
+        http=http,
+        cookies=deps.credential_manager,
+        scenario=scenario,
+    )
 
     registry = ToolRegistry()
     cap_ctx = CapabilityContext(

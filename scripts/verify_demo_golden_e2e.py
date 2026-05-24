@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -23,7 +24,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from copilot_agent.agent.graph import route_after_assistant, route_after_safety_gate  # noqa: E402
+from copilot_agent.agent.final_answer import build_final_answer  # noqa: E402
+from copilot_agent.agent.graph import close_graph_checkpointer, route_after_assistant, route_after_safety_gate  # noqa: E402
 from copilot_agent.agent.state import AgentState  # noqa: E402
 from copilot_agent.agent.nodes import AgentNodes  # noqa: E402
 from copilot_agent.context import ContextManager  # noqa: E402
@@ -39,6 +41,15 @@ from copilot_agent.policy import PolicyRegistry  # noqa: E402
 from copilot_agent.rag.retriever import RagStore  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.agent.message_utils import current_turn_messages, last_user_content  # noqa: E402
+from copilot_agent.agent.stream.event_mapper import GraphEventMapper  # noqa: E402
+from copilot_agent.eval.llm_client import ensure_eval_api_env  # noqa: E402
+from copilot_agent.kernel import KernelDeps, build_kernel_components  # noqa: E402
+from copilot_agent.rag import build_rag_store  # noqa: E402
+from copilot_agent.rag.request_context import merge_retrieval_scopes  # noqa: E402
+from copilot_agent.runtime.checkpoint_reader import CheckpointReader  # noqa: E402
+from copilot_agent.runtime.execution_engine import GraphInterrupted  # noqa: E402
+from copilot_agent.scenario.bootstrap import apply_scenario_environment  # noqa: E402
 from copilot_agent.scenario.router import route_tools  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
@@ -178,9 +189,21 @@ def _build_tool_registry(*, executed_counter: dict[str, int], question: str) -> 
                 }
             )
         return {
-            "excerpts_markdown": f"mock docs for {query}",
-            "sources": ["DEPLOY-SERVER.md", "watermark-java-backend-tech-selection.md", "RUNBOOK.md"],
-            "suggested_api_paths": hints,
+            "success": True,
+            "data": {
+                "excerpts_markdown": f"mock docs for {query}",
+                "sources": ["DEPLOY-SERVER.md", "watermark-java-backend-tech-selection.md", "RUNBOOK.md"],
+                "citations": [
+                    {
+                        "source_file": "DEPLOY-SERVER.md",
+                        "heading_path": "Deploy",
+                        "start_line": 1,
+                        "chunk_id": "DEPLOY-SERVER.md:1:demo",
+                        "authority": 90,
+                    }
+                ],
+                "suggested_api_paths": hints,
+            },
         }
 
     async def http_get(path: str, cookie_header: str | None = None) -> dict[str, Any]:
@@ -230,6 +253,279 @@ def _build_graph(planner, assistant, safety_gate, tools: list[Any]):
     )
     workflow.add_edge("tools", "assistant")
     return workflow.compile(checkpointer=MemorySaver())
+
+
+class _DemoStubHttpClient:
+    """Deterministic HTTP stub for live LLM E2E (no Java backend required)."""
+
+    async def http_get(
+        self,
+        path: str,
+        cookie_header: str | None = None,
+        stored_cookie: str | None = None,
+    ) -> dict[str, Any]:
+        del cookie_header, stored_cookie
+        base = path.split("?", 1)[0]
+        if base == "/actuator/health":
+            return {"ok": True, "status_code": 200, "body": {"status": "UP"}}
+        if base.startswith("/api/v1/jobs/"):
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"status": "QUEUED", "jobId": base.rsplit("/", 1)[-1]},
+            }
+        return {"ok": False, "status_code": 404, "error": f"stub path not found: {base}"}
+
+    async def http_post(
+        self,
+        path: str,
+        json_body: dict[str, Any],
+        cookie_header: str | None = None,
+        stored_cookie: str | None = None,
+        idempotency_key: str | None = None,
+        *,
+        allow_job_post: bool,
+        user_confirmed_dangerous: bool,
+    ) -> dict[str, Any]:
+        del cookie_header, stored_cookie, idempotency_key
+        base = path.split("?", 1)[0]
+        if base == _watermark_dangerous_path():
+            if not allow_job_post:
+                return {
+                    "ok": False,
+                    "error": "POST disabled (set COPILOT_ALLOW_JOB_POST=true and confirm_dangerous).",
+                }
+            if not user_confirmed_dangerous:
+                return {"ok": False, "error": "Dangerous POST requires confirm_dangerous=true."}
+        return {"ok": True, "status_code": 200, "body": {"path": base, **json_body}}
+
+
+def _record_from_tool_event(
+    *,
+    kind: str,
+    payload: dict[str, Any],
+    pending_args: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if kind == "tool_start":
+        call_id = str(payload.get("call_id") or "")
+        args = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
+        if call_id:
+            pending_args[call_id] = dict(args)
+        return None
+    if kind != "tool_end":
+        return None
+    name = str(payload.get("name") or "")
+    call_id = str(payload.get("call_id") or "")
+    args = pending_args.pop(call_id, {})
+    record: dict[str, Any] = {"name": name, "call_id": call_id, **args}
+    if name in {"http_get", "http_post"} and args.get("path"):
+        record["path"] = str(args.get("path"))
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    hints = data.get("suggested_api_paths")
+    if isinstance(hints, list):
+        record["suggested_api_paths"] = hints
+    return record
+
+
+async def _run_case_live(case: dict[str, Any], *, artifact_dir: Path) -> dict[str, Any]:
+    case_id = str(case.get("id", ""))
+    input_data = case.get("input") if isinstance(case.get("input"), dict) else {}
+    messages = input_data.get("messages") if isinstance(input_data.get("messages"), list) else []
+    question = str(messages[-1].get("content", "")) if messages else ""
+    confirm_dangerous = bool(input_data.get("confirm_dangerous", False))
+    allow_job_post = bool(input_data.get("allow_job_post", settings.copilot_allow_job_post))
+
+    must_have_tools = [str(x) for x in case.get("must_have_tools") or []]
+    forbidden_tools = [str(x) for x in case.get("forbidden_tools") or []]
+    expect_blocked = bool(case.get("expect_blocked", False))
+    required_sources = [str(x) for x in case.get("required_sources") or []]
+    answer_must_contain = [str(x) for x in case.get("answer_must_contain") or []]
+
+    apply_scenario_environment(load_scenario("watermark"))
+    scenario = load_scenario("watermark")
+    route = route_tools(
+        question,
+        engine=scenario.router_engine,
+        confirm_dangerous=confirm_dangerous,
+        allow_job_post=allow_job_post,
+    )
+
+    previous_caps = settings.copilot_capabilities
+    settings.copilot_capabilities = "rag,http"
+    graph = None
+    try:
+        run_stamp = uuid.uuid4().hex[:8]
+        event_store_path = artifact_dir / f"demo-live-{case_id}-{run_stamp}-events.sqlite"
+        checkpoint_path = artifact_dir / f"demo-live-{case_id}-{run_stamp}-checkpoints.sqlite"
+
+        event_store = EventStore(str(event_store_path))
+        rag_store = build_rag_store()
+        credentials = CredentialManager.from_scenario_resources(scenario.resources, ttl_seconds=3600)
+        memory = MemoryManager(
+            rag_store=rag_store,
+            event_store=event_store,
+            checkpoint_path=str(checkpoint_path),
+            policy=scenario.resolve_memory_policy(),
+        )
+        kernel = build_kernel_components(
+            scenario,
+            KernelDeps(
+                rag_store=rag_store,
+                credential_manager=credentials,
+                event_store=event_store,
+                http=_DemoStubHttpClient(),
+                memory=memory,
+            ),
+        )
+        context_manager = ContextManager(
+            scenario=scenario,
+            memory=memory,
+            tool_registry=kernel.tool_registry,
+            router_engine=scenario.router_engine,
+            credential_manager=credentials,
+        )
+        nodes = AgentNodes(
+            memory=memory,
+            llm_provider=kernel.llm_provider,
+            policy=kernel.policy,
+            tool_registry=kernel.tool_registry,
+            tools=kernel.tools,
+            context_manager=context_manager,
+        )
+        graph = build_agent_graph(
+            nodes.planner,
+            nodes.assistant,
+            nodes.safety_gate,
+            kernel.tools,
+            checkpoint_path=str(checkpoint_path),
+            async_checkpoint=True,
+        )
+        context_manager.bind_graph(graph)
+        mapper = GraphEventMapper(
+            memory=memory,
+            tool_registry=kernel.tool_registry,
+            checkpoint_reader=CheckpointReader(graph),
+        )
+
+        thread_id = f"demo-live-{case_id}-{uuid.uuid4().hex[:6]}"
+        run_id = f"run-{case_id}"
+        turn_messages = current_turn_messages(messages)
+        goal = last_user_content(turn_messages)
+        lc_turn = [HumanMessage(content=goal)] if goal else [HumanMessage(content=question)]
+
+        bundle = await context_manager.assemble(
+            thread_id=thread_id,
+            run_id=run_id,
+            turn_messages=lc_turn,
+            goal=goal,
+            confirm_dangerous=confirm_dangerous,
+            allow_job_post=allow_job_post,
+        )
+        tool_route = next(
+            (hint.get("tool_route") for hint in bundle.policy_hints if isinstance(hint, dict) and hint.get("tool_route")),
+            route.as_dict(),
+        )
+
+        executed: list[dict[str, Any]] = []
+        pending_args: dict[str, dict[str, Any]] = {}
+        answer = ""
+        done_final_answer: dict[str, Any] = {}
+        graph_config = {
+            "recursion_limit": (scenario.budgets.max_graph_rounds * 2) + 4,
+            "configurable": {
+                "thread_id": thread_id,
+                "conversation_id": thread_id,
+                "run_id": run_id,
+                "input_messages": turn_messages,
+                "confirm_dangerous": confirm_dangerous,
+                "allow_job_post": allow_job_post,
+                "preretrieval_cache": bundle.truncation_report.get("preretrieval_cache"),
+                "tool_route": tool_route,
+                "tenant_id": scenario.resources.default_tenant_id,
+                "max_classification": scenario.resources.default_max_classification,
+                "allowed_scopes": list(
+                    merge_retrieval_scopes(
+                        credential_manager=credentials,
+                        scenario=scenario,
+                        user_id=memory.resolve_user_id(thread_id),
+                    )
+                ),
+            },
+        }
+
+        try:
+            async for runtime_event in mapper.map(
+                graph=graph,
+                graph_input={"messages": bundle.graph_messages},
+                graph_config=graph_config,
+                thread_id=thread_id,
+                run_id=run_id,
+            ):
+                payload = runtime_event.data if isinstance(runtime_event.data, dict) else {}
+                record = _record_from_tool_event(
+                    kind=runtime_event.kind,
+                    payload=payload,
+                    pending_args=pending_args,
+                )
+                if record is not None:
+                    executed.append(record)
+                if runtime_event.kind == "token":
+                    answer += str(runtime_event.content or payload.get("text") or "")
+                if runtime_event.kind == "done":
+                    raw = payload.get("final_answer")
+                    if isinstance(raw, dict):
+                        done_final_answer = raw
+        except GraphInterrupted:
+            pass
+
+        if not answer.strip():
+            state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+            values = getattr(state, "values", None) or {}
+            checkpoint_messages = values.get("messages") if isinstance(values, dict) else []
+            for message in reversed(checkpoint_messages or []):
+                content = getattr(message, "content", "")
+                if isinstance(content, str) and content.strip():
+                    answer = content
+                    break
+
+        verdict = evaluate_trajectory(
+            executed=executed,
+            expected_tools=must_have_tools,
+            forbidden_tools=forbidden_tools,
+            expect_blocked=expect_blocked,
+            route_recommended_tools=list(route.recommended_tools),
+            route_kind=route.kind,
+            strict_route_order=False,
+            strict_tool_order=False,
+        )
+        citation = evaluate_citation(
+            answer=answer,
+            retrieval_sources=required_sources or ["DEPLOY-SERVER.md", "RUNBOOK.md"],
+            required_sources=required_sources,
+        )
+        keyword_ok = all(token.lower() in answer.lower() for token in answer_must_contain) if answer_must_contain else True
+        final_answer_ok = True
+        if "search_docs" in must_have_tools and not expect_blocked:
+            citations = done_final_answer.get("citations") if isinstance(done_final_answer.get("citations"), list) else []
+            final_answer_ok = len(citations) > 0
+
+        passed = verdict.passed and citation.passed and keyword_ok and final_answer_ok
+        return {
+            "id": case_id,
+            "question": question,
+            "route_kind": route.kind,
+            "executed_tools": [str(item.get("name", "")) for item in executed],
+            "answer_preview": answer[:240],
+            "trajectory": verdict.as_dict(),
+            "citation": citation.as_dict(),
+            "keyword_ok": keyword_ok,
+            "final_answer_ok": final_answer_ok,
+            "passed": passed,
+        }
+    finally:
+        await close_graph_checkpointer(graph)
+        settings.copilot_capabilities = previous_caps
 
 
 async def _run_case(case: dict[str, Any], *, nodes: AgentNodes, registry: ToolRegistry) -> dict[str, Any]:
@@ -300,8 +596,16 @@ async def _run_case(case: dict[str, Any], *, nodes: AgentNodes, registry: ToolRe
         required_sources=required_sources,
     )
     keyword_ok = all(token.lower() in answer.lower() for token in answer_must_contain) if answer_must_contain else True
+    final_answer_ok = True
+    if "search_docs" in must_have_tools and not expect_blocked:
+        final_answer = build_final_answer(
+            answer=answer,
+            messages=list(final_messages or []),
+            route_kind=route.kind,
+        )
+        final_answer_ok = len(final_answer.citations) > 0
 
-    passed = verdict.passed and citation.passed and keyword_ok
+    passed = verdict.passed and citation.passed and keyword_ok and final_answer_ok
     return {
         "id": case_id,
         "question": question,
@@ -311,6 +615,7 @@ async def _run_case(case: dict[str, Any], *, nodes: AgentNodes, registry: ToolRe
         "trajectory": verdict.as_dict(),
         "citation": citation.as_dict(),
         "keyword_ok": keyword_ok,
+        "final_answer_ok": final_answer_ok,
         "passed": passed,
     }
 
@@ -329,60 +634,75 @@ async def _main_async() -> int:
         "--mode",
         choices=["proxy", "live"],
         default="proxy",
-        help="proxy=deterministic mock LLM; live=requires API key (not yet wired).",
+        help="proxy=deterministic mock LLM; live=real LLM + RAG + stub HTTP.",
+    )
+    parser.add_argument(
+        "--live-min-pass-rate",
+        type=float,
+        default=0.834,
+        help="Minimum pass rate for live mode (default 5/6 cases).",
     )
     args = parser.parse_args()
 
-    if args.mode == "live" and not settings.openai_api_key.strip():
+    if args.mode == "live" and not ensure_eval_api_env():
         print("demo_golden_e2e=SKIP")
         print("reason=missing_openai_api_key")
         return 0
 
     cases = _load_cases(Path(args.dataset).resolve())
-    event_store = EventStore(str(ROOT / "storage/verify-demo-golden-events.sqlite"))
-    rag = RagStore([DocChunk(source="README.md", start_line=1, text="demo golden corpus")])
-    memory = MemoryManager(
-        rag_store=rag,
-        event_store=event_store,
-        checkpoint_path=str(ROOT / "storage/verify-demo-golden-checkpoints.sqlite"),
-    )
-
     records: list[dict[str, Any]] = []
-    for case in cases:
-        question = str((case.get("input") or {}).get("messages", [{}])[-1].get("content", ""))
-        registry = _build_tool_registry(executed_counter={}, question=question)
-        scenario = load_scenario("watermark")
-        credentials = CredentialManager.from_scenario_resources(scenario.resources, ttl_seconds=120)
-        context_manager = ContextManager(
-            scenario=scenario,
-            memory=memory,
-            tool_registry=registry,
+
+    if args.mode == "live":
+        artifact_dir = Path(args.summary_json).resolve().parent / "demo-live-runs"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("SCENARIO", "watermark")
+        for case in cases:
+            records.append(await _run_case_live(case, artifact_dir=artifact_dir))
+    else:
+        event_store = EventStore(str(ROOT / "storage/verify-demo-golden-events.sqlite"))
+        rag = RagStore([DocChunk(source="README.md", start_line=1, text="demo golden corpus")])
+        memory = MemoryManager(
+            rag_store=rag,
+            event_store=event_store,
+            checkpoint_path=str(ROOT / "storage/verify-demo-golden-checkpoints.sqlite"),
         )
-        nodes = AgentNodes(
-            memory=memory,
-            llm_provider=LLMProvider(),
-            policy=PolicyRegistry(
-                registry,
-                scenario_policy=scenario.policy,
-                credential_manager=credentials,
-            ),
-            tool_registry=registry,
-            tools=registry.tools(),
-            context_manager=context_manager,
-        )
-        records.append(await _run_case(case, nodes=nodes, registry=registry))
+
+        for case in cases:
+            question = str((case.get("input") or {}).get("messages", [{}])[-1].get("content", ""))
+            registry = _build_tool_registry(executed_counter={}, question=question)
+            scenario = load_scenario("watermark")
+            credentials = CredentialManager.from_scenario_resources(scenario.resources, ttl_seconds=120)
+            context_manager = ContextManager(
+                scenario=scenario,
+                memory=memory,
+                tool_registry=registry,
+            )
+            nodes = AgentNodes(
+                memory=memory,
+                llm_provider=LLMProvider(),
+                policy=PolicyRegistry(
+                    registry,
+                    scenario_policy=scenario.policy,
+                    credential_manager=credentials,
+                ),
+                tool_registry=registry,
+                tools=registry.tools(),
+                context_manager=context_manager,
+            )
+            records.append(await _run_case(case, nodes=nodes, registry=registry))
 
     passed_n = sum(1 for item in records if item["passed"])
     total = len(records)
     pass_rate = round(passed_n / total, 4) if total else 0.0
+    gate_ok = pass_rate >= 1.0 if args.mode == "proxy" else pass_rate >= args.live_min_pass_rate
     summary = {
         "mode": args.mode,
         "cases_total": total,
         "cases_passed": passed_n,
         "demo_golden_pass_rate": pass_rate,
         "records": records,
-        "checks": {"demo_golden_gate_ok": pass_rate >= 1.0},
-        "demo_golden_e2e": "PASS" if pass_rate >= 1.0 else "FAIL",
+        "checks": {"demo_golden_gate_ok": gate_ok},
+        "demo_golden_e2e": "PASS" if gate_ok else "FAIL",
     }
 
     summary_path = Path(args.summary_json).resolve()

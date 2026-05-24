@@ -42,6 +42,8 @@ def evaluate_trajectory(
     expect_blocked: bool,
     route_recommended_tools: list[str],
     route_kind: str,
+    strict_route_order: bool = True,
+    strict_tool_order: bool = True,
 ) -> TrajectoryVerdict:
     executed_names = [normalize_tool_name(str(item.get("name", ""))) for item in executed]
     reasons: list[str] = []
@@ -85,11 +87,17 @@ def evaluate_trajectory(
             reasons.append(f"path_mismatch:{exp}")
 
     route_order_ok = executed_names == list(route_recommended_tools)
-    if route_recommended_tools and not route_order_ok:
+    if route_recommended_tools and not route_order_ok and not strict_route_order:
+        route_order_ok = all(tool in executed_names for tool in route_recommended_tools)
+    if not expected_tools and not expect_blocked:
+        route_order_ok = True
+    if route_recommended_tools and not route_order_ok and strict_route_order:
         reasons.append("route_order_mismatch")
+    elif route_recommended_tools and not route_order_ok:
+        reasons.append("route_tools_incomplete")
 
     rag_before_api_ok = True
-    if route_kind == "troubleshooting" and "search_docs" in executed_names and "http_get" in executed_names:
+    if strict_tool_order and route_kind == "troubleshooting" and "search_docs" in executed_names and "http_get" in executed_names:
         rag_before_api_ok = executed_names.index("search_docs") < executed_names.index("http_get")
         if not rag_before_api_ok:
             reasons.append("search_docs_not_before_http_get")

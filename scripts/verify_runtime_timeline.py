@@ -45,6 +45,51 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     _append(store, completed_thread, completed_run_id, "run_created", {"status": "queued"})
     store.update_run_status(completed_run_id, RUN_STATUS_RUNNING)
     _append(store, completed_thread, completed_run_id, "run_started", {"status": "running"})
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "plan_created",
+        {
+            "goal": "verify timeline",
+            "strategy": "route_first_react",
+            "tool_route": {"kind": "knowledge", "recommended_tools": ["search_docs"]},
+            "plan": {
+                "goal": "verify timeline",
+                "route_kind": "knowledge",
+                "steps": [
+                    {
+                        "id": "step-1",
+                        "goal": "Search docs",
+                        "tool_hint": "search_docs",
+                        "status": "pending",
+                    }
+                ],
+            },
+        },
+    )
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "plan_updated",
+        {
+            "update_reason": "tool_completed",
+            "plan": {
+                "goal": "verify timeline",
+                "route_kind": "knowledge",
+                "steps": [
+                    {
+                        "id": "step-1",
+                        "goal": "Search docs",
+                        "tool_hint": "search_docs",
+                        "status": "completed",
+                        "outcome": "search_docs executed",
+                    }
+                ],
+            },
+        },
+    )
     _append(store, completed_thread, completed_run_id, "token", {"text": "hello "})
     _append(store, completed_thread, completed_run_id, "token", {"text": "world"})
     _append(
@@ -95,7 +140,30 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "success": True,
         },
     )
-    _append(store, completed_thread, completed_run_id, "done", {})
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "output_guard_checked",
+        {"guard": "private_rag_output_v1", "safe": True, "action": "allow", "finding_count": 0},
+    )
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "done",
+        {
+            "final_answer": {
+                "answer": "hello world",
+                "citations": [{"source_file": "watermark-java-backend-tech-selection.md"}],
+                "tools_used": ["search_docs"],
+                "evidence_count": 1,
+                "safety_status": "safe",
+                "output_guard_action": "allow",
+                "metadata": {"evidence_count": 1},
+            }
+        },
+    )
     _append(
         store,
         completed_thread,
@@ -188,6 +256,9 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     completed_kinds = [item["kind"] for item in completed_timeline["items"]]
     completed_tool = next((item for item in completed_timeline["items"] if item["kind"] == "tool_call"), {})
     completed_retrieval = next((item for item in completed_timeline["items"] if item["kind"] == "retrieval"), {})
+    completed_plan = next((item for item in completed_timeline["items"] if item["kind"] == "plan"), {})
+    completed_final = next((item for item in completed_timeline["items"] if item["kind"] == "final_answer"), {})
+    completed_guard = next((item for item in completed_timeline["items"] if item["kind"] == "output_guard"), {})
     approval_item = next((item for item in approval_timeline["items"] if item["kind"] == "approval"), {})
     memory_item = next((item for item in memory_timeline["items"] if item["kind"] == "memory"), {})
 
@@ -204,6 +275,11 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "retrieval_call_id_linked": completed_retrieval.get("call_id") == completed_tool.get("call_id"),
             "tool_merged": completed_tool.get("start_event_id") is not None and completed_tool.get("end_event_id") is not None,
             "tool_success": completed_tool.get("success"),
+            "plan_step_count": len(completed_plan.get("steps") or []),
+            "plan_strategy": completed_plan.get("strategy"),
+            "final_answer_citations": completed_final.get("citation_count"),
+            "final_answer_safety": completed_final.get("safety_status"),
+            "output_guard_action": completed_guard.get("action"),
             "warnings": [warning["code"] for warning in completed_timeline["warnings"]],
             "checkpoint_message_count": (completed_timeline.get("checkpoint") or {}).get("completed", {}).get(
                 "message_count"
@@ -211,6 +287,13 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "debugger_status": (completed_timeline.get("debugger") or {}).get("status"),
             "debugger_tool_total": (completed_timeline.get("debugger") or {}).get("tool_calls", {}).get("total"),
             "debugger_consistency_ok": (completed_timeline.get("debugger") or {}).get("consistency", {}).get("ok"),
+            "debugger_plan_step_count": (completed_timeline.get("debugger") or {}).get("plan", {}).get("step_count"),
+            "debugger_final_citations": (completed_timeline.get("debugger") or {}).get("final_answer", {}).get(
+                "citation_count"
+            ),
+            "debugger_output_guard_action": (completed_timeline.get("debugger") or {}).get("output_guard", {}).get(
+                "last_action"
+            ),
         },
         "missing_tool": {
             "run_id": missing_tool_run_id,
@@ -271,11 +354,19 @@ def main() -> int:
         and summary["completed"]["retrieval_call_id_linked"] is True
         and summary["completed"]["tool_merged"]
         and summary["completed"]["tool_success"] is True
+        and summary["completed"]["plan_step_count"] == 1
+        and summary["completed"]["plan_strategy"] == "route_first_react"
+        and summary["completed"]["final_answer_citations"] == 1
+        and summary["completed"]["final_answer_safety"] == "safe"
+        and summary["completed"]["output_guard_action"] == "allow"
         and not summary["completed"]["warnings"]
         and "checkpoint" in summary["completed"]["kinds"]
         and summary["completed"]["debugger_status"] == "completed"
         and summary["completed"]["debugger_tool_total"] == 1
         and summary["completed"]["debugger_consistency_ok"] is True
+        and summary["completed"]["debugger_plan_step_count"] == 2
+        and summary["completed"]["debugger_final_citations"] == 1
+        and summary["completed"]["debugger_output_guard_action"] == "allow"
     )
     ok_missing_tool = "tool_missing_end" in summary["missing_tool"]["warnings"]
     ok_approval = summary["approval"]["status"] == "approved" and summary["approval"]["resolved"].get("approved") is True

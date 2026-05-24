@@ -11,11 +11,21 @@ def extract_ascii_tokens(text: str) -> list[str]:
 
 
 def extract_cjk_tokens(text: str, *, min_len: int = 2) -> list[str]:
-    return [t for t in _CJK_SEQ_RE.findall(text) if len(t) >= min_len]
+    tokens: list[str] = []
+    for seq in _CJK_SEQ_RE.findall(text):
+        if len(seq) < min_len:
+            continue
+        tokens.append(seq)
+        if len(seq) > 4:
+            for i in range(len(seq) - 1):
+                bigram = seq[i : i + 2]
+                if len(bigram) >= min_len:
+                    tokens.append(bigram)
+    return tokens
 
 
 def tokenize(text: str) -> list[str]:
-    """Tokenize for sparse retrieval: ASCII identifiers + CJK sequences."""
+    """Tokenize for sparse retrieval: ASCII identifiers + CJK sequences (+ bigrams)."""
     ascii_tokens = extract_ascii_tokens(text)
     cjk_tokens = extract_cjk_tokens(text)
     return ascii_tokens + cjk_tokens

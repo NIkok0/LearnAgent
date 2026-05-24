@@ -17,8 +17,8 @@
 | ExecutionEngine cancel / approve / 并发槽 | ✅ | `verify_runtime_execution_engine.py` |
 | Session MVP（REST + SSE 冒烟） | ✅ | `verify_session_mvp.py` |
 | Golden Run 事件契约 | ✅ | `verify_golden_scenarios.py` |
+| 失败一致性 v1（sequence / tool_end 幂等 / failure meta） | ✅ | `verify_runtime_execution_engine.py`、`verify_memory_checkpoint_consistency.py` |
 | `running`/`queued` durable resume | ❌ | — |
-| 失败一致性（sequence / last_successful_event_id） | ⚠️ | 见 §7.3、[guide §2.8](./agent-learning-guide.md) |
 
 套件见 [ci-design.md](./ci-design.md)。
 
@@ -236,11 +236,11 @@ Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 | 要求 | 现状 |
 |------|------|
-| `tool_call_id` 幂等 | 部分：mapper 生成 call_id；tool_end 重试幂等未完整 |
-| Run 内 `sequence` 单调递增 | ⚠️ 未全面 enforced |
-| `run_failed` + `last_successful_event_id` | ⚠️ 目标已定义，实现见 §8.1 L8 波 |
+| `tool_call_id` 幂等 | ✅ mapper 生成 call_id；EventStore 对重复 `tool_end.call_id` 幂等返回已有事件 |
+| Run 内 `sequence` 单调递增 | ✅ EventStore append 时分配 run-local sequence；读取按 `sequence,id` 排序 |
+| `run_failed` + `last_successful_event_id` | ✅ `run_failed_meta` / `run_consistency_checked` 已落地 |
 | EventStore 写失败不静默继续 | 部分路径仍 best-effort |
-| checkpoint sync 失败可观测 | ⚠️ `checkpoint_sync_failed` 等待落地 |
+| checkpoint sync 失败可观测 | ✅ `checkpoint_sync_failed` 已落地；checkpoint 资源释放由验证脚本覆盖 |
 
 ### 7.4 与 data-flow / guardrail 的衔接
 
@@ -265,7 +265,7 @@ Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **3** | L8 | EventStore/checkpoint 失败一致性：`sequence`、`tool_call_id` 幂等、`last_successful_event_id` | **guide §2.6**、本节 §7.3 |
+| **3** | L8 | EventStore/checkpoint 失败一致性 v1：`sequence`、`tool_call_id` 幂等、`last_successful_event_id` | ✅ `verify_runtime_execution_engine.py`、`verify_memory_checkpoint_consistency.py` |
 | **3** | L8 Storage | `running`/`queued` durable resume 或外部队列 PoC | `verify_runtime_execution_engine.py` 扩展 |
 | **3** | L8 | Run 级幂等键 `client_run_id` | API + event_store |
 | **3** | L8 | orphan run 清理策略配置化 + 审计事件 | eval golden |
@@ -298,5 +298,37 @@ Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 - 不定义 LangGraph 节点内部 state 字段（见 `agent/state.py`）
 - 不定义 Memory 压缩策略（见 [memory-checkpoint-design.md](./memory-checkpoint-design.md)）
+
+---
+
+## Appendix: Checkpoint Consistency v2
+
+Checkpoint consistency v2 keeps the existing split of responsibilities:
+
+- EventStore is the product fact source for Thread, Run, Event, Timeline, approval, cancel, tool audit, and final answer.
+- LangGraph checkpoint is the working-memory fact source for graph state and message history.
+- The two stores are not treated as one atomic transaction.
+
+When a completed run reaches terminal finalization, `ExecutionEngine` writes `checkpoint_consistency_checked` after reading the latest LangGraph checkpoint snapshot. The event compares `run_completed_meta.message_count` with the checkpoint snapshot and records:
+
+- `checkpoint_read_ok`
+- `checkpoint_missing`
+- `checkpoint_has_interrupt`
+- `checkpoint_message_count_actual`
+- `checkpoint_message_count_reported`
+- `checkpoint_match`
+- `warnings`
+- `error`
+- `source_event_ids`
+
+Checkpoint read failure, missing checkpoint, or count mismatch does not change a completed run into failed. It is an observability warning only. The existing `run_consistency_checked` event now includes the checkpoint v2 summary fields so Timeline and debug tooling can show one compact consistency view.
+
+Local debug export:
+
+```powershell
+E:\Conda\envs\learnagent312\python.exe scripts\export_run_debug_bundle.py --event-store-path storage\learnagent-events.sqlite --checkpoint-path storage\langgraph-checkpoints.sqlite --run-id <run_id>
+```
+
+The debug bundle includes run/thread rows, raw events, Timeline projection, latest run consistency, latest checkpoint consistency, and raw checkpoint SQLite inspection. It is a local troubleshooting artifact and may contain user input or event payloads.
 - 不定义 Eval 套件（见 [eval-design.md](./eval-design.md)）
 - 不定义 HTTP 路径全集（见 README §5–6）

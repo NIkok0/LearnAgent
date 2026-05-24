@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # noqa: E402
 
 from copilot_agent.context import ContextManager, pack_graph_messages  # noqa: E402
+from copilot_agent.context.assemble import build_graph_turn_messages  # noqa: E402
 from copilot_agent.context.checkpoint_pack import pack_checkpoint_for_budget, total_message_chars  # noqa: E402
 from copilot_agent.context.constants import RAG_PRERETRIEVAL_PREFIX  # noqa: E402
 from copilot_agent.context.preretrieval import should_preretrieve  # noqa: E402
@@ -169,6 +170,39 @@ async def _run_checks() -> dict[str, bool]:
             checks["context_built_payload_valid"] = True
         except Exception:
             checks["context_built_payload_valid"] = False
+
+    prior_graph = _BudgetGraph(
+        [
+            SystemMessage(content=scenario.system_prompt),
+            HumanMessage(content="turn-one"),
+            AIMessage(content="reply-one"),
+        ]
+    )
+    policy = MemoryPolicyConfig(inject_dedupe_system_prompt=True, inject_dedupe_memory_messages=True)
+    first_turn = await build_graph_turn_messages(
+        graph=_BudgetGraph([]),
+        thread_id="dedupe-thread-first",
+        system_prompt=scenario.system_prompt,
+        memory_context={},
+        turn_messages=[HumanMessage(content="turn-one")],
+        policy=policy,
+    )
+    checks["first_turn_includes_system_prompt"] = any(
+        isinstance(message, SystemMessage) and scenario.system_prompt.strip() in str(message.content)
+        for message in first_turn
+    )
+    second_turn = await build_graph_turn_messages(
+        graph=prior_graph,
+        thread_id="dedupe-thread-second",
+        system_prompt=scenario.system_prompt,
+        memory_context={},
+        turn_messages=[HumanMessage(content="turn-two")],
+        policy=policy,
+    )
+    checks["continuation_skips_duplicate_system_prompt"] = not any(
+        isinstance(message, SystemMessage) and scenario.system_prompt.strip() == str(message.content).strip()
+        for message in second_turn
+    )
 
     return checks
 

@@ -1,4 +1,4 @@
-# LearnAgent CI 设计
+﻿# LearnAgent CI 设计
 
 > GitHub Actions 工作流、本地复现命令与失败排查。**套件清单以** `scripts/verify_eval_suite.py` **为准**。  
 > Eval 分层见 [eval-design.md](./eval-design.md)；模块地图见 [agent-learning-guide.md](./agent-learning-guide.md)。
@@ -11,9 +11,8 @@
 |---|---|---|
 | 单一 CI 工作流 | ✅ | `.github/workflows/eval-ci.yml`（已移除 `agent-ci.yml`） |
 | PR 门禁 | ✅ | `--profile core` + `--profile rag` |
-| Nightly | ✅ | `--profile full`（schedule 默认 `--enable-ragas`） |
-| 本地快检 profile | ✅ | `--profile core-fast`（**不进 PR CI**，仅本地） |
-| 环境 | ✅ | Python 3.12 + `requirements.txt`；本地建议 `conda run -n learnagent312` |
+| Nightly | ✅ | `--profile full` + `requirements-vector.txt` + `bge-small-zh-v1.5` |
+| 环境 | ✅ | PR：`requirements.txt`；Nightly 追加 `requirements-vector.txt` |
 
 ---
 
@@ -22,7 +21,7 @@
 | Job | 触发 | 命令 | 产物 |
 |---|---|---|---|
 | `eval_core` | PR / push（非 schedule） | `core` → `rag` | `eval-suite-summary.json` + `eval-rag-summary.json` |
-| `eval_full_nightly` | cron / `workflow_dispatch` | `full`（可选 `--enable-ragas`） | `eval-suite-summary.json` |
+| `eval_full_nightly` | cron / `workflow_dispatch` | `full` + vector/rerank env | `eval-suite-summary.json` + `rag_metrics/nightly-latest.json` |
 
 **合并规则**：PR job 在 core 与 rag 均 `overall_pass=true` 时才算绿。
 
@@ -45,9 +44,18 @@ checkout → pip install -r requirements.txt
 |---|---:|---|
 | `core-fast` | 13 | ❌ 仅本地 |
 | `core` | **21** | ✅ |
-| `rag` | **11** | ✅ |
+| `rag` | **14** | ✅ |
 | `e2e` | 1 | ❌（在 `full` 中） |
-| `full` | 33 | Nightly |
+| `full` | 38 | Nightly |
+
+Nightly `eval_full_nightly` 额外步骤：
+
+```text
+pip install -r requirements-vector.txt
+env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+  → verify_eval_suite.py --profile full [--enable-ragas on schedule]
+  → phase4_ragas_nightly 写入 artifacts/eval/rag_metrics/nightly-latest.json
+```
 
 ---
 
@@ -76,6 +84,7 @@ checkout → pip install -r requirements.txt
 | `runtime_timeline` | `verify_runtime_timeline.py` |
 | `runtime_checkpoint_link` | `verify_runtime_checkpoint_link.py` |
 | `runtime_execution_engine` | `verify_runtime_execution_engine.py` |
+| `checkpoint_consistency_v2` | `verify_checkpoint_consistency_v2.py` |
 | `session_mvp` | `verify_session_mvp.py` |
 | `memory_checkpoint_consistency` | `verify_memory_checkpoint_consistency.py` |
 | `memory_production_v1` | `verify_memory_production_v1.py` |
@@ -101,11 +110,14 @@ checkout → pip install -r requirements.txt
 
 ---
 
-## 5. rag profile（11 套件）
+## 5. rag profile（14 套件）
 
 | 套件 | 脚本 | 备注 |
 |---|---|---|
-| `phase4_ragas` | `verify_phase4_ragas.py` | 默认 proxy；`--allow-missing-docs` 可 SKIP |
+| `rag_retrieval_scopes` | `verify_rag_retrieval_scopes.py` | credential + rag ACL scopes |
+| `private_rag_context_guard_v1` | `verify_private_rag_context_guard_v1.py` | untrusted context header |
+| `private_rag_output_guard_v1` | `verify_private_rag_output_guard_v1.py` | 敏感输出检测 |
+| `phase4_ragas` | `verify_phase4_ragas.py` | PR：`--disable-vector` proxy |
 | `phase4_tool_trajectory` | `verify_phase4_tool_trajectory.py` | 28 case L5 图轨迹 |
 | `rag_api_path_extraction` | `verify_rag_api_path_extraction.py` | |
 | `rag_api_ingest` | `verify_rag_api_ingest.py` | |
@@ -117,6 +129,18 @@ checkout → pip install -r requirements.txt
 | `rag_hot_reload` | `verify_rag_hot_reload.py` | 无 docs 时可 SKIP |
 | `rag_rerank` | `verify_rag_rerank.py` | 无 rerank 依赖时跳过 rerank 段 |
 
+### 5.1 Nightly RAG 深测（Wave A + Wave C）
+
+| 套件 | 脚本 | 备注 |
+|---|---|---|
+| `phase4_ragas_nightly` | `verify_phase4_ragas.py` | `--enable-vector` + `bge-small-zh-v1.5` + rerank；L2 context metrics |
+| `rag_e2e_ragas` | `verify_rag_e2e_ragas.py` | retrieve→LLM→RAGAS + L4；无 API key 时 SKIP |
+
+产物：
+- `artifacts/eval/rag_metrics/nightly-latest.json`（proxy + L2）
+- `artifacts/eval/rag_metrics/e2e-latest.json`（RAGAS + citation）
+- `artifacts/eval/rag_metrics/history/`（timestamped 快照；gold recall 回归 >0.05 告警）
+
 ---
 
 ## 6. e2e 与 full
@@ -124,7 +148,7 @@ checkout → pip install -r requirements.txt
 | Profile | 内容 |
 |---|---|
 | `e2e` | `demo_golden_e2e`（Demo 1–6 proxy） |
-| `full` | core（21）+ rag（11）+ e2e（1）= **33** |
+| `full` | core（21）+ rag（15）+ nightly（2）+ e2e（1）= **39** |
 
 Nightly schedule 默认带 `--enable-ragas`，将 `phase4_ragas` 切为 `--mode auto`。
 
@@ -172,3 +196,13 @@ conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --
 - 不在本文维护各 `verify_*.py` 实现细节（见 [eval-design.md](./eval-design.md)）
 - 不替代 [agent-learning-guide.md](./agent-learning-guide.md) 的架构与成熟度表
 - 已删除脚本（`verify_phase4_overall`、`verify_credentials_m14` 等）不再文档化
+
+
+---
+
+## Appendix: Checkpoint Consistency v2
+
+`checkpoint_consistency_v2` is covered by `scripts/verify_checkpoint_consistency_v2.py` and is included in `core-fast`. The suite verifies `checkpoint_consistency_checked`, Timeline `checkpoint.consistency_v2`, missing-checkpoint warning semantics, and debug bundle export.
+
+`scripts/export_run_debug_bundle.py` is a local troubleshooting tool, not a default CI gate. It exports EventStore events, Timeline projection, latest consistency payloads, and checkpoint SQLite raw inspection for one run.
+

@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.types import Command
 
-from copilot_agent.agent.graph import build_agent_graph
+from copilot_agent.agent.graph import build_agent_graph, close_graph_checkpointer
 from copilot_agent.agent.nodes import AgentNodes
 from copilot_agent.agent.message_utils import current_turn_messages, last_user_content
 from copilot_agent.agent.stream.event_mapper import GraphEventMapper
@@ -18,7 +18,13 @@ from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.kernel import KernelDeps, build_kernel_components
 from copilot_agent.memory.checkpoint_compactor import CheckpointCompactor
 from copilot_agent.memory.manager import CHECKPOINT_COMPACTED_EVENT
-from copilot_agent.observability import end_chat_trace, flush_langfuse, start_chat_trace
+from copilot_agent.observability import (
+    end_chat_trace,
+    flush_observability,
+    observability_trace_metadata,
+    resolve_observability_trace_id,
+    start_chat_trace,
+)
 from copilot_agent.rag import RagStore
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader
 from copilot_agent.runtime.event_store import EventStore
@@ -27,6 +33,7 @@ from copilot_agent.scenario.loader import LoadedScenario
 from copilot_agent.settings import settings
 from copilot_agent.tools.extensions.mcp import McpRuntime
 from copilot_agent.credentials import CredentialManager
+from copilot_agent.rag.request_context import merge_retrieval_scopes
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +64,7 @@ class ChatRunner:
         kernel = build_kernel_components(scenario, deps)
 
         self._scenario = kernel.scenario
+        self._credential_manager = deps.credential_manager
         self._mcp_runtime = kernel.mcp_runtime
         self._max_rounds = kernel.scenario.budgets.max_graph_rounds
         self._memory = kernel.memory
@@ -70,6 +78,7 @@ class ChatRunner:
             memory=kernel.memory,
             tool_registry=kernel.tool_registry,
             router_engine=kernel.scenario.router_engine,
+            credential_manager=deps.credential_manager,
         )
         self._nodes = AgentNodes(
             memory=kernel.memory,
@@ -118,10 +127,12 @@ class ChatRunner:
     ) -> AsyncIterator[str]:
         trace = start_chat_trace(
             conversation_id=conversation_id,
+            run_id=run_id,
             messages=messages,
             confirm_dangerous=confirm_dangerous,
             model=settings.openai_model,
         )
+        trace_id = resolve_observability_trace_id(trace, thread_id=conversation_id, run_id=run_id)
         try:
             turn_messages = current_turn_messages(messages)
             goal = last_user_content(turn_messages)
@@ -149,6 +160,12 @@ class ChatRunner:
                 graph_input = Command(resume=resume)
                 preretrieval_cache = None
                 tool_route = None
+            user_id = self._memory.resolve_user_id(conversation_id)
+            allowed_scopes = merge_retrieval_scopes(
+                credential_manager=self._credential_manager,
+                scenario=self._scenario,
+                user_id=user_id,
+            )
             graph_config = {
                 "recursion_limit": (self._max_rounds * 2) + 4,
                 "configurable": {
@@ -161,6 +178,11 @@ class ChatRunner:
                     "preretrieval_cache": preretrieval_cache,
                     "tool_route": tool_route,
                     "trace": trace,
+                    "trace_id": trace_id,
+                    **observability_trace_metadata(trace),
+                    "tenant_id": self._scenario.resources.default_tenant_id,
+                    "max_classification": self._scenario.resources.default_max_classification,
+                    "allowed_scopes": allowed_scopes,
                 },
             }
             last_output = ""
@@ -171,6 +193,14 @@ class ChatRunner:
                 thread_id=conversation_id,
                 run_id=run_id,
             ):
+                if not runtime_event.correlation.trace_id:
+                    runtime_event = runtime_event.model_copy(
+                        update={
+                            "correlation": runtime_event.correlation.model_copy(
+                                update={"trace_id": trace_id}
+                            )
+                        }
+                    )
                 if runtime_event.kind == "token":
                     text = runtime_event.content or str(runtime_event.data.get("text", ""))
                     last_output += str(text)
@@ -188,7 +218,7 @@ class ChatRunner:
             end_chat_trace(trace, error=str(e))
             raise
         finally:
-            flush_langfuse()
+            flush_observability()
 
     def _emit(self, event: RuntimeEvent) -> str:
         EventStoreAdapter.append_memory(self._memory, event)
@@ -217,10 +247,7 @@ class ChatRunner:
     async def aclose(self) -> None:
         if self._mcp_runtime is not None:
             await self._mcp_runtime.aclose()
-        checkpointer = getattr(self._graph, "checkpointer", None)
-        conn = getattr(checkpointer, "_learnagent_conn", None)
-        if conn is not None and hasattr(conn, "close"):
-            await conn.close()
+        await close_graph_checkpointer(self._graph)
 
     def _to_lc_messages(self, messages: list[dict[str, Any]]) -> list[BaseMessage]:
         out: list[BaseMessage] = []

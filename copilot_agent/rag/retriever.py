@@ -6,7 +6,7 @@ from typing import Any
 
 from copilot_agent.contracts.retrieval import RetrievalRequest, RetrievalResult
 from copilot_agent.rag.bm25 import BM25Index
-from copilot_agent.rag.fusion import apply_doc_type_boost, dedup_chunks, rank_from_scores, rrf_fuse
+from copilot_agent.rag.fusion import apply_authority_boost, apply_doc_type_boost, dedup_chunks, rank_from_scores, rrf_fuse
 from copilot_agent.rag.index import build_vector_index, sync_vector_index
 from copilot_agent.rag.ingest import load_chunks
 from copilot_agent.rag.keyword import keyword_search, keyword_scores
@@ -35,10 +35,14 @@ class RagStore:
         chunks: list[DocChunk],
         *,
         vector_index: Any | None = None,
+        vector_chunk_allowlist: set[str] | None = None,
+        vector_metadata_filter: dict[str, str] | None = None,
     ) -> None:
         self.chunks = chunks
         self._by_key = {c.key: c for c in chunks}
         self._vector_index = vector_index
+        self._vector_chunk_allowlist = vector_chunk_allowlist
+        self._vector_metadata_filter = vector_metadata_filter
         self._retriever = None
         self._bm25: BM25Index | None = BM25Index(chunks) if chunks else None
         self._policy_filter = RagPolicyFilter()
@@ -141,6 +145,11 @@ class RagStore:
             query_hints=hints,
             enabled=settings.rag_doc_type_boost_enabled,
         )
+        fused = apply_authority_boost(
+            fused,
+            self._by_key,
+            enabled=settings.rag_authority_boost_enabled,
+        )
 
         ordered = sorted(fused.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))
         out: list[DocChunk] = []
@@ -186,7 +195,13 @@ class RagStore:
         if len(prefiltered) == len(self.chunks):
             detailed = self.search_detailed(request.query, top_k=top_k)
         else:
-            scoped = RagStore(prefiltered, vector_index=None)
+            allowlist = {chunk.chunk_id for chunk in prefiltered}
+            scoped = RagStore(
+                prefiltered,
+                vector_index=self._vector_index,
+                vector_chunk_allowlist=allowlist,
+                vector_metadata_filter={"tenant_id": request.tenant_id},
+            )
             detailed = scoped.search_detailed(request.query, top_k=top_k)
         result = self._policy_filter.post_filter(detailed.chunks, request)
         pre_blocked = [decision for decision in pre_decisions if not decision.allowed]
@@ -219,11 +234,24 @@ class RagStore:
         raw: dict[tuple[str, int], float] = {}
         for n in nodes:
             meta = getattr(n.node, "metadata", None) or {}
+            chunk_id = str(meta.get("chunk_id", "") or "")
+            if self._vector_chunk_allowlist is not None and chunk_id not in self._vector_chunk_allowlist:
+                continue
+            if self._vector_metadata_filter:
+                skip = False
+                for field, expected in self._vector_metadata_filter.items():
+                    if str(meta.get(field, "")) != str(expected):
+                        skip = True
+                        break
+                if skip:
+                    continue
             source = str(meta.get("source", ""))
             start_line = int(meta.get("start_line", 0) or 0)
             if not source:
                 continue
             key = (source, start_line)
+            if key not in self._by_key:
+                continue
             score = float(n.score or 0.0)
             raw[key] = max(raw.get(key, 0.0), score)
         if not raw:

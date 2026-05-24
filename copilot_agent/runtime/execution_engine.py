@@ -9,13 +9,22 @@ from copilot_agent.runtime.event_store import (
     EventStore,
     RUN_STATUS_CANCELLED,
     RUN_STATUS_CANCELLING,
+    RUN_STATUS_COMPLETED,
+    RUN_STATUS_FAILED,
     RUN_STATUS_QUEUED,
     RUN_STATUS_RUNNING,
     RUN_STATUS_WAITING_APPROVAL,
     RunConcurrencyLimitError,
+    IdempotencyConflictError,
     TERMINAL_RUN_STATUSES,
 )
-from copilot_agent.runtime.event_schema import EVENT_RUN_CONSISTENCY_CHECKED, EVENT_RUN_FAILED_META
+from copilot_agent.runtime.checkpoint_reader import CheckpointReader
+from copilot_agent.runtime.event_schema import (
+    EVENT_CHECKPOINT_CONSISTENCY_CHECKED,
+    EVENT_RUN_COMPLETED_META,
+    EVENT_RUN_CONSISTENCY_CHECKED,
+    EVENT_RUN_FAILED_META,
+)
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
@@ -27,6 +36,15 @@ if TYPE_CHECKING:
 
 
 FINAL_STREAM_MARKER = object()
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -45,6 +63,7 @@ class ManagedRun:
     checkpoint_pending: bool = False
     slot_acquired: bool = False
     rehydrated: bool = False
+    idempotency_reused: bool = False
     interrupt_payload: dict[str, Any] = field(default_factory=dict)
 
 
@@ -52,6 +71,12 @@ class GraphInterrupted(Exception):
     def __init__(self, interrupt_payload: dict[str, Any] | None = None) -> None:
         self.interrupt_payload = interrupt_payload or {}
         super().__init__("graph interrupted for approval")
+
+
+class CheckpointSyncFailed(Exception):
+    def __init__(self, message: str = "checkpoint sync failed") -> None:
+        self.message = message
+        super().__init__(message)
 
 
 class ExecutionEngine:
@@ -78,10 +103,40 @@ class ExecutionEngine:
         messages: list[dict[str, Any]],
         confirm_dangerous: bool = False,
         stream: bool = False,
+        idempotency_key: str | None = None,
     ) -> ManagedRun:
+        payload_hash = self._events.idempotency_payload_hash(
+            {
+                "messages": messages,
+                "confirm_dangerous": bool(confirm_dangerous),
+                "stream": bool(stream),
+            }
+        )
         await self._acquire_run_slot()
         try:
-            run = self._events.create_run(thread_id, status=RUN_STATUS_QUEUED)
+            run = self._events.create_run(
+                thread_id,
+                status=RUN_STATUS_QUEUED,
+                idempotency_key=idempotency_key,
+                idempotency_payload_hash=payload_hash if idempotency_key else None,
+            )
+            created_status = str(run.get("status") or "")
+            if created_status != RUN_STATUS_QUEUED or self._has_run_created(str(run["id"])):
+                managed = ManagedRun(
+                    run_id=str(run["id"]),
+                    thread_id=thread_id,
+                    messages=messages,
+                    confirm_dangerous=confirm_dangerous,
+                    stream=stream,
+                    stream_queue=asyncio.Queue() if stream else None,
+                    idempotency_reused=True,
+                )
+                if managed.stream_queue is not None:
+                    await managed.stream_queue.put(FINAL_STREAM_MARKER)
+                    async with self._lock:
+                        self._runs[managed.run_id] = managed
+                self._release_run_slot()
+                return managed
             managed = ManagedRun(
                 run_id=str(run["id"]),
                 thread_id=thread_id,
@@ -182,6 +237,9 @@ class ExecutionEngine:
             if item is FINAL_STREAM_MARKER:
                 break
             yield str(item)
+        if managed.idempotency_reused:
+            async with self._lock:
+                self._runs.pop(run_id, None)
 
     async def _get_managed(self, run_id: str) -> ManagedRun:
         async with self._lock:
@@ -247,6 +305,24 @@ class ExecutionEngine:
             )
             await self._run_with_timeout(managed, confirm_dangerous=True, resume=True)
             self._events.complete_run(run_id)
+        except CheckpointSyncFailed as exc:
+            message = str(exc.message or exc)
+            await self._emit_runtime(
+                managed,
+                RuntimeEvent.from_payload(
+                    "error",
+                    {"error": message, "reason": "checkpoint_sync_failed"},
+                    thread_id=managed.thread_id,
+                    run_id=managed.run_id,
+                ),
+            )
+            self._append_failed_meta(
+                managed,
+                error=message,
+                reason="checkpoint_sync_failed",
+                phase="finalize",
+            )
+            self._events.complete_run(run_id, error=message)
         except TimeoutError:
             message = f"run timed out after {self._run_timeout_seconds} seconds"
             await self._emit_runtime(
@@ -415,6 +491,7 @@ class ExecutionEngine:
                 "phase": phase,
                 "error": error,
                 "last_successful_event_id": self._events.latest_run_event_id(managed.run_id),
+                "last_successful_sequence": self._events.latest_run_sequence(managed.run_id),
                 "checkpoint_thread_id": managed.thread_id,
                 "checkpoint_pending": bool(managed.checkpoint_pending),
                 "resume_supported": bool(managed.checkpoint_pending),
@@ -422,15 +499,18 @@ class ExecutionEngine:
         )
 
     def _mark_cancelled(self, managed: ManagedRun) -> None:
-        self._events.append_event(managed.thread_id, managed.run_id, "cancelled", {})
-        self._events.update_run_status(managed.run_id, RUN_STATUS_CANCELLED, completed=True)
+            self._events.append_event(managed.thread_id, managed.run_id, "cancelled", {})
+            self._events.update_run_status(managed.run_id, RUN_STATUS_CANCELLED, completed=True)
 
     def _is_terminal(self, run_id: str) -> bool:
         run = self._events.get_run(run_id) or {}
         return str(run.get("status", "")) in TERMINAL_RUN_STATUSES
 
     async def _finalize_memory(self, managed: ManagedRun) -> None:
-        self._append_consistency_checked(managed)
+        checkpoint_consistency: dict[str, Any] | None = None
+        if (self._events.get_run(managed.run_id) or {}).get("status") == RUN_STATUS_COMPLETED:
+            checkpoint_consistency = await self._append_checkpoint_consistency_checked(managed)
+        self._append_consistency_checked(managed, checkpoint_consistency=checkpoint_consistency)
         finalize = getattr(self._runner, "finalize_memory", None)
         if callable(finalize):
             try:
@@ -445,7 +525,89 @@ class ExecutionEngine:
         except Exception:
             return
 
-    def _append_consistency_checked(self, managed: ManagedRun) -> None:
+    async def _append_checkpoint_consistency_checked(self, managed: ManagedRun) -> dict[str, Any]:
+        events = self._events.list_run_events(managed.run_id)
+        completed_meta = next(
+            (
+                event
+                for event in reversed(events)
+                if str(event.get("type") or "") == EVENT_RUN_COMPLETED_META
+            ),
+            None,
+        )
+        reported = None
+        source_event_ids: list[int] = []
+        if completed_meta is not None:
+            payload = completed_meta.get("payload") if isinstance(completed_meta.get("payload"), dict) else {}
+            reported = _optional_int(payload.get("message_count"))
+            event_id = completed_meta.get("id")
+            if event_id is not None:
+                source_event_ids.append(int(event_id))
+
+        warnings: list[str] = []
+        error: str | None = None
+        checkpoint_read_ok = False
+        checkpoint_missing = False
+        checkpoint_has_interrupt: bool | None = None
+        actual: int | None = None
+
+        graph = getattr(self._runner, "graph", None)
+        if graph is None:
+            warnings.append("checkpoint_graph_unavailable")
+        else:
+            try:
+                snapshot = await CheckpointReader(graph).snapshot(managed.thread_id)
+                checkpoint_read_ok = True
+                actual = _optional_int(snapshot.get("message_count"))
+                checkpoint_has_interrupt = bool(snapshot.get("has_interrupt", False))
+                if actual is None or actual <= 0:
+                    checkpoint_missing = True
+                    warnings.append("checkpoint_missing")
+            except Exception as exc:
+                error = str(exc)
+                warnings.append("checkpoint_read_failed")
+
+        checkpoint_match = bool(
+            checkpoint_read_ok
+            and not checkpoint_missing
+            and reported is not None
+            and actual == reported
+        )
+        if completed_meta is None:
+            warnings.append("run_completed_meta_missing")
+        elif reported is None:
+            warnings.append("run_completed_meta_message_count_missing")
+        elif checkpoint_read_ok and not checkpoint_missing and actual != reported:
+            warnings.append("checkpoint_message_count_mismatch")
+
+        payload = {
+            "checkpoint_read_ok": checkpoint_read_ok,
+            "checkpoint_missing": checkpoint_missing,
+            "checkpoint_has_interrupt": checkpoint_has_interrupt,
+            "checkpoint_message_count_actual": actual,
+            "checkpoint_message_count_reported": reported,
+            "checkpoint_match": checkpoint_match,
+            "warnings": warnings,
+            "error": error,
+            "source_event_ids": source_event_ids,
+        }
+        event = self._events.append_event(
+            managed.thread_id,
+            managed.run_id,
+            EVENT_CHECKPOINT_CONSISTENCY_CHECKED,
+            payload,
+        )
+        event_id = event.get("id")
+        if event_id is not None:
+            payload["event_id"] = int(event_id)
+        return payload
+
+    def _append_consistency_checked(
+        self,
+        managed: ManagedRun,
+        *,
+        checkpoint_consistency: dict[str, Any] | None = None,
+    ) -> None:
         run = self._events.get_run(managed.run_id) or {}
         status = str(run.get("status") or "")
         events = self._events.list_run_events(managed.run_id)
@@ -459,31 +621,63 @@ class ExecutionEngine:
             missing.append(EVENT_RUN_FAILED_META)
         if status == "cancelled" and "cancelled" not in event_types:
             missing.append("cancelled")
+        if status == "completed" and "approval_required" in event_types and "approval_resolved" not in event_types:
+            missing.append("approval_resolved")
+        starts = {
+            str((event.get("payload") or {}).get("call_id") or "")
+            for event in events
+            if event.get("type") == "tool_start"
+        }
+        ends = {
+            str((event.get("payload") or {}).get("call_id") or "")
+            for event in events
+            if event.get("type") == "tool_end"
+        }
+        missing_tool_ends = sorted(call_id for call_id in starts if call_id and call_id not in ends)
+        missing.extend(f"tool_end:{call_id}" for call_id in missing_tool_ends)
+        payload = {
+            "status": status,
+            "ok": not missing,
+            "missing_events": missing,
+            "event_count": len(events),
+            "last_event_id": self._events.latest_run_event_id(managed.run_id),
+            "last_sequence": self._events.latest_run_sequence(managed.run_id),
+            "checkpoint_pending": bool(managed.checkpoint_pending),
+            "missing_tool_end_call_ids": missing_tool_ends,
+        }
+        if checkpoint_consistency is not None:
+            warnings = checkpoint_consistency.get("warnings")
+            payload.update(
+                {
+                    "checkpoint_match": checkpoint_consistency.get("checkpoint_match"),
+                    "checkpoint_message_count_actual": checkpoint_consistency.get(
+                        "checkpoint_message_count_actual"
+                    ),
+                    "checkpoint_message_count_reported": checkpoint_consistency.get(
+                        "checkpoint_message_count_reported"
+                    ),
+                    "checkpoint_warning_count": len(warnings) if isinstance(warnings, list) else 0,
+                }
+            )
         self._events.append_event(
             managed.thread_id,
             managed.run_id,
             EVENT_RUN_CONSISTENCY_CHECKED,
-            {
-                "status": status,
-                "ok": not missing,
-                "missing_events": missing,
-                "event_count": len(events),
-                "last_event_id": self._events.latest_run_event_id(managed.run_id),
-                "checkpoint_pending": bool(managed.checkpoint_pending),
-            },
+            payload,
         )
 
     def _cleanup_orphan_runs(self) -> None:
-        self._events.fail_non_terminal_runs(
-            error="server restarted before run completed",
-            exclude_statuses={RUN_STATUS_WAITING_APPROVAL},
-        )
+        for run in self._events.list_runs_by_status({RUN_STATUS_CANCELLING}):
+            self._recover_cancelled_run(run, reason="process_restarted")
+        for run in self._events.list_runs_by_status({RUN_STATUS_QUEUED, RUN_STATUS_RUNNING}):
+            self._recover_failed_run(run, reason="process_restarted")
         self._rehydrate_waiting_approval_runs()
 
     def _rehydrate_waiting_approval_runs(self) -> None:
         for run in self._events.list_runs_by_status({RUN_STATUS_WAITING_APPROVAL}):
             run_id = str(run["id"])
             thread_id = str(run["thread_id"])
+            self._events.mark_run_recovered(run_id, reason="waiting_approval_rehydrated")
             messages = self._recover_run_messages(run_id)
             interrupt_payload = self._recover_interrupt_payload(run_id)
             managed = ManagedRun(
@@ -495,6 +689,34 @@ class ExecutionEngine:
                 interrupt_payload=interrupt_payload,
             )
             self._runs[run_id] = managed
+
+    def _recover_failed_run(self, run: dict[str, Any], *, reason: str) -> None:
+        run_id = str(run["id"])
+        thread_id = str(run["thread_id"])
+        managed = ManagedRun(run_id=run_id, thread_id=thread_id, messages=self._recover_run_messages(run_id))
+        self._events.mark_run_recovered(run_id, reason=reason)
+        message = "server restarted before run completed"
+        self._events.append_event(
+            thread_id,
+            run_id,
+            "error",
+            {"error": message, "reason": reason},
+        )
+        self._append_failed_meta(managed, error=message, reason=reason, phase="startup_recovery")
+        self._events.update_run_status(run_id, RUN_STATUS_FAILED, error=message, completed=True)
+        self._append_consistency_checked(managed)
+
+    def _recover_cancelled_run(self, run: dict[str, Any], *, reason: str) -> None:
+        run_id = str(run["id"])
+        thread_id = str(run["thread_id"])
+        managed = ManagedRun(run_id=run_id, thread_id=thread_id, messages=self._recover_run_messages(run_id))
+        self._events.mark_run_recovered(run_id, reason=reason)
+        self._events.append_event(thread_id, run_id, "cancelled", {"reason": reason})
+        self._events.update_run_status(run_id, RUN_STATUS_CANCELLED, completed=True)
+        self._append_consistency_checked(managed)
+
+    def _has_run_created(self, run_id: str) -> bool:
+        return any(event.get("type") == "run_created" for event in self._events.list_run_events(run_id))
 
     def _recover_run_messages(self, run_id: str) -> list[dict[str, Any]]:
         for event in self._events.list_run_events(run_id):

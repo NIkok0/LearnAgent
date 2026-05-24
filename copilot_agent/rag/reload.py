@@ -128,6 +128,7 @@ class RagStoreManager:
     def status(self) -> dict[str, Any]:
         docs_source = resolve_docs_source()
         base = docs_source.docs_dir
+        documents = _document_status(base)
         with self._vector_lock:
             vector_status = self._vector_status
             vector_sync = dict(self._last_vector_sync)
@@ -139,6 +140,8 @@ class RagStoreManager:
             "docs_dir": str(base) if base is not None else None,
             "docs_source": docs_source.as_dict(),
             "chunk_count": len(self._store.chunks),
+            "document_count": documents.get("document_count", 0),
+            "deleted_document_count": documents.get("deleted_document_count", 0),
             "vector_enabled": self._store.vector_enabled,
             "vector_index_status": vector_status,
             "vector_rebuilding": vector_rebuilding,
@@ -149,3 +152,19 @@ class RagStoreManager:
             "last_reload_at": self._last_reload_at,
             "last_reload_trigger": self._last_trigger,
         }
+
+
+def _document_status(base: Any | None) -> dict[str, int]:
+    if base is None:
+        return {"document_count": 0, "deleted_document_count": 0}
+    try:
+        from copilot_agent.rag.document_lifecycle import list_rag_documents
+
+        result = list_rag_documents(docs_dir=base)
+        return {
+            "document_count": int(result.get("document_count") or 0),
+            "deleted_document_count": int(result.get("deleted_document_count") or 0),
+        }
+    except Exception:
+        log.exception("Failed to compute RAG document status")
+        return {"document_count": 0, "deleted_document_count": 0}

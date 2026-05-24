@@ -20,6 +20,8 @@ from copilot_agent.contracts.adapters.tool_http import HttpResponseAdapter
 
 from copilot_agent.contracts.adapters.tool_rag import RagSearchAdapter
 from copilot_agent.contracts.retrieval import RetrievalRequest
+from copilot_agent.scenario.loader import LoadedScenario
+from copilot_agent.rag.request_context import build_retrieval_request
 
 from copilot_agent.credentials import CredentialManager
 from copilot_agent.credentials.audit import build_credential_audit_payload
@@ -37,6 +39,7 @@ from copilot_agent.observability import (
 )
 
 from copilot_agent.rag import format_chunks_for_prompt
+from copilot_agent.rag.citations import citations_from_chunks
 from copilot_agent.rag.context_guard import build_guarded_context
 from copilot_agent.rag.schema import dynamic_search_top_k
 
@@ -59,22 +62,15 @@ def _retrieval_request_from_context(
     query: str,
     ctx: dict[str, Any],
     user_id: str,
+    credential_manager: CredentialManager | None = None,
+    scenario: LoadedScenario | None = None,
 ) -> RetrievalRequest:
-    tenant_id = str(ctx.get("tenant_id") or "default")
-    allowed_raw = ctx.get("allowed_scopes")
-    allowed_scopes = [str(item) for item in allowed_raw] if isinstance(allowed_raw, list) else []
-    if user_id:
-        allowed_scopes.append(f"user:{user_id}")
-    if tenant_id:
-        allowed_scopes.append(f"tenant:{tenant_id}")
-    return RetrievalRequest(
-        tenant_id=tenant_id,
-        user_id=user_id or "local_user",
+    return build_retrieval_request(
         query=query,
-        purpose=str(ctx.get("retrieval_purpose") or "agent_context"),
-        max_classification=str(ctx.get("max_classification") or "internal"),  # type: ignore[arg-type]
-        allowed_scopes=list(dict.fromkeys(allowed_scopes)),
-        allow_high_pii=bool(ctx.get("allow_high_pii", False)),
+        ctx=ctx,
+        user_id=user_id,
+        credential_manager=credential_manager,
+        scenario=scenario,
     )
 
 
@@ -95,6 +91,8 @@ class ToolHandlers:
 
         cookies: CredentialManager,
 
+        scenario: LoadedScenario | None = None,
+
     ) -> None:
 
         self._memory = memory
@@ -102,6 +100,8 @@ class ToolHandlers:
         self._http = http
 
         self._cookies = cookies
+
+        self._scenario = scenario
 
 
 
@@ -149,6 +149,8 @@ class ToolHandlers:
                 query=query,
                 ctx=ctx,
                 user_id=self._memory.resolve_user_id(thread_id) if thread_id else "local_user",
+                credential_manager=self._cookies,
+                scenario=self._scenario,
             )
             result, policy_result = self._memory.policy_aware_search_docs(request, top_k=top_k)
 
@@ -176,6 +178,7 @@ class ToolHandlers:
             raw = {
                 "excerpts_markdown": excerpts,
                 "sources": list({c.source for c in hits}) or list(cache.get("sources") or []) if cache else [],
+                "citations": [item.model_dump(exclude_none=True) for item in citations_from_chunks(hits)],
                 "suggested_api_paths": enrichment["suggested_api_paths"],
                 "api_field_hints": enrichment["api_field_hints"],
                 "preretrieval_dedupe": dedupe_meta,
@@ -377,6 +380,17 @@ class ToolHandlers:
         t0 = time.perf_counter()
 
         try:
+            reused = self._reuse_successful_post_result(
+                conversation_id=conversation_id,
+                run_id=str(ctx.get("run_id") or ""),
+                idempotency_key=idempotency_key,
+            )
+            if reused is not None:
+                duration_ms = int((time.perf_counter() - t0) * 1000)
+                model = HttpResponseAdapter.to_tool_result(reused, duration_ms=duration_ms)
+                safe = sanitize_observability_payload(model.to_llm_dict())
+                end_tool_span(tool_span, result={"duration_ms": duration_ms, "idempotency_reused": True, **safe})
+                return model.to_llm_dict()
 
             stored = self._cookies.get_cookie(conversation_id, required_scopes=("http:write",)) if conversation_id else None
             if conversation_id and not self._cookies.authorize_scopes(("http:write",)):
@@ -461,4 +475,38 @@ class ToolHandlers:
 
             raise
 
+    def _reuse_successful_post_result(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        idempotency_key: str | None,
+    ) -> dict[str, Any] | None:
+        key = (idempotency_key or "").strip()
+        if not conversation_id or not run_id or not key:
+            return None
+        finder = getattr(self._memory.event_store, "find_successful_tool_end_by_idempotency", None)
+        if not callable(finder):
+            return None
+        event = finder(run_id, tool_name="http_post", idempotency_key=key)
+        if not event:
+            return None
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        data = result.get("data")
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        reused: dict[str, Any] = {
+            "ok": True,
+            "success": True,
+            "metadata": {
+                **metadata,
+                "idempotency_reused": True,
+                "reused_from_event_id": event.get("id"),
+            },
+        }
+        if isinstance(data, dict):
+            reused.update(data)
+        elif data is not None:
+            reused["body"] = data
+        return reused
 

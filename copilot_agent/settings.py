@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+    observability_provider: str = "none"
 
     rag_use_vector: bool = False
     rag_rebuild_index: bool = False
@@ -53,6 +54,7 @@ class Settings(BaseSettings):
     rag_rrf_k: int = 60
     rag_bm25_weight: float = 1.0
     rag_doc_type_boost_enabled: bool = True
+    rag_authority_boost_enabled: bool = True
     rag_dedup_results: bool = True
     rag_fusion_candidate_multiplier: int = 4
     rag_rerank_enabled: bool = False
@@ -72,8 +74,12 @@ class Settings(BaseSettings):
 
     agent_tool_route_enabled: bool = True
     agent_tool_route_enforce: bool = True
+    agent_tool_route_llm_fallback: bool = False
     agent_diagnosis_template_enabled: bool = True
     agent_retrieval_path_inject: bool = True
+    agent_tool_message_mode: str = "full"
+    """LLM-facing ToolMessage payload: full JSON or summary truncation."""
+    agent_tool_message_max_chars: int = 4000
 
     # Phase 3: persisted LangGraph checkpoint.
     agent_checkpoint_path: str = "storage/langgraph-checkpoints.sqlite"

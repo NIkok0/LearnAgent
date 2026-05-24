@@ -61,15 +61,34 @@ def apply_doc_type_boost(
     return boosted
 
 
+def apply_authority_boost(
+    scores: dict[tuple[str, int], float],
+    chunks_by_key: dict[tuple[str, int], DocChunk],
+    *,
+    enabled: bool = True,
+) -> dict[tuple[str, int], float]:
+    if not enabled or not scores:
+        return scores
+    boosted: dict[tuple[str, int], float] = {}
+    for key, score in scores.items():
+        chunk = chunks_by_key.get(key)
+        if chunk is None:
+            boosted[key] = score
+            continue
+        authority = int(getattr(chunk, "authority", 50) or 50)
+        boosted[key] = score * (1.0 + (authority - 50) * 0.002)
+    return boosted
+
+
 def dedup_chunks(chunks: list[DocChunk]) -> list[DocChunk]:
-    """Keep first (highest-ranked) chunk per (source, heading_path)."""
-    seen: set[tuple[str, str]] = set()
-    out: list[DocChunk] = []
+    """Keep one chunk per (source, heading_path); prefer highest authority."""
+    grouped: dict[tuple[str, str], list[DocChunk]] = {}
+    order: list[tuple[str, str]] = []
     for chunk in chunks:
         path = chunk.heading_path or chunk.section_title or str(chunk.start_line)
         dedup_key = (chunk.source, path)
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        out.append(chunk)
-    return out
+        if dedup_key not in grouped:
+            order.append(dedup_key)
+            grouped[dedup_key] = []
+        grouped[dedup_key].append(chunk)
+    return [max(grouped[key], key=lambda item: int(getattr(item, "authority", 50) or 50)) for key in order]

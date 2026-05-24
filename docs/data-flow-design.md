@@ -352,7 +352,7 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **3** | L7 Output | `FinalAnswerModel`：NL + `citations[]` + 可选业务字段 | golden 断言扩展 |
+| **3** | L7 Output | `FinalAnswerModel` v2：answer + citations + tool evidence + citation status + safety metadata | `verify_final_answer_l7.py` |
 | **3** | L7 | ToolMessage 摘要策略（全量 JSON vs 截断）文档化 + 配置项 | eval case |
 
 ---

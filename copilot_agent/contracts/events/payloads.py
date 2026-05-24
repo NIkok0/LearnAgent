@@ -30,6 +30,7 @@ class ToolStartPayload(BaseModel):
     timeout_seconds: float | None = None
     max_retries: int | None = None
     idempotency_key: str | None = None
+    idempotency_key_present: bool = False
 
 
 class ToolEndPayload(BaseModel):
@@ -39,10 +40,15 @@ class ToolEndPayload(BaseModel):
     duration_ms: int | None = None
     success: bool = True
     error: str | None = None
+    error_type: str | None = None
     sanitized_result: dict[str, Any] | None = None
+    attempt: int | None = None
+    max_attempts: int | None = None
     retry_count: int | None = None
     timeout_seconds: float | None = None
     idempotency_key: str | None = None
+    idempotency_key_present: bool = False
+    idempotency_reused: bool = False
 
 
 class RetrievalSourceItem(BaseModel):
@@ -56,6 +62,7 @@ class RetrievalSourceItem(BaseModel):
     http_path: str | None = None
     request_field_names: list[str] = Field(default_factory=list)
     error_codes: list[str] = Field(default_factory=list)
+    authority: int | None = None
 
 
 class RetrievalCompletedPayload(BaseModel):
@@ -126,6 +133,25 @@ class OutputGuardCheckedPayload(BaseModel):
     findings: list[str] = Field(default_factory=list)
     original_chars: int = 0
     emitted_chars: int = 0
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LlmGenerationPayload(BaseModel):
+    trace_id: str = ""
+    provider: str = ""
+    model: str = ""
+    round_index: int = 0
+    latency_ms: int | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float | None = None
+    finish_reason: str | None = None
+    tool_call_count: int = 0
+    tool_names: list[str] = Field(default_factory=list)
+    observability_provider: str = "none"
+    external_trace_url: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 

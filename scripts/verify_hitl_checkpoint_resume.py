@@ -174,6 +174,9 @@ def _summarize(waiting: dict[str, Any], done: dict[str, Any], events: list[dict[
         "waiting_status": waiting.get("status"),
         "final_status": done.get("status"),
         "event_types": event_types,
+        "approval_required_count": event_types.count("approval_required"),
+        "token_event_count": event_types.count("token"),
+        "tool_start_count": event_types.count("tool_start"),
         "checkpoint_meta": checkpoint_meta,
         "approval_resolved": resolved,
         "resumed_starts": resumed_starts,
@@ -197,10 +200,13 @@ def main() -> int:
         "approve_resume_value": summary["approved"]["approval_resolved"].get("resume_value") is True,
         "approve_from_checkpoint": bool(summary["approved"]["resumed_starts"]),
         "approve_token": "approved-from-checkpoint" in summary["approved"]["token_text"],
+        "approve_no_duplicate_interrupt": summary["approved"]["approval_required_count"] == 1,
         "reject_waits": summary["rejected"]["waiting_status"] == "waiting_approval",
         "reject_completes": summary["rejected"]["final_status"] == "completed",
         "reject_resume_value": summary["rejected"]["approval_resolved"].get("resume_value") is False,
         "reject_token": "rejected-from-checkpoint" in summary["rejected"]["token_text"],
+        "reject_no_tool_execution": summary["rejected"]["tool_start_count"] == 0,
+        "reject_no_duplicate_interrupt": summary["rejected"]["approval_required_count"] == 1,
         "checkpoint_meta_present": bool(summary["approved"]["checkpoint_meta"].get("resume_supported")),
         "checkpoint_interrupt_summary": bool(
             (summary["approved"]["checkpoint_meta"].get("interrupt_summary") or {}).get("tool_calls")

@@ -86,7 +86,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | LangGraph StateGraph | 显式状态机、条件边、循环 | 与当前 agent graph 完全匹配 | 不自动定义 plan 生命周期 | `plan_created/plan_updated` schema | 当前主线 |
 | CrewAI Planning | 面向任务/crew 的 planning | 概念清晰 | 与当前 LangGraph runtime 不直接兼容 | plan event 与 run timeline 映射 | 参考 |
 | Semantic Kernel Planners | 插件组合规划 | 适合 SK plugin 生态 | 当前官方也强调函数调用对 planner 的替代场景 | 迁移成本高 | 参考 |
-| 当前 observe-only planner | 写 `plan_created`，不改变执行语义 | 低风险、可观测 | 还不是真正 Plan-and-Execute | plan state、plan update、step outcome | 短期继续 |
+| 当前 route-first planner | 写 `plan_created/plan_updated`，基于 Scenario Router 生成可观测计划，执行仍走 ReAct loop | 低风险、可观测、可回放 | 还不是真正 LLM Planner / Plan-and-Execute | step lifecycle、replan 触发、timeline 交互 | 短期继续 |
 
 ### Memory
 
@@ -114,12 +114,12 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 
 | 方案 | 支持能力 | 优势 | 限制 | LearnAgent 仍需设计 | 结论 |
 |---|---|---|---|---|---|
-| Langfuse | LLM trace、span、tool trace | 当前已有接入基础 | 不是 runtime event store | trace/event correlation | 保留 |
-| LangSmith | LangChain/LangGraph observability | 与 LangChain 生态匹配 | 引入外部服务和账号体系 | 与本地 SQLite timeline 对齐 | 可选 |
-| OpenTelemetry | 标准 tracing/metrics/logs | 生产标准 | 需要大量 instrumentation | span 命名、attribute schema | 生产阶段引入 |
-| OpenAI Agents tracing | Agents SDK 内置 trace | 覆盖 LLM、tool、guardrail、自定义事件 | 主线不是 Agents SDK | 数据同步到 EventStore | 参考 |
-| 当前 EventStore timeline | thread/run/event 可回放事实源 | 完全服务本地 runtime | 不是指标系统；没有聚合 dashboard | trace correlation、metrics export | 当前主线事实源 |
-| `TimelineProjector` | CQRS / Projection Read Model，将 raw events 投影为 run timeline | 保持 EventStore 为事实源，适合 UI/API 查询 | 当前为即时投影，未做缓存表或复杂查询优化 | timeline schema、warning 规则、后续 read model cache | MVP 高优先级 |
+| Langfuse | LLM trace/span/tool trace | 已通过 ObservabilityProvider 作为可选模型轨 provider 接入 | 不是 runtime event store | 与 EventStore 	race_id、llm_generation、timeline cost 对齐 | 可选保留 |
+| LangSmith | LangChain/LangGraph observability + eval dataset/experiment | 已通过 ObservabilityProvider 作为可选模型轨 provider 接入，更贴合 LangGraph | 引入外部服务和账号体系，不替代本地 SQLite timeline | 与 EventStore 	race_id、external_trace_url、eval harness 对齐 | 推荐作为 LangGraph trace/eval PoC |
+| OpenTelemetry | 标准 tracing/metrics/logs | 生产标准 | 需要较多 instrumentation | span 命名、attribute schema、EventStore 对齐 | 生产阶段评估 |
+| OpenAI Agents tracing | Agents SDK 内置 trace | 覆盖 LLM/tool/guardrail/custom events | 当前主线不是 Agents SDK | 数据同步到 EventStore | 参考 |
+| EventStore timeline | thread/run/event 可回放事实源 | 完全服务本地 runtime | 不是外部指标系统 | trace correlation、metrics export | 当前主线事实源 |
+| TimelineProjector | CQRS / Projection Read Model，将 raw events 投影为 run timeline | 保持 EventStore 为事实源，适合 UI/API 查询 | 当前为即时投影，未做缓存表或复杂查询优化 | timeline schema、warning 规则、后续 read model cache | MVP 高优先级 |
 
 ### Sandbox
 
@@ -154,7 +154,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | Memory | LangGraph checkpoint + RAG + EventStore `memory_*` 摘要；v1.1 policy（keyword episodic、budget、conflict）；`current_turn_messages`；`CheckpointCompactor` | 向量 episodic；续轮去重 System/episodic 注入；可选 LLM 压缩摘要；见 [memory-checkpoint-design.md](./memory-checkpoint-design.md) §8 |
 | RAG | 9 篇 Demo 语料 + BM25/RRF/可选向量；Scenario `docs_manifest.json`；结构化 API ingest；Tool-grounded + proxy eval | RAGAS 夜跑；生产语料替换；见 [rag-design.md](./rag-design.md) §10 |
 | Policy | `PolicyRegistry` + Scenario HTTP 白名单 + **`required_scopes`** + `safety_gate` + credential audit | 策略表版本化；输入/输出 Guard；见 [guardrail-policy-design.md](./guardrail-policy-design.md) |
-| Observability | EventStore 为 timeline 事实源；Langfuse trace/span（LLM/tool） | `trace_id` 与 `run_id`/`tool_call_id` 写入事件；token/cost/latency 聚合；OpenTelemetry 生产阶段 |
+| Observability | EventStore 为 timeline 事实源；`ObservabilityProvider=none/langfuse/langsmith`；`llm_generation` + token/cost/latency 聚合 | LangSmith eval dataset/experiment PoC；OpenTelemetry 生产阶段评估 |
 | UI / 控制通道 | REST + SSE（`/v1/chat` 兼容）；`/ui` timeline；`GET /timeline`；`WS /v1/runs/{id}/ws` 回放 | WS 重连与增量事件协议；长 Run 默认 cursor 拉取；完整产品 UI 后置 |
 | Eval（横切） | `verify_eval_suite`；profile 见 [ci-design](./ci-design.md) | 见 [guide §2.8](./agent-learning-guide.md) |
 
@@ -170,7 +170,7 @@ FastAPI + LangGraph + LangChain + SQLite EventStore + RAG + ExecutionEngine
 | Tool 结果协议 | 各工具返回结构不一，LangChain 不强制审计格式 | 统一 `ToolResultModel`、脱敏、`tool_call_id` 进 timeline | [data-flow §0](./data-flow-design.md) |
 | Memory 编排策略 | 框架不管何时写摘要、何时召回、如何压缩 working memory | episodic 召回；checkpoint 为 working 真相源 | [memory-checkpoint §0](./memory-checkpoint-design.md)、[context-manager §0](./context-manager-design.md) |
 | RAG / 文档问答 | 框架不管业务文档集、引用溯源与检索评测 | 混合检索；required_source proxy 指标 | [rag §0](./rag-design.md)、[tool-design §0](./tool-design.md) |
-| Trace 关联 | Langfuse 与 EventStore 是两套 ID | `thread_id`/`run_id`/`tool_call_id`/`trace_id` 可互查 | [observability §0](./observability-design.md) |
+| Trace 关联 | 外部 provider 与 EventStore 是两套 ID | `thread_id`/`run_id`/`tool_call_id`/`trace_id`/`external_trace_url` 可互查 | [observability §0](./observability-design.md) |
 | Sandbox 策略 | 容器只提供隔离，权限/审计语义仍要自建 | shell/git 类工具 permission + 审计 | 未实现；HTTP 白名单见 [guardrail §0](./guardrail-policy-design.md) |
 
 | 模块边界与改造优先级见 [agent-learning-guide.md](./agent-learning-guide.md) §3、**§7（八层栈）**。分项设计见 [runtime-design.md](./runtime-design.md)、[rag-design.md](./rag-design.md)、[guardrail-policy-design.md](./guardrail-policy-design.md)、[observability-design.md](./observability-design.md)、[memory-checkpoint-design.md](./memory-checkpoint-design.md)、[context-manager-design.md](./context-manager-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)。

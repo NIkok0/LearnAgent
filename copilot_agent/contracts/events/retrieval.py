@@ -36,6 +36,7 @@ def build_retrieval_completed_payload(
             doc_type=chunk.doc_type if chunk.doc_type and chunk.doc_type != "doc" else None,
             start_line=chunk.start_line,
             chunk_index=chunk.chunk_index if chunk.chunk_index else index,
+            authority=int(getattr(chunk, "authority", 50) or 50),
         )
         if chunk.api_endpoint is not None:
             item = item.model_copy(

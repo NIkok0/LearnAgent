@@ -10,7 +10,7 @@ from pathlib import Path
 
 from typing import Literal
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,16 +21,19 @@ from copilot_agent.scenario.bootstrap import apply_scenario_environment
 from copilot_agent.scenario.loader import LoadedScenario, load_scenario, scenario_status
 from copilot_agent.contracts.validate import ContractValidationError, enrich_event_row
 from copilot_agent.credentials import CredentialManager
-from copilot_agent.observability import flush_langfuse
+from copilot_agent.observability import flush_observability, provider_configured
 from copilot_agent.rag import RagStoreManager
 from copilot_agent.rag.docs_manifest import register_uploaded_file
+from copilot_agent.rag.document_lifecycle import delete_rag_document, list_rag_documents
 from copilot_agent.rag.ingest import repo_docs_dir
+from copilot_agent.runtime.event_schema import EVENT_RAG_DOCUMENT_DELETED
 from copilot_agent.runtime.checkpoint_store import CheckpointStore
 from copilot_agent.runtime.event_store import (
     THREAD_END_REASON_BROWSER_CLOSE,
     THREAD_END_REASON_EXPLICIT,
     ActiveRunExistsError,
     EventStore,
+    IdempotencyConflictError,
     RunConcurrencyLimitError,
     ThreadNotActiveError,
 )
@@ -105,7 +108,11 @@ async def lifespan(app: FastAPI):
         rag_manager.store.vector_enabled,
         settings.rag_hot_reload_enabled,
     )
-    log.info("Langfuse configured=%s", settings.langfuse_configured)
+    log.info(
+        "Observability provider=%s configured=%s",
+        settings.observability_provider,
+        provider_configured(),
+    )
     mcp_runtime = await McpRuntime.start(loaded_scenario.mcp, scenario_root=loaded_scenario.root)
     if mcp_runtime is not None:
         mcp_tools = [
@@ -149,7 +156,7 @@ async def lifespan(app: FastAPI):
         await thread_lifecycle_cleaner.stop()
     if runner is not None:
         await runner.aclose()
-    flush_langfuse()
+    flush_observability()
     thread_lifecycle_cleaner = None
     execution_engine = None
     runner = None
@@ -192,11 +199,13 @@ class ChatRequest(BaseModel):
     thread_id: str | None = None
     messages: list[ChatMessage]
     confirm_dangerous: bool = Field(default=False, description="Auto-approve scenario-declared dangerous tool calls")
+    idempotency_key: str | None = None
 
 
 class CreateRunRequest(BaseModel):
     messages: list[ChatMessage]
     confirm_dangerous: bool = Field(default=False, description="Auto-approve dangerous tool calls for this run")
+    idempotency_key: str | None = None
 
 
 @app.get("/health")
@@ -233,11 +242,37 @@ def rag_reload() -> dict[str, object]:
     return {"rag": manager.reload(trigger="api")}
 
 
+@app.get("/v1/rag/documents")
+def rag_documents() -> dict[str, object]:
+    return {"rag": _require_rag_manager().status(), **list_rag_documents()}
+
+
+@app.delete("/v1/rag/documents/{doc_id}")
+def rag_delete_document(doc_id: str, reason: str = "api_delete") -> dict[str, object]:
+    manager = _require_rag_manager()
+    try:
+        result = delete_rag_document(doc_id, manager=manager, reason=reason, sync_vector=True)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document not found") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result.vector_delete_attempted and not result.vector_delete_success:
+        _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETED, result.audit_payload())
+        raise HTTPException(status_code=500, detail={"error": "vector delete failed", **result.audit_payload()})
+    _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETED, result.audit_payload())
+    return {"deleted": result.as_response()}
+
+
 _UPLOAD_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.md$")
 
 
 @app.post("/v1/rag/upload")
-async def rag_upload(file: UploadFile = File(...)) -> dict[str, object]:
+async def rag_upload(
+    file: UploadFile = File(...),
+    tenant_id: str = Form("default"),
+    classification: str = Form("internal"),
+    acl: str = Form(""),
+) -> dict[str, object]:
     manager = _require_rag_manager()
     base = repo_docs_dir()
     if base is None:
@@ -252,16 +287,42 @@ async def rag_upload(file: UploadFile = File(...)) -> dict[str, object]:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="upload must be UTF-8 markdown") from exc
+    security: dict[str, object] = {
+        "tenant_id": tenant_id.strip() or "default",
+        "classification": classification.strip() or "internal",
+        "acl": [],
+    }
+    if acl.strip():
+        try:
+            parsed_acl = json.loads(acl)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="acl must be a JSON array string") from exc
+        if not isinstance(parsed_acl, list):
+            raise HTTPException(status_code=400, detail="acl must be a JSON array")
+        security["acl"] = [str(item) for item in parsed_acl]
     (base / filename).write_text(text, encoding="utf-8")
-    register_uploaded_file(base, filename)
+    register_uploaded_file(base, filename, security=security)
     status = manager.reload(trigger="api")
-    return {"uploaded": filename, "rag": status}
+    return {"uploaded": filename, "rag": status, "doc_security": security}
 
 
 def _require_execution_engine() -> ExecutionEngine:
     if execution_engine is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
     return execution_engine
+
+
+def _append_rag_audit_event(event_type: str, payload: dict[str, object]) -> None:
+    thread_id = "__rag_audit__"
+    run_id = "__rag_audit__"
+    event_store.ensure_thread(thread_id, title="RAG audit")
+    if event_store.get_run(run_id) is None:
+        event_store.create_run(thread_id, run_id=run_id)
+        event_store.append_event(thread_id, run_id, "run_created", {"status": "audit"})
+        event_store.update_run_status(run_id, "running")
+        event_store.append_event(thread_id, run_id, "done", {"audit": True})
+        event_store.complete_run(run_id)
+    event_store.append_event(thread_id, run_id, event_type, payload)
 
 
 def _reject_inactive_thread(thread_id: str) -> None:
@@ -345,11 +406,14 @@ async def create_run(thread_id: str, req: CreateRunRequest) -> dict[str, object]
             messages=msgs,
             confirm_dangerous=req.confirm_dangerous,
             stream=False,
+            idempotency_key=req.idempotency_key,
         )
     except ThreadNotActiveError as exc:
         raise HTTPException(status_code=409, detail="thread is not active") from exc
     except ActiveRunExistsError as exc:
         raise HTTPException(status_code=409, detail="thread already has an active run") from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail="idempotency key conflict") from exc
     except RunConcurrencyLimitError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"run": event_store.get_run(managed.run_id)}
@@ -516,11 +580,14 @@ async def chat(req: ChatRequest):
             messages=msgs,
             confirm_dangerous=req.confirm_dangerous,
             stream=True,
+            idempotency_key=req.idempotency_key,
         )
     except ThreadNotActiveError:
         return JSONResponse(status_code=409, content={"detail": "thread is not active"})
     except ActiveRunExistsError:
         return JSONResponse(status_code=409, content={"detail": "thread already has an active run"})
+    except IdempotencyConflictError:
+        return JSONResponse(status_code=409, content={"detail": "idempotency key conflict"})
     except RunConcurrencyLimitError as exc:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 

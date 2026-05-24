@@ -38,6 +38,10 @@ class ScenarioResourcesConfig(BaseModel):
     credential_cookie_name: str = ""
     credential_provider: str = ""
     credential_scopes: list[str] = Field(default_factory=lambda: ["http:read", "http:write"])
+    default_tenant_id: str = "default"
+    default_max_classification: str = "internal"
+    rag_allowed_scopes: list[str] = Field(default_factory=list)
+    rag_embedding_model: str | None = None
     docs_fallback: str = ""
     rag_rules: str | None = None
     diagnosis: str | None = None

@@ -22,5 +22,54 @@
     "watermark-java-backend-tech-selection.md": "tech_selection",
     "README.md": "overview",
     "README_ALGORITHM.md": "algorithm"
+  },
+  "doc_security": {
+    "API-CONTRACT.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "authority": 95,
+      "acl": []
+    },
+    "SECURITY-BASELINE.md": {
+      "tenant_id": "default",
+      "classification": "confidential",
+      "authority": 85,
+      "acl": ["group:ops", "group:security"]
+    },
+    "REQUIREMENTS-CHECKLIST-AND-TEST-CASES.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "DEPLOY-SERVER.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "RUNBOOK.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "OPERATIONS-SLO-SLA.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "watermark-java-backend-tech-selection.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "README.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    },
+    "README_ALGORITHM.md": {
+      "tenant_id": "default",
+      "classification": "internal",
+      "acl": []
+    }
   }
 }

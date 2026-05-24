@@ -4,6 +4,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -103,20 +104,29 @@ def load_docs_manifest(docs_dir: Path | None) -> DocsManifest:
     )
 
 
-def register_uploaded_file(docs_dir: Path, filename: str, *, doc_type: str = "doc") -> DocsManifest:
+def register_uploaded_file(
+    docs_dir: Path,
+    filename: str,
+    *,
+    doc_type: str = "doc",
+    security: dict[str, object] | None = None,
+) -> DocsManifest:
     """Append an uploaded markdown file to the manifest on disk."""
     manifest = load_docs_manifest(docs_dir)
     load_order = list(manifest.load_order)
     doc_types = dict(manifest.doc_types)
+    doc_security = dict(manifest.doc_security)
     if filename not in load_order:
         load_order.append(filename)
     doc_types.setdefault(filename, doc_type)
+    if security:
+        doc_security[filename] = dict(security)
     updated = DocsManifest(
         version=manifest.version,
         load_order=tuple(load_order),
         doc_types=doc_types,
         include_glob=manifest.include_glob,
-        doc_security=dict(manifest.doc_security),
+        doc_security=doc_security,
     )
     payload = {
         "version": updated.version,
@@ -128,3 +138,49 @@ def register_uploaded_file(docs_dir: Path, filename: str, *, doc_type: str = "do
     path = docs_dir / MANIFEST_FILENAME
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return updated
+
+
+def save_docs_manifest(docs_dir: Path, manifest: DocsManifest) -> None:
+    payload = {
+        "version": manifest.version,
+        "load_order": list(manifest.load_order),
+        "doc_types": manifest.doc_types,
+        "include_glob": manifest.include_glob,
+        "doc_security": manifest.doc_security,
+    }
+    path = docs_dir / MANIFEST_FILENAME
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def remove_document_from_manifest(docs_dir: Path, doc_id: str) -> tuple[DocsManifest, str | None, dict[str, Any]]:
+    """Remove a document by doc_id or source filename from docs_manifest.json."""
+    manifest = load_docs_manifest(docs_dir)
+    target = _resolve_manifest_filename(manifest, doc_id)
+    if target is None:
+        return manifest, None, {}
+    load_order = [name for name in manifest.load_order if name != target]
+    doc_types = dict(manifest.doc_types)
+    doc_types.pop(target, None)
+    doc_security = dict(manifest.doc_security)
+    security = dict(doc_security.pop(target, {}))
+    updated = DocsManifest(
+        version=manifest.version,
+        load_order=tuple(load_order),
+        doc_types=doc_types,
+        include_glob=manifest.include_glob,
+        doc_security=doc_security,
+    )
+    save_docs_manifest(docs_dir, updated)
+    return updated, target, security
+
+
+def _resolve_manifest_filename(manifest: DocsManifest, doc_id: str) -> str | None:
+    needle = doc_id.strip()
+    if not needle:
+        return None
+    if needle in manifest.load_order or needle in manifest.doc_security:
+        return needle
+    for filename, security in manifest.doc_security.items():
+        if str(security.get("doc_id") or filename) == needle:
+            return filename
+    return None

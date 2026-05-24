@@ -83,3 +83,22 @@ def evaluate_citation(
         missing_required=tuple(missing_required),
         uncited_retrieval=tuple(uncited_retrieval),
     )
+
+
+def evaluate_structured_citations(
+    *,
+    citations: list[dict[str, object]],
+    required_sources: list[str] | None = None,
+) -> CitationVerdict:
+    """L4 check using structured CitationItem list from search_docs."""
+    retrieval_sources = [
+        str(item.get("source_file", ""))
+        for item in citations
+        if isinstance(item, dict) and str(item.get("source_file", "")).strip()
+    ]
+    return evaluate_citation(
+        answer=" ".join(retrieval_sources),
+        retrieval_sources=retrieval_sources,
+        required_sources=required_sources,
+        require_all_retrieval=False,
+    )

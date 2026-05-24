@@ -81,8 +81,9 @@ def main() -> int:
     assert item_store is not None
     writer = MemoryItemWriter(item_store, policy=policy)
 
+    demo_user_id = f"user-demo-{uuid.uuid4().hex[:8]}"
     thread_a = f"ltm-a-{uuid.uuid4().hex[:8]}"
-    store.ensure_thread(thread_a, user_id="user-demo")
+    store.ensure_thread(thread_a, user_id=demo_user_id)
     run1 = _seed_completed_run(
         memory,
         store,
@@ -194,7 +195,7 @@ def main() -> int:
     pref_hit = any(item.memory_type == MemoryType.PREFERENCE for item in pref_items)
 
     checks = {
-        "run_summary_persisted": len(item_store.list_active(user_id="user-demo", thread_id=thread_a)) >= 1,
+        "run_summary_persisted": len(item_store.list_active(user_id=demo_user_id, thread_id=thread_a)) >= 1,
         "long_term_recall_in_preview": len(recalled_ids) >= 1 or len(preview.recalled_long_term) >= 1,
         "dedup_identical_goal": len(task_summaries) == 1,
         "conflict_supersede": second.action == "supersede" and old_item is not None and old_item.is_deprecated,
@@ -203,12 +204,13 @@ def main() -> int:
         "cross_thread_user_scope": len(cross_recall) >= 1,
         "importance_filter": low_importance.action == "skip",
         "preference_rule_extract": pref_hit,
-        "resolve_user_id": memory.resolve_user_id(thread_a) == "user-demo",
+        "resolve_user_id": memory.resolve_user_id(thread_a) == demo_user_id,
         "content_hash_stable": content_hash(" Hello ") == content_hash("hello"),
     }
     passed = all(checks.values())
     summary = {
         "thread_a": thread_a,
+        "demo_user_id": demo_user_id,
         "run1": run1,
         "recalled_long_term": preview.recalled_long_term,
         "conflict_actions": {"first": first.action, "second": second.action},

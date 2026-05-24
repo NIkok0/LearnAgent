@@ -27,6 +27,36 @@ PHASE4_CASE_KEYS = {
     "expect_blocked",
 }
 
+ALLOWED_QUESTION_TYPES = {"factual", "procedural", "troubleshooting", "api_lookup"}
+
+
+def _validate_optional_rag_fields(case: dict[str, Any], case_id: str, shape_errors: list[str]) -> None:
+    question_type = case.get("question_type")
+    if question_type is not None and str(question_type) not in ALLOWED_QUESTION_TYPES:
+        shape_errors.append(f"{case_id}: invalid_question_type={question_type}")
+
+    for field in ("gold_chunks", "must_not_sources"):
+        value = case.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            shape_errors.append(f"{case_id}: {field}_must_be_list")
+            continue
+        for idx, item in enumerate(value):
+            if field == "must_not_sources":
+                if not isinstance(item, str) or not str(item).strip():
+                    shape_errors.append(f"{case_id}: must_not_sources[{idx}]_must_be_non_empty_string")
+                continue
+            if not isinstance(item, dict):
+                shape_errors.append(f"{case_id}: gold_chunks[{idx}]_must_be_object")
+                continue
+            if not str(item.get("source", "")).strip():
+                shape_errors.append(f"{case_id}: gold_chunks[{idx}].source_required")
+            try:
+                int(item.get("start_line", 0))
+            except (TypeError, ValueError):
+                shape_errors.append(f"{case_id}: gold_chunks[{idx}].start_line_must_be_int")
+
 
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -39,6 +69,9 @@ def _validate_phase4_cases(cases: list[dict[str, Any]]) -> dict[str, Any]:
         missing = PHASE4_CASE_KEYS - set(case.keys())
         if missing:
             shape_errors.append(f"{case_id}: missing {sorted(missing)}")
+            continue
+        _validate_optional_rag_fields(case, case_id, shape_errors)
+        if any(err.startswith(f"{case_id}:") for err in shape_errors):
             continue
         try:
             if case.get("expect_blocked"):

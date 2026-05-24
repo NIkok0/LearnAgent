@@ -306,3 +306,33 @@ Wave1–2 已完成项见 **§0**。路线图索引：[agent-learning-guide §7]
 - 不用 EventStore 事件流重放生成 LangGraph `messages`（审计只读，不作 working 重建源）
 - 不在 checkpoint 内存储未脱敏的 secrets（工具审计仍走 `ToolResultModel.sanitized_*`）
 - 不把 RAG 全库嵌入 checkpoint（语义检索仍经 `search_docs`）
+
+---
+
+## Appendix: Consistency v2 / Debug Bundle
+
+Memory/checkpoint consistency v2 makes the dual-store boundary explicit:
+
+- EventStore keeps product facts and replayable timeline events.
+- LangGraph checkpoint keeps working-memory state.
+- LearnAgent only reconciles them with derived events; it does not rebuild checkpoint from EventStore and does not promise atomic writes across both stores.
+
+For completed runs, `ExecutionEngine` writes `checkpoint_consistency_checked` after `run_completed_meta`. The payload compares `run_completed_meta.message_count` with the current checkpoint snapshot and records read status, missing state, interrupt flag, actual/reported message counts, match result, warnings, and source event ids.
+
+Failure semantics:
+
+- checkpoint read failed: write warning event, do not reverse a completed run to failed.
+- checkpoint missing: write warning event, keep EventStore timeline readable.
+- message count mismatch: write warning event for debugging and regression tracking.
+
+Verification entry:
+
+```powershell
+E:\Conda\envs\learnagent312\python.exe scripts\verify_checkpoint_consistency_v2.py --event-store-path storage\verify-checkpoint-consistency-events.sqlite --checkpoint-path storage\verify-checkpoint-consistency-checkpoints.sqlite
+```
+
+Debug export entry:
+
+```powershell
+E:\Conda\envs\learnagent312\python.exe scripts\export_run_debug_bundle.py --event-store-path storage\learnagent-events.sqlite --checkpoint-path storage\langgraph-checkpoints.sqlite --run-id <run_id>
+```

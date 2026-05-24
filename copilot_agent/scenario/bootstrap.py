@@ -26,8 +26,19 @@ def apply_scenario_environment(scenario: LoadedScenario) -> str:
     configure_diagnosis_templates(scenario.diagnosis_templates)
     configure_session_cookie(scenario.resources.credential_cookie_name)
     bind_http_path_policy(scenario.http_path_policy)
+    _apply_rag_runtime_settings(scenario)
     _apply_mcp_process_env(scenario)
     return docs_str
+
+
+def _apply_rag_runtime_settings(scenario: LoadedScenario) -> None:
+    from copilot_agent.settings import settings
+
+    model = (scenario.resources.rag_embedding_model or "").strip()
+    if model:
+        settings.rag_embedding_model = model
+        os.environ["RAG_EMBEDDING_MODEL"] = model
+        log.info("RAG_EMBEDDING_MODEL set from scenario %s -> %s", scenario.name, model)
 
 
 def _apply_mcp_process_env(scenario: LoadedScenario) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from copilot_agent.scenario.router.decision import RouteDecision
 from copilot_agent.scenario.router.schema import (
     MatchExpr,
     RouterRule,
@@ -34,6 +35,19 @@ class RouterEngine:
         confirm_dangerous: bool = False,
         allow_job_post: bool = False,
     ) -> ToolRoute:
+        return self.route_detailed(
+            query,
+            confirm_dangerous=confirm_dangerous,
+            allow_job_post=allow_job_post,
+        ).route
+
+    def route_detailed(
+        self,
+        query: str,
+        *,
+        confirm_dangerous: bool = False,
+        allow_job_post: bool = False,
+    ) -> RouteDecision:
         text = query.strip()
         ctx = _EvalContext(
             text=text,
@@ -45,26 +59,38 @@ class RouterEngine:
 
         if not text:
             empty = self._rules.empty_query or self._rules.defaults
-            return ToolRoute(
-                kind=empty.kind,
-                recommended_tools=tuple(empty.recommended_tools),
-                forbidden_tools=tuple(empty.forbidden_tools),
-                suggested_paths=tuple(empty.suggested_paths),
-                rationale=empty.rationale or "Empty query; default to documentation search if needed.",
+            return RouteDecision(
+                route=ToolRoute(
+                    kind=empty.kind,
+                    recommended_tools=tuple(empty.recommended_tools),
+                    forbidden_tools=tuple(empty.forbidden_tools),
+                    suggested_paths=tuple(empty.suggested_paths),
+                    rationale=empty.rationale or "Empty query; default to documentation search if needed.",
+                ),
+                matched_rule_id="empty_query",
+                used_defaults=False,
             )
 
         for rule in self._rules.rules:
             if rule.when is not None and not _eval_expr(rule.when, ctx, self._rules.predicates):
                 continue
-            return self._materialize(rule, ctx)
+            return RouteDecision(
+                route=self._materialize(rule, ctx),
+                matched_rule_id=rule.id,
+                used_defaults=False,
+            )
 
         fallback = self._rules.defaults
-        return ToolRoute(
-            kind=fallback.kind,
-            recommended_tools=tuple(fallback.recommended_tools),
-            forbidden_tools=tuple(fallback.forbidden_tools),
-            suggested_paths=tuple(fallback.suggested_paths),
-            rationale=fallback.rationale or "Static platform documentation question; use search_docs only.",
+        return RouteDecision(
+            route=ToolRoute(
+                kind=fallback.kind,
+                recommended_tools=tuple(fallback.recommended_tools),
+                forbidden_tools=tuple(fallback.forbidden_tools),
+                suggested_paths=tuple(fallback.suggested_paths),
+                rationale=fallback.rationale or "Static platform documentation question; use search_docs only.",
+            ),
+            matched_rule_id=None,
+            used_defaults=True,
         )
 
     def _materialize(self, rule: RouterRule, ctx: _EvalContext) -> ToolRoute:

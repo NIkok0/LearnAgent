@@ -88,6 +88,47 @@ async def _wait_for_status(store: EventStore, run_id: str, statuses: set[str], *
     return store.get_run(run_id) or {}
 
 
+def _verify_sequence_monotonic(store: EventStore, run_id: str) -> bool:
+    events = store.list_run_events(run_id)
+    sequences = [int(event.get("sequence") or 0) for event in events if event.get("sequence") is not None]
+    if len(sequences) < 2:
+        return True
+    return all(sequences[index] == sequences[index - 1] + 1 for index in range(1, len(sequences)))
+
+
+def _verify_tool_end_idempotent(store: EventStore, run_id: str) -> bool:
+    seen: set[str] = set()
+    for event in store.list_run_events(run_id):
+        if event.get("type") != "tool_end":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        call_id = str(payload.get("call_id") or "")
+        if not call_id:
+            continue
+        if call_id in seen:
+            return False
+        seen.add(call_id)
+    if not seen:
+        return False
+    call_id = next(iter(seen))
+    run = store.get_run(run_id) or {}
+    thread_id = str(run.get("thread_id") or "")
+    duplicate = store.append_event(
+        thread_id,
+        run_id,
+        "tool_end",
+        {"name": "search_docs", "call_id": call_id, "result": {"success": True}, "success": True},
+    )
+    first_id = duplicate.get("id")
+    second = store.append_event(
+        thread_id,
+        run_id,
+        "tool_end",
+        {"name": "search_docs", "call_id": call_id, "result": {"success": True}, "success": True},
+    )
+    return first_id == second.get("id")
+
+
 async def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     store = EventStore(str(event_store_path))
     manager = ExecutionEngine(event_store=store, runner=FakeRunner(store))  # type: ignore[arg-type]
@@ -246,6 +287,7 @@ def main() -> int:
 
     event_store_path = Path(args.event_store_path).resolve()
     event_store_path.parent.mkdir(parents=True, exist_ok=True)
+    store = EventStore(str(event_store_path))
     summary = asyncio.run(verify(event_store_path, args.thread_prefix))
 
     ok_completed = (
@@ -284,7 +326,20 @@ def main() -> int:
         and summary["failed"]["timeline_failed_meta"].get("reason") == "runtime_exception"
         and summary["failed"]["timeline_consistency"].get("ok") is True
     )
-    passed = ok_completed and ok_cancelled and ok_approved and ok_rejected and ok_archived and ok_failed
+    sequence_ok = _verify_sequence_monotonic(store, summary["completed"]["run_id"])
+    idempotent_ok = _verify_tool_end_idempotent(store, summary["completed"]["run_id"])
+    passed = (
+        ok_completed
+        and ok_cancelled
+        and ok_approved
+        and ok_rejected
+        and ok_archived
+        and ok_failed
+        and sequence_ok
+        and idempotent_ok
+    )
+    summary["sequence_monotonic"] = sequence_ok
+    summary["tool_end_idempotent"] = idempotent_ok
     summary["runtime_execution_engine"] = "PASS" if passed else "FAIL"
 
     summary_path = Path(args.summary_json).resolve()
@@ -307,6 +362,8 @@ def main() -> int:
     print(f"failed_meta_reason={summary['failed']['failed_meta'].get('reason')}")
     print(f"failed_meta_last_successful_event_id={summary['failed']['failed_meta'].get('last_successful_event_id')}")
     print(f"failed_consistency_ok={summary['failed']['timeline_consistency'].get('ok')}")
+    print(f"sequence_monotonic={summary.get('sequence_monotonic')}")
+    print(f"tool_end_idempotent={summary.get('tool_end_idempotent')}")
     print(f"summary_json={summary_path}")
     print(f"runtime_execution_engine={summary['runtime_execution_engine']}")
 

@@ -28,9 +28,18 @@ class ApiPathHintData(BaseModel):
     score: float = 1.0
 
 
+class CitationItem(BaseModel):
+    source_file: str
+    heading_path: str | None = None
+    start_line: int = 0
+    chunk_id: str = ""
+    authority: int | None = None
+
+
 class SearchDocsToolData(BaseModel):
     excerpts_markdown: str | None = None
     sources: list[str] = Field(default_factory=list)
+    citations: list[CitationItem] = Field(default_factory=list)
     suggested_api_paths: list[ApiPathHintData] = Field(default_factory=list)
 
 

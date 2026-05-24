@@ -12,7 +12,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.scenario import load_scenario  # noqa: E402
+from copilot_agent.agent.tool_route_merge import merge_api_paths_into_route  # noqa: E402
 from copilot_agent.scenario.router import route_tools, tool_allowed  # noqa: E402
+from copilot_agent.scenario.router.types import ToolRoute  # noqa: E402
 
 
 def _assert(name: str, ok: bool) -> None:
@@ -73,6 +75,57 @@ def main() -> int:
 
     contract = route_tools("POST /api/v1/jobs/watermark 默认 algorithmType 是什么？", engine=engine)
     _assert("contract question knowledge", contract.kind == "knowledge")
+
+    merged, changed = merge_api_paths_into_route(
+        ToolRoute(
+            kind="troubleshooting",
+            recommended_tools=("search_docs", "http_get"),
+            forbidden_tools=("http_post",),
+            suggested_paths=("/actuator/health",),
+            rationale="test",
+        ),
+        ["/api/v1/jobs/22222222-2222-4222-8222-222222222222"],
+    )
+    _assert("path merge adds retrieval hint", changed)
+    _assert(
+        "path merge keeps prior paths",
+        "/actuator/health" in merged.suggested_paths
+        and "/api/v1/jobs/22222222-2222-4222-8222-222222222222" in merged.suggested_paths,
+    )
+
+    defaults_query = "介绍一下水印平台的核心模块架构"
+    baseline = engine.route(defaults_query)
+    decision = engine.route_detailed(defaults_query)
+    _assert("defaults query uses rule fallback", decision.used_defaults)
+    _assert("defaults query is knowledge", baseline.kind == "knowledge")
+
+    async def _mock_live_classifier(_query: str, _baseline: ToolRoute) -> dict:
+        return {
+            "kind": "live_status",
+            "recommended_tools": ["http_get"],
+            "suggested_paths": ["/actuator/health"],
+            "rationale": "Needs live health check",
+        }
+
+    import asyncio
+
+    from copilot_agent.scenario.router.llm_fallback import refine_route_with_llm  # noqa: E402
+    from copilot_agent.settings import settings  # noqa: E402
+
+    original_fallback = settings.agent_tool_route_llm_fallback
+    settings.agent_tool_route_llm_fallback = True
+    try:
+        refined = asyncio.run(
+            refine_route_with_llm(
+                defaults_query,
+                baseline,
+                classifier=_mock_live_classifier,
+            )
+        )
+    finally:
+        settings.agent_tool_route_llm_fallback = original_fallback
+    _assert("llm fallback upgrades kind", refined.kind == "live_status")
+    _assert("llm fallback recommends http_get", "http_get" in refined.recommended_tools)
 
     print("verify_tool_router=PASS")
     return 0

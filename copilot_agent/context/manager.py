@@ -14,11 +14,13 @@ from copilot_agent.context.packing import pack_graph_messages
 from copilot_agent.context.preretrieval import preretrieve_docs
 from copilot_agent.contracts.adapters.tool_rag import RagSearchAdapter
 from copilot_agent.contracts.context import ContextBundle
+from copilot_agent.credentials import CredentialManager
 from copilot_agent.memory import MemoryManager
 from copilot_agent.runtime.event_schema import EVENT_CONTEXT_BUILT, EVENT_RETRIEVAL_COMPLETED
 from copilot_agent.scenario.loader import LoadedScenario
 from copilot_agent.scenario.router import RouterEngine
 from copilot_agent.scenario.router.types import ToolRoute, build_route_system_message
+from copilot_agent.rag.request_context import retrieval_defaults_from_scenario
 from copilot_agent.settings import settings
 from copilot_agent.tools.registry import ToolRegistry
 
@@ -34,6 +36,7 @@ class ContextManager:
         tool_registry: ToolRegistry,
         router_engine: RouterEngine | None = None,
         graph: Any | None = None,
+        credential_manager: CredentialManager | None = None,
     ) -> None:
         self._scenario = scenario
         self._memory = memory
@@ -41,6 +44,7 @@ class ContextManager:
         self._router = router_engine or scenario.router_engine
         self._graph = graph
         self._system_prompt = scenario.system_prompt
+        self._credential_manager = credential_manager
 
     def bind_graph(self, graph: Any) -> None:
         self._graph = graph
@@ -61,11 +65,32 @@ class ContextManager:
         allow_job_post: bool | None = None,
     ) -> ToolRoute:
         allow = settings.copilot_allow_job_post if allow_job_post is None else allow_job_post
-        return self._router.route(
+        return self._router.route_detailed(
+            goal,
+            confirm_dangerous=confirm_dangerous,
+            allow_job_post=allow,
+        ).route
+
+    async def resolve_route(
+        self,
+        goal: str,
+        *,
+        confirm_dangerous: bool = False,
+        allow_job_post: bool | None = None,
+        classifier: Any | None = None,
+    ) -> ToolRoute:
+        allow = settings.copilot_allow_job_post if allow_job_post is None else allow_job_post
+        decision = self._router.route_detailed(
             goal,
             confirm_dangerous=confirm_dangerous,
             allow_job_post=allow,
         )
+        route = decision.route
+        if settings.agent_tool_route_llm_fallback and decision.used_defaults:
+            from copilot_agent.scenario.router.llm_fallback import refine_route_with_llm
+
+            route = await refine_route_with_llm(goal, route, classifier=classifier)
+        return route
 
     def route_system_message(self, route: ToolRoute) -> SystemMessage | None:
         if not settings.agent_tool_route_enabled:
@@ -151,7 +176,7 @@ class ContextManager:
         policy = self._memory.policy
         memory_inject_chars = self._memory_inject_chars(memory_dict)
 
-        route = self.plan_route(goal, confirm_dangerous=confirm_dangerous, allow_job_post=allow_job_post)
+        route = await self.resolve_route(goal, confirm_dangerous=confirm_dangerous, allow_job_post=allow_job_post)
         route_message = self.route_system_message(route)
 
         hits, rag_message, retrieved_context, pr_meta = preretrieve_docs(
@@ -160,6 +185,12 @@ class ContextManager:
             route=route,
             budget_chars=budget_max,
             thread_id=thread_id,
+            retrieval_defaults=retrieval_defaults_from_scenario(
+                self._scenario,
+                credential_manager=self._credential_manager,
+                thread_id=thread_id,
+                user_id=self._memory.resolve_user_id(thread_id) if thread_id else "",
+            ),
         )
         if hits and run_id and settings.context_emit_built_event:
             self._memory.append_event(
@@ -260,7 +291,7 @@ class ContextManager:
         if settings.agent_tool_route_enabled:
             return {
                 "goal": goal,
-                "strategy": "tool_grounded_react",
+                "strategy": "route_first_react",
                 "tool_route": route.as_dict(),
                 "available_tools": self._tool_registry.public_specs(),
             }

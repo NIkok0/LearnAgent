@@ -48,6 +48,7 @@ class DocChunk(BaseModel):
     pii_level: str = "none"
     source_hash: str = ""
     retention_policy: str = "default"
+    authority: int = 50
 
     @property
     def key(self) -> tuple[str, int]:
