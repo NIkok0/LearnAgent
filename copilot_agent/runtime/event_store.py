@@ -702,6 +702,29 @@ class EventStore:
             limit=limit,
         )
 
+    def find_latest_event_by_type_and_payload(
+        self,
+        event_type: str,
+        *,
+        payload_key: str,
+        payload_value: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        sql = "SELECT * FROM events WHERE type = ?"
+        params: list[Any] = [event_type]
+        if run_id:
+            sql += " AND run_id = ?"
+            params.append(run_id)
+        sql += " ORDER BY id DESC"
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        for row in rows:
+            event = _event_row_to_dict(row)
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get(payload_key) or "") == payload_value:
+                return event
+        return None
+
     def latest_run_event_id(self, run_id: str) -> int | None:
         with self._lock, self._connect() as conn:
             row = conn.execute(

@@ -50,6 +50,18 @@ jobs:
       - name: Run eval rag profile
         run: python scripts/verify_eval_suite.py --profile rag --summary-json artifacts/eval/eval-rag-summary.json
 
+      - name: Run live LLM E2E acceptance
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            python scripts/verify_live_llm_e2e_acceptance.py --require-live --message "hello agent"
+          else
+            python scripts/verify_live_llm_e2e_acceptance.py --message "hello agent"
+          fi
+
       - name: Build eval job summary
         if: always()
         run: |
@@ -64,7 +76,11 @@ jobs:
 
           core = load(Path("artifacts/eval/eval-suite-summary.json"))
           rag = load(Path("artifacts/eval/eval-rag-summary.json"))
+          live = load(Path("artifacts/runtime/live-llm-e2e-acceptance-summary.json"))
           overall = bool(core.get("overall_pass", False) and rag.get("overall_pass", False))
+          live_status = live.get("status", "MISSING")
+          if live_status == "FAIL":
+              overall = False
           lines = [
               "## LearnAgent CI Summary",
               f"- overall_pass: {overall}",
@@ -82,6 +98,13 @@ jobs:
               f"- suites_failed: {rag.get('suites_failed')}",
               f"- failed_suites: {', '.join(rag.get('failed_suites', [])) or '(none)'}",
               f"- skipped_suites: {', '.join(rag.get('skipped_suites', [])) or '(none)'}",
+              "",
+              "### live_llm_e2e_acceptance",
+              f"- status: {live_status}",
+              f"- provider: {live.get('provider')}",
+              f"- model: {live.get('model')}",
+              f"- base_url: {live.get('base_url')}",
+              f"- reason: {live.get('reason', '')}",
           ]
           summary_file = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"])
           summary_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -97,6 +120,7 @@ jobs:
           path: |
             artifacts/eval/eval-suite-summary.json
             artifacts/eval/eval-rag-summary.json
+            artifacts/runtime/live-llm-e2e-acceptance-summary.json
           if-no-files-found: warn
 
   eval_full_nightly:

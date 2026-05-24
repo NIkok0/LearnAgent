@@ -44,7 +44,13 @@ def main() -> int:
         answer="Worker may be down; see DEPLOY-SERVER.md.",
         messages=messages,
         route_kind="troubleshooting",
-        metadata={"safety_status": "safe", "output_guard_action": "allow", "citation_required": True},
+        metadata={
+            "safety_status": "safe",
+            "output_guard_action": "allow",
+            "citation_required": True,
+            "trace_id": "trace-final-answer",
+            "run_id": "run-final-answer",
+        },
     )
     missing_citation = build_final_answer(
         answer="This answer needs evidence but has none.",
@@ -74,6 +80,10 @@ def main() -> int:
         and "citation_required_but_missing" in missing_citation.contract_warnings,
         "safety_status": model.safety_status == "safe",
         "output_guard_action": model.output_guard_action == "allow",
+        "trace_run_metadata": model.metadata.get("trace_id") == "trace-final-answer"
+        and model.metadata.get("run_id") == "run-final-answer",
+        "output_guard_metadata": model.metadata.get("output_guard_action") == "allow"
+        and model.metadata.get("safety_status") == "safe",
         "structured_citations_pass": structured.passed,
     }
     passed = all(checks.values())

@@ -526,7 +526,12 @@ conda run -n learnagent312 python scripts/verify_deepseek_provider.py
 conda run -n learnagent312 python scripts/smoke_chat_api.py --message "hello agent"
 
 # Optional live provider acceptance, not default CI.
+# Requires OPENAI_API_KEY plus optional OPENAI_BASE_URL / OPENAI_MODEL.
 conda run -n learnagent312 python scripts/verify_live_llm_e2e_acceptance.py --require-live --message "hello agent"
+
+# RAG compliance lifecycle: ingest/delete audit + deletion proof export.
+conda run -n learnagent312 python scripts/verify_rag_document_lifecycle_v1.py
+conda run -n learnagent312 python scripts/export_rag_deletion_proof.py --doc-id <doc_id>
 ```
 
 ---

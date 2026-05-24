@@ -464,6 +464,8 @@ class GraphEventMapper:
                     "output_guard_action": guard_payload.get("action"),
                     "output_guard": guard_payload,
                     "citation_required": settings.private_rag_require_citations,
+                    "trace_id": trace_id,
+                    "run_id": run_id,
                 },
             )
             done_payload["final_answer"] = final_answer.model_dump()

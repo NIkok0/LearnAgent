@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -38,12 +39,18 @@ def verify_live(
             "ok": False,
             "skipped": not require_live,
             "reason": "OPENAI_API_KEY_not_set",
+            "provider": "openai-compatible",
+            "model": settings.openai_model,
+            "base_url": settings.openai_base_url,
         }
 
     settings.agent_event_store_path = str(event_store_path)
     settings.agent_checkpoint_path = str(checkpoint_path)
     settings.observability_provider = "none"
     settings.langfuse_enabled = False
+    settings.copilot_capabilities = "rag,http"
+    os.environ["COPILOT_CAPABILITIES"] = "rag,http"
+    os.environ.setdefault("SCENARIO", "minimal")
 
     try:
         from fastapi.testclient import TestClient  # noqa: PLC0415
@@ -56,6 +63,9 @@ def verify_live(
             "ok": False,
             "skipped": not require_live,
             "reason": reason,
+            "provider": "openai-compatible",
+            "model": settings.openai_model,
+            "base_url": settings.openai_base_url,
         }
 
     with TestClient(server_module.app) as client:
@@ -68,7 +78,8 @@ def verify_live(
             },
             timeout=90,
         )
-        sse = _parse_sse(response.text)
+        response_text = response.text
+        sse = _parse_sse(response_text)
         meta = next((item["data"] for item in sse if item["event"] == "meta"), {})
         run_id = str(meta.get("run_id") or "")
         timeline_response = client.get(f"/v1/runs/{run_id}/timeline", timeout=30) if run_id else None
@@ -114,9 +125,13 @@ def verify_live(
         "status": "PASS" if ok else "FAIL",
         "ok": ok,
         "skipped": False,
+        "provider": "openai-compatible",
+        "model": settings.openai_model,
+        "base_url": settings.openai_base_url,
         "thread_id": thread_id,
         "run_id": run_id,
         "http_status": response.status_code,
+        "http_error_body": response_text[:1000] if response.status_code >= 400 else "",
         "checks": checks,
         "sse_event_types": sse_types,
         "persisted_event_types": event_types,

@@ -24,9 +24,18 @@ from copilot_agent.credentials import CredentialManager
 from copilot_agent.observability import flush_observability, provider_configured
 from copilot_agent.rag import RagStoreManager
 from copilot_agent.rag.docs_manifest import register_uploaded_file
-from copilot_agent.rag.document_lifecycle import delete_rag_document, list_rag_documents
+from copilot_agent.rag.document_lifecycle import (
+    build_ingest_result,
+    delete_rag_document,
+    document_source_hash,
+    list_rag_documents,
+)
 from copilot_agent.rag.ingest import repo_docs_dir
-from copilot_agent.runtime.event_schema import EVENT_RAG_DOCUMENT_DELETED
+from copilot_agent.runtime.event_schema import (
+    EVENT_RAG_DOCUMENT_DELETE_PROOF,
+    EVENT_RAG_DOCUMENT_DELETED,
+    EVENT_RAG_DOCUMENT_INGESTED,
+)
 from copilot_agent.runtime.checkpoint_store import CheckpointStore
 from copilot_agent.runtime.event_store import (
     THREAD_END_REASON_BROWSER_CLOSE,
@@ -259,8 +268,22 @@ def rag_delete_document(doc_id: str, reason: str = "api_delete") -> dict[str, ob
     if result.vector_delete_attempted and not result.vector_delete_success:
         _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETED, result.audit_payload())
         raise HTTPException(status_code=500, detail={"error": "vector delete failed", **result.audit_payload()})
-    _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETED, result.audit_payload())
+    delete_event = _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETED, result.audit_payload())
+    proof_payload = result.proof_payload(delete_event_id=int(delete_event.get("id") or 0) or None)
+    _append_rag_audit_event(EVENT_RAG_DOCUMENT_DELETE_PROOF, proof_payload)
     return {"deleted": result.as_response()}
+
+
+@app.get("/v1/rag/documents/{doc_id}/deletion-proof")
+def rag_document_deletion_proof(doc_id: str) -> dict[str, object]:
+    event = event_store.find_latest_event_by_type_and_payload(
+        EVENT_RAG_DOCUMENT_DELETE_PROOF,
+        payload_key="doc_id",
+        payload_value=doc_id,
+    )
+    if event is None:
+        raise HTTPException(status_code=404, detail="deletion proof not found")
+    return {"proof": event.get("payload") or {}, "event": event}
 
 
 _UPLOAD_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.md$")
@@ -269,9 +292,12 @@ _UPLOAD_FILENAME = re.compile(r"^[A-Za-z0-9._-]+\.md$")
 @app.post("/v1/rag/upload")
 async def rag_upload(
     file: UploadFile = File(...),
-    tenant_id: str = Form("default"),
-    classification: str = Form("internal"),
+    tenant_id: str = Form(""),
+    classification: str = Form(""),
     acl: str = Form(""),
+    doc_id: str = Form(""),
+    pii_level: str = Form("none"),
+    retention_policy: str = Form("default"),
 ) -> dict[str, object]:
     manager = _require_rag_manager()
     base = repo_docs_dir()
@@ -287,23 +313,27 @@ async def rag_upload(
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="upload must be UTF-8 markdown") from exc
+    source_hash = document_source_hash(text)
+    parsed_acl = _parse_upload_acl(acl)
     security: dict[str, object] = {
-        "tenant_id": tenant_id.strip() or "default",
-        "classification": classification.strip() or "internal",
-        "acl": [],
+        "doc_id": _require_rag_meta("doc_id", doc_id),
+        "tenant_id": _require_rag_meta("tenant_id", tenant_id),
+        "classification": _validate_choice(
+            "classification",
+            classification,
+            {"public", "internal", "confidential", "secret"},
+        ),
+        "pii_level": _validate_choice("pii_level", pii_level, {"none", "low", "medium", "high"}),
+        "retention_policy": _require_rag_meta("retention_policy", retention_policy),
+        "source_hash": source_hash,
+        "acl": parsed_acl,
     }
-    if acl.strip():
-        try:
-            parsed_acl = json.loads(acl)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail="acl must be a JSON array string") from exc
-        if not isinstance(parsed_acl, list):
-            raise HTTPException(status_code=400, detail="acl must be a JSON array")
-        security["acl"] = [str(item) for item in parsed_acl]
     (base / filename).write_text(text, encoding="utf-8")
     register_uploaded_file(base, filename, security=security)
     status = manager.reload(trigger="api")
-    return {"uploaded": filename, "rag": status, "doc_security": security}
+    result = build_ingest_result(filename=filename, security=security, text=text, rag_status=status, docs_dir=base)
+    _append_rag_audit_event(EVENT_RAG_DOCUMENT_INGESTED, result.audit_payload())
+    return {"uploaded": filename, "ingested": result.as_response(), "doc_security": security}
 
 
 def _require_execution_engine() -> ExecutionEngine:
@@ -312,7 +342,7 @@ def _require_execution_engine() -> ExecutionEngine:
     return execution_engine
 
 
-def _append_rag_audit_event(event_type: str, payload: dict[str, object]) -> None:
+def _append_rag_audit_event(event_type: str, payload: dict[str, object]) -> dict[str, object]:
     thread_id = "__rag_audit__"
     run_id = "__rag_audit__"
     event_store.ensure_thread(thread_id, title="RAG audit")
@@ -322,7 +352,37 @@ def _append_rag_audit_event(event_type: str, payload: dict[str, object]) -> None
         event_store.update_run_status(run_id, "running")
         event_store.append_event(thread_id, run_id, "done", {"audit": True})
         event_store.complete_run(run_id)
-    event_store.append_event(thread_id, run_id, event_type, payload)
+    return event_store.append_event(thread_id, run_id, event_type, payload)
+
+
+def _require_rag_meta(name: str, value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail=f"{name} is required")
+    return text
+
+
+def _validate_choice(name: str, value: str, allowed: set[str]) -> str:
+    text = _require_rag_meta(name, value).lower()
+    if text not in allowed:
+        raise HTTPException(status_code=400, detail=f"{name} must be one of {sorted(allowed)}")
+    return text
+
+
+def _parse_upload_acl(raw_acl: str) -> list[str]:
+    text = str(raw_acl or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="acl is required")
+    try:
+        parsed_acl = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="acl must be a JSON array string") from exc
+    if not isinstance(parsed_acl, list) or not parsed_acl:
+        raise HTTPException(status_code=400, detail="acl must be a non-empty JSON array")
+    acl = [str(item).strip() for item in parsed_acl if str(item).strip()]
+    if not acl:
+        raise HTTPException(status_code=400, detail="acl must include at least one non-empty item")
+    return acl
 
 
 def _reject_inactive_thread(thread_id: str) -> None:
