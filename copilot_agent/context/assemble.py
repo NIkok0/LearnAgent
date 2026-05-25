@@ -5,8 +5,9 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from copilot_agent.context.memory_inject import memory_context_messages
-from copilot_agent.memory.policy import EPISODIC_MEMORY_PREFIX, MemoryPolicyConfig
+from copilot_agent.memory.injection_render import EPISODIC_MEMORY_PREFIX, MEMORY_CONTEXT_PREFIX
 from copilot_agent.memory.item_schema import LONG_TERM_MEMORY_PREFIX
+from copilot_agent.memory.policy_config import MemoryPolicyConfig
 
 
 async def checkpoint_has_prior_turns(graph: Any, thread_id: str) -> bool:
@@ -47,6 +48,9 @@ def _memory_message_seen(existing: set[str], content: str) -> bool:
         return True
     for prior in existing:
         if prior.startswith(EPISODIC_MEMORY_PREFIX) and text.startswith(EPISODIC_MEMORY_PREFIX):
+            if prior == text:
+                return True
+        if prior.startswith(MEMORY_CONTEXT_PREFIX) and text.startswith(MEMORY_CONTEXT_PREFIX):
             if prior == text:
                 return True
         if prior.startswith(LONG_TERM_MEMORY_PREFIX) and text.startswith(LONG_TERM_MEMORY_PREFIX):

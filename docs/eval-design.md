@@ -11,7 +11,7 @@
 |---|---|---|
 | 聚合入口 | ✅ | `verify_eval_suite.py` |
 | PR 门禁 | ✅ | `--profile core` + `--profile rag` |
-| K/C/S Contract 套件 | ✅ | 9 项在 `CONTRACT_SUITES` |
+| K/C/S Contract 套件 | ✅ | 套件清单见 `CONTRACT_SUITES` |
 | L5 工具轨迹 | ✅ | `phase4_tool_trajectory`（28 case） |
 | Demo golden proxy | ✅ | `--profile e2e` |
 | RAGAS PR 硬门禁 | ❌ | Nightly E2E RAGAS ✅（`verify_rag_e2e_ragas`）；PR 仍 proxy |
@@ -42,29 +42,29 @@
                          │
      ┌───────────────────┼───────────────────┐
      ▼                   ▼                   ▼
- core-fast (13)      core (21)          rag (11)
+ core-fast           core               rag
  本地快检            PR 门禁之一          PR 门禁之二
      │                   │                   │
  Contract 快集      Contract 全量         RAG + L5 + 路由
  Runtime 核心       Runtime/Memory        ingest/citation
  Phase3/4 部分      Golden + Legacy       hot_reload/rerank
                          │
-                    e2e (1) ──► full (39) = core + rag + nightly + e2e
+                    e2e ──► full = core + rag + nightly + e2e
 ```
 
 ---
 
 ## 3. Profile 定义
 
-| Profile | 套件数 | 用途 | CI |
-|---|---:|---|---|
-| `core-fast` | 13 | 本地快检 | ❌ |
-| `core` | 21 | Contract + Runtime + Memory + Golden + Legacy | ✅ PR |
-| `rag` | 15 | RAG + Tool-grounded + L5 轨迹 | ✅ PR |
-| `e2e` | 1 | Demo 1–6 golden proxy | Nightly（full） |
-| `full` | 39 | 发版 / 夜跑（含 `phase4_ragas_nightly` + **`rag_e2e_ragas`**） | ✅ schedule |
+| Profile | 用途 | CI |
+|---|---|---|
+| `core-fast` | 本地快检 | ❌ |
+| `core` | Contract + Runtime + Memory + Golden + Legacy | ✅ PR |
+| `rag` | RAG + Tool-grounded + L5 轨迹 | ✅ PR |
+| `e2e` | Demo 1–6 golden proxy | Nightly（full） |
+| `full` | 发版 / 夜跑（含 `phase4_ragas_nightly` + **`rag_e2e_ragas`**） | ✅ schedule |
 
-**套件枚举与本地命令**（SSOT）：[ci-design.md](./ci-design.md) §3–§7；最短操作入口：[README.md](../README.md) §6。
+**套件数量、枚举与本地命令**（SSOT）：[ci-design.md](./ci-design.md) §3–§7；最短操作入口：[README.md](../README.md) §6。
 
 ---
 
@@ -78,7 +78,7 @@
 - `ToolResultModel` 审计字段
 - eval JSON 与事件 kind 可解析
 
-**K/C/S 专项**（均在 `core` 的 `CONTRACT_SUITES`）：
+**K/C/S 专项**（均在 `core` 的 `CONTRACT_SUITES`；完整列表见 [ci-design.md](./ci-design.md)）：
 
 | 套件 | 职责 |
 |---|---|
@@ -107,13 +107,15 @@ EventStore、Timeline、ExecutionEngine、Session、Memory 的确定性行为：
 
 | 类型 | 代表套件 | 与单测脚本关系 |
 |---|---|---|
-| 检索质量 | `phase4_ragas`、`phase4_ragas_nightly`、`rag_retrieval_quality` | PR 稀疏；Nightly 向量+rerank |
+| 检索质量 | `phase4_ragas`、`phase4_ragas_nightly`、`rag_domain` | PR 稀疏；Nightly 向量+rerank |
 | 路由分类 | `tool_router` | 28 case，**不跑图** |
 | 工具轨迹 | `phase4_tool_trajectory` | 28 case，**跑完整 L5 图** |
-| Ingest / 引用 | `rag_api_ingest`、`citation_l4` | |
+| Ingest / 引用 | `rag_domain`、`citation_l4` | |
 | 运维 | `rag_hot_reload`、`rag_rerank` | 可 SKIP 段 |
 
 **分工**：`tool_router` = 路由决策；`phase4_tool_trajectory` = 路由 + safety_gate + 工具执行序列。
+
+**RAG 脚本治理**：轻量 deterministic RAG case 优先加入 `verify_rag_domain.py`。只有生命周期、RAGAS/vector、Private RAG guard、完整 Agent trajectory 这类边界更重的验证才新增独立脚本；旧单 case RAG wrapper 已合并到 `verify_rag_domain.py --case <case>`。
 
 ---
 
@@ -158,6 +160,8 @@ PR 跑两次 profile 时，rag 使用独立路径：`artifacts/eval/eval-rag-sum
 
 - 默认 `--suite-timeout-seconds=180`
 - 部分脚本逻辑 PASS 但进程未退出时，聚合层可能记 `timeout_after_pass_signal`（仍可按 PASS 处理）
+- 聚合层会兼容 `TimeoutExpired.stdout/stderr` 的 bytes / str 输出，避免超时处理二次崩溃。
+- `verify_phase4_ragas.py --mode auto` 对 RAGAS 使用软超时；超时只记录 warning 并回退 proxy。
 
 ---
 
@@ -197,7 +201,7 @@ Demo 1–6；由 `demo_golden_e2e`（e2e profile）校验。
 | 方案 | 角色 |
 |---|---|
 | 自研 `verify_*` | **主门禁** |
-| RAGAS | RAG 专项；full + `--enable-ragas` |
+| RAGAS | RAG 专项；full + `--enable-ragas` 仅让 `phase4_ragas` 进入 auto；RAGAS 超时/外部失败回退 proxy |
 | Promptfoo | 规划中的场景编排层 |
 | DeepEval / LangSmith | 可选增强，非 PR 门禁 |
 

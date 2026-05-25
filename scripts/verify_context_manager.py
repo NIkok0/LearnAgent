@@ -21,7 +21,7 @@ from copilot_agent.context.constants import RAG_PRERETRIEVAL_PREFIX  # noqa: E40
 from copilot_agent.context.preretrieval import should_preretrieve  # noqa: E402
 from copilot_agent.context.preretrieval_dedupe import apply_preretrieval_dedupe, build_preretrieval_cache  # noqa: E402
 from copilot_agent.contracts.events.registry import validate_payload_for_kind  # noqa: E402
-from copilot_agent.memory.policy import MemoryPolicyConfig  # noqa: E402
+from copilot_agent.memory.policy_config import MemoryPolicyConfig  # noqa: E402
 from copilot_agent.memory import MemoryManager  # noqa: E402
 from copilot_agent.rag import RagStore  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
@@ -115,6 +115,12 @@ async def _run_checks() -> dict[str, bool]:
         "preretrieval_cache_in_bundle": False,
         "preretrieval_dedupe_skips_duplicate": False,
         "checkpoint_pack_compacts_history": False,
+        "checkpoint_pack_preview_no_persist": False,
+        "context_preview_no_events": False,
+        "context_preview_marks_dry_run": False,
+        "memory_injection_explainability": False,
+        "memory_context_prompt_structured": False,
+        "memory_context_keeps_current_user": False,
     }
 
     cache = build_preretrieval_cache(query="水印任务一直 QUEUED 怎么排查？", hits=chunks)
@@ -137,6 +143,25 @@ async def _run_checks() -> dict[str, bool]:
     checks["checkpoint_pack_compacts_history"] = bool(pack_result.get("compacted")) and total_message_chars(
         budget_graph._messages
     ) + 300 <= 2500
+    preview_history = [
+        HumanMessage(content=f"preview question {index} " + ("p" * 400))
+        for index in range(8)
+    ]
+    preview_graph = _BudgetGraph(preview_history)
+    before_preview_count = len(preview_graph._messages)
+    preview_pack = await pack_checkpoint_for_budget(
+        preview_graph,
+        "budget-preview-thread",
+        max_total_chars=900,
+        new_turn_chars=300,
+        policy=policy,
+        persist=False,
+    )
+    checks["checkpoint_pack_preview_no_persist"] = (
+        bool(preview_pack.get("compacted"))
+        and preview_pack.get("persisted") is False
+        and len(preview_graph._messages) == before_preview_count
+    )
 
     packed = pack_graph_messages(
         [
@@ -159,6 +184,27 @@ async def _run_checks() -> dict[str, bool]:
         bundle.truncation_report.get("preretrieval_enabled")
     )
     checks["preretrieval_cache_in_bundle"] = isinstance(bundle.truncation_report.get("preretrieval_cache"), dict)
+    checks["memory_injection_explainability"] = any(
+        item.get("kind") == "episodic" and "dropped_conflicts" in item
+        for item in bundle.memory_injections
+        if isinstance(item, dict)
+    ) and any(
+        item.get("kind") == "long_term" and item.get("pending_excluded") is True
+        for item in bundle.memory_injections
+        if isinstance(item, dict)
+    )
+    memory_messages = [
+        str(getattr(message, "content", "") or "")
+        for message in bundle.graph_messages
+        if isinstance(message, SystemMessage) and str(getattr(message, "content", "") or "").startswith("[MemoryContext]")
+    ]
+    checks["memory_context_prompt_structured"] = not memory_messages or all(
+        "Rules:" in content and "Prefer current user message" in content for content in memory_messages
+    )
+    checks["memory_context_keeps_current_user"] = any(
+        isinstance(message, HumanMessage) and "QUEUED" in str(getattr(message, "content", "") or "")
+        for message in bundle.graph_messages
+    )
 
     events = event_store.list_events(thread_id, run_id=run_id)
     context_events = [event for event in events if event.get("type") == "context_built"]
@@ -170,6 +216,20 @@ async def _run_checks() -> dict[str, bool]:
             checks["context_built_payload_valid"] = True
         except Exception:
             checks["context_built_payload_valid"] = False
+
+    before_preview_events = len(event_store.list_events(thread_id))
+    preview_bundle = await ctx.preview(
+        thread_id=thread_id,
+        turn_messages=[HumanMessage(content="preview QUEUED task context")],
+        goal="preview QUEUED task context",
+    )
+    after_preview_events = len(event_store.list_events(thread_id))
+    checks["context_preview_no_events"] = before_preview_events == after_preview_events
+    checks["context_preview_marks_dry_run"] = (
+        preview_bundle.run_id is None
+        and preview_bundle.truncation_report.get("dry_run") is True
+        and (preview_bundle.truncation_report.get("side_effects") or {}).get("event_store_written") is False
+    )
 
     prior_graph = _BudgetGraph(
         [

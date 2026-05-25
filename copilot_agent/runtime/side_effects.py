@@ -83,6 +83,7 @@ def _side_effect_item(event: dict[str, Any], payload: dict[str, Any]) -> dict[st
         "idempotency_reused": bool(payload.get("idempotency_reused", False)),
         "compensatable": bool(payload.get("compensatable", False)),
         "reason": payload.get("reason"),
+        "policy_trace_id": payload.get("policy_trace_id"),
     }
 
 

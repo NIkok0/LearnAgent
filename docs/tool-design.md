@@ -21,7 +21,7 @@
 | MCP 动态工具注册 | ✅ 已实现 | `tools/extensions/mcp/` · `McpCapability` |
 | `search_docs` / `http_get` / `http_post` | ✅ 已实现 | `tools/capability/{rag,http}.py` |
 | shell / git Capability pack | ❌ 待建 | 见 **§5** · [guide §2.8](./agent-learning-guide.md) |
-| `ToolSpec.timeout_seconds` 强制 | ⚠️ 部分 | 声明已有；ExecutionEngine 强制见 [guardrail §5](./guardrail-policy-design.md) |
+| `ToolSpec.timeout_seconds` 强制 | ✅ 已实现 | `tools/registry.py` `asyncio.wait_for`；`verify_tool_execution_reliability.py` |
 
 ### Tool-grounded 编排（M06）
 
@@ -38,6 +38,7 @@
 | L5 工具轨迹 proxy 评测（28 case） | ✅ 已实现 | `verify_phase4_tool_trajectory.py`，`eval/tool_trajectory.py` |
 | 路由单元测试（28 case 分类） | ✅ 已实现 | `verify_tool_router.py` |
 | **检索结果 → API path 结构化注入** | ✅ 已实现 | `rag/api_paths.py` + ingest `api_endpoint`；`suggested_api_paths` / `api_field_hints` |
+| **检索 path merge → `tool_route.suggested_paths`** | ✅ 已实现 | `agent/tool_route_merge.py` + `nodes.py` `plan_updated{update_reason:path_merge}` |
 | **排障结构化诊断模板**（QUEUED / PROCESSING / FAILED） | ✅ 已实现 | `agent/diagnosis.py`；`AGENT_DIAGNOSIS_TEMPLATE_ENABLED` |
 | **`retrieval_completed.call_id` 与 tool 关联** | ✅ 已实现 | `agent/tool_call_context.py`，`event_mapper.py`，`tool_handlers.py` |
 | **Demo 1–6 golden E2E（proxy）** | ✅ 已实现 | `verify_demo_golden_e2e.py` |
@@ -440,7 +441,7 @@ assistant 下一轮 http_get 优先使用 suggested_api_paths
 | ingest 结构化 `api_endpoint` | ✅ `rag/api_parse.py` |
 | `extract_api_paths` 优先结构化字段 | ✅ `rag/api_paths.py` |
 | `search_docs` enrich | ✅ `tool_handlers.py` |
-| merge 进 `tool_route.suggested_paths`（planner 二次更新） | ✅ assemble 内 `tool_route` 供 planner 复用；仍靠 LLM 读 ToolMessage 选 path |
+| merge 进 `tool_route.suggested_paths`（planner 二次更新） | ✅ `tool_route_merge.py` 从 ToolMessage 提取 path；`nodes.py` 写入 `plan_updated{update_reason:path_merge}` |
 | eval 断言 path 来自检索 chunk | ⚠️ Demo 3 golden 已验轨迹；未断言 path 来源文件 |
 
 #### 3.7.3 `retrieval_completed.call_id`（已实现）
@@ -465,13 +466,13 @@ Timeline: retrieval.call_id == search_docs tool_start.call_id
 
 触发条件：`tool_route.kind == troubleshooting` 且 messages 中已有 `search_docs` + `http_get` 的 ToolMessage。
 
-输出结构（固定 markdown 章节）：
+输出结构（固定 markdown 章节；以下为示例内容，不作为本文档标题）：
 
 ```markdown
-## 文档依据
-## 当前任务状态
-## 可能原因
-## 建议排查步骤
+文档依据:
+当前任务状态:
+可能原因:
+建议排查步骤:
 ```
 
 内容来源：静态模板表（Worker / Redis / 算法）+ `http_get` job JSON 的 `status` / `errorCode` + 检索 `sources`。
@@ -595,12 +596,12 @@ python scripts/verify_demo_golden_e2e.py
 
 | 层 | 任务 | 验收 |
 |-----|------|------|
-| **L5** | planner 硬 merge：`suggested_api_paths` → 更新 `tool_route.suggested_paths` | e2e 扩展 |
+| **L5** | ~~planner 硬 merge：`suggested_api_paths` → 更新 `tool_route.suggested_paths`~~ | ✅ `verify_tool_router.py` + L5 proxy 覆盖 |
 | **L5** | `plan_updated` 事件 + 步骤 `outcome`（Plan-and-Execute PoC） | golden 扩展 |
 | **L6** | 真实 LLM E2E `--mode live` | `verify_demo_golden_e2e.py --mode live` |
 | **L5** | LLM 意图分类 fallback（规则优先，LLM 兜底） | 新 eval case |
 | **L6** | shell / git Capability pack + `scenarios/coding/` 示例 | 新 verify + guide §2.8 |
-| **L6** | `ToolSpec.timeout_seconds` → ExecutionEngine 强制 | runtime + tool 单测 |
+| **L6** | ~~`ToolSpec.timeout_seconds` → handler 执行层强制~~ | ✅ `verify_tool_execution_reliability.py` |
 | **L5** | 多 Agent / 子目标分解 | [tech-selection §4](./tech-selection-design.md) |
 
 ---

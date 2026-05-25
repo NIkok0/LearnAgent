@@ -2,25 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from copilot_agent.rag.docs_resolver import resolve_docs_source
 from copilot_agent.rag.api_parse import parse_api_section
 from copilot_agent.rag.ingest_source import FileIngestSource, IngestSource
+from copilot_agent.rag.preprocess import DocumentPreprocessor
 from copilot_agent.rag.schema import DocChunk
 from copilot_agent.rag.security import resolve_authority
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _Section:
-    start_line: int
-    text: str
-    section_title: str
-    heading_path: str
 
 
 def resolve_ingest_source(base: Path | None = None) -> FileIngestSource:
@@ -31,74 +23,6 @@ def resolve_ingest_source(base: Path | None = None) -> FileIngestSource:
 def repo_docs_dir() -> Path | None:
     """Compatibility wrapper for the Scenario-bound docs resolver."""
     return resolve_docs_source().docs_dir
-
-
-def _heading_level(line: str) -> int:
-    stripped = line.lstrip()
-    if not stripped.startswith("#"):
-        return 0
-    return len(stripped) - len(stripped.lstrip("#"))
-
-
-def _heading_title(line: str) -> str:
-    return line.lstrip("#").strip()
-
-
-def _update_heading_stack(stack: list[tuple[int, str]], line: str) -> None:
-    level = _heading_level(line)
-    if level == 0:
-        return
-    title = _heading_title(line)
-    while stack and stack[-1][0] >= level:
-        stack.pop()
-    stack.append((level, title))
-
-
-def _heading_path(stack: list[tuple[int, str]]) -> str:
-    return " > ".join(title for _, title in stack)
-
-
-def _split_sections(lines: list[str]) -> list[_Section]:
-    heading_stack: list[tuple[int, str]] = []
-    buf: list[str] = []
-    start = 1
-    section_title = ""
-    heading_path = ""
-    sections: list[_Section] = []
-
-    for i, line in enumerate(lines, start=1):
-        if line.startswith("#"):
-            _update_heading_stack(heading_stack, line)
-            if buf:
-                sections.append(
-                    _Section(
-                        start_line=start,
-                        text="\n".join(buf),
-                        section_title=section_title,
-                        heading_path=heading_path,
-                    )
-                )
-            buf = [line]
-            start = i
-            section_title = _heading_title(line)
-            heading_path = _heading_path(heading_stack)
-        else:
-            if not buf:
-                buf = [line]
-                start = i
-            else:
-                buf.append(line)
-
-    if buf:
-        sections.append(
-            _Section(
-                start_line=start,
-                text="\n".join(buf),
-                section_title=section_title,
-                heading_path=heading_path,
-            )
-        )
-    return sections
 
 
 def _append_chunk(
@@ -114,6 +38,10 @@ def _append_chunk(
     updated_at: str,
     api_meta=None,
     security_meta: dict[str, object] | None = None,
+    source_format: str = "markdown",
+    page_number: int | None = None,
+    ocr_used: bool = False,
+    ocr_required: bool = False,
 ) -> None:
     endpoint = api_meta.api_endpoint if api_meta is not None else None
     request_fields = list(api_meta.request_fields) if api_meta is not None else []
@@ -144,6 +72,10 @@ def _append_chunk(
             source_hash=str(security.get("source_hash") or ""),
             retention_policy=str(security.get("retention_policy") or "default"),
             authority=resolve_authority(doc_type=doc_type, security_meta=security),
+            source_format=source_format,
+            page_number=page_number,
+            ocr_used=ocr_used,
+            ocr_required=ocr_required,
         )
     )
 
@@ -163,8 +95,8 @@ def _load_file_chunks(
     updated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
     chunks: list[DocChunk] = []
     chunk_index = 0
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for section in _split_sections(lines):
+    document = DocumentPreprocessor().preprocess(path)
+    for section in document.sections:
         title = section.section_title
         path_str = section.heading_path
         api_meta = parse_api_section(section_title=title, text=section.text, heading_path=path_str) if doc_type == "api_contract" else None
@@ -181,6 +113,10 @@ def _load_file_chunks(
                 updated_at=updated_at,
                 api_meta=api_meta,
                 security_meta=security_meta,
+                source_format=section.source_format,
+                page_number=section.page_number,
+                ocr_used=section.ocr_used,
+                ocr_required=section.ocr_required,
             )
             chunk_index += 1
         else:
@@ -201,6 +137,10 @@ def _load_file_chunks(
                     updated_at=updated_at,
                     api_meta=api_meta,
                     security_meta=security_meta,
+                    source_format=section.source_format,
+                    page_number=section.page_number,
+                    ocr_used=section.ocr_used,
+                    ocr_required=section.ocr_required,
                 )
                 chunk_index += 1
                 pos += step

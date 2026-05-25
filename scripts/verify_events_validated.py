@@ -32,6 +32,21 @@ def main() -> int:
         "outcome": "completed",
         "tools_used": ["search_docs"],
         "tool_details": [{"name": "search_docs", "category": "rag", "risk_level": "low"}],
+        "final_answer": "ok",
+        "completed_actions": [{"kind": "tool", "tool": "search_docs", "success": True}],
+        "decisions": [],
+        "artifacts": [],
+        "retrieval_sources": [{"source_file": "README.md", "chunk_index": 0}],
+        "warnings": [],
+        "memory_candidates_seed": [
+            {
+                "content": "Run completed for goal: verify validated events",
+                "memory_type": "task_summary",
+                "scope": "session",
+                "source_kind": "final_answer",
+                "source_event_ids": [1],
+            }
+        ],
         "key_outputs": ["ok"],
         "errors": [],
         "source_event_ids": [1],
@@ -46,6 +61,7 @@ def main() -> int:
         "contract_validated_flag": enriched.get("contract_validated") is True,
         "correlation_present": isinstance(enriched.get("correlation"), dict),
         "payload_goal_preserved": (enriched.get("payload") or {}).get("goal") == "verify validated events",
+        "payload_seed_preserved": len((enriched.get("payload") or {}).get("memory_candidates_seed") or []) == 1,
         "memory_summary_validates": True,
     }
 

@@ -13,13 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.agent.stream.event_mapper import GraphEventMapper  # noqa: E402
 from copilot_agent.contracts.events.registry import validate_payload_for_kind  # noqa: E402
-from copilot_agent.memory import MemoryManager  # noqa: E402
-from copilot_agent.rag.retriever import RagStore  # noqa: E402
 from copilot_agent.runtime.event_schema import EVENT_OUTPUT_GUARD_CHECKED  # noqa: E402
-from copilot_agent.runtime.event_store import EventStore  # noqa: E402
 from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
+from scripts._verify_helpers import build_mapper_fixture  # noqa: E402
 
 
 class _FakeChunk:
@@ -39,23 +36,20 @@ class _FakeGraph:
 
 
 async def _collect(text: str) -> list:
-    store = EventStore(str(ROOT / "storage/verify-private-rag-output-guard.sqlite"))
     thread_id = f"output-guard-{uuid.uuid4().hex[:8]}"
-    run = store.create_run(thread_id)
-    run_id = str(run["id"])
-    memory = MemoryManager(
-        rag_store=RagStore([]),
-        event_store=store,
-        checkpoint_path=str(ROOT / "storage/verify-private-rag-output-guard-checkpoints.sqlite"),
+    fixture = build_mapper_fixture(
+        event_store_path=ROOT / "storage/verify-private-rag-output-guard.sqlite",
+        checkpoint_path=ROOT / "storage/verify-private-rag-output-guard-checkpoints.sqlite",
+        thread_id=thread_id,
+        tool_registry=ToolRegistry(),
     )
-    mapper = GraphEventMapper(memory=memory, tool_registry=ToolRegistry())
     events = []
-    async for event in mapper.map(
+    async for event in fixture.mapper.map(
         graph=_FakeGraph(text),
         graph_input={},
         graph_config={},
         thread_id=thread_id,
-        run_id=run_id,
+        run_id=fixture.run_id,
     ):
         events.append(event)
     return events

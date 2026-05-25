@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
+from langchain_core._api import LangChainBetaWarning
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph.message import RemoveMessage
 
-from copilot_agent.memory.policy import MemoryPolicyConfig
+from copilot_agent.memory.policy_config import MemoryPolicyConfig
+from copilot_agent.memory.schema import CheckpointCompactionSummary, CheckpointSummarySection
 
 log = logging.getLogger(__name__)
 
 COMPACTION_PREFIX = "[CheckpointCompaction]"
+_MEMORY_INJECTION_PREFIXES = ("[MemoryContext]", "[EpisodicMemory]", "[LongTermMemory]")
 
 
 class CheckpointCompactor:
@@ -48,11 +52,12 @@ class CheckpointCompactor:
         if not prefix:
             return {"compacted": False, "reason": "nothing_to_compact", "message_count": len(messages)}
 
-        summary = _build_deterministic_summary(prefix, self._policy.checkpoint_compact_summary_max_chars)
+        summary_model = build_checkpoint_summary_model(prefix, policy=self._policy, kept_recent_turns=keep_turns)
+        summary = render_checkpoint_summary(summary_model, self._policy.checkpoint_compact_summary_max_chars)
         summary_message = SystemMessage(content=f"{COMPACTION_PREFIX}\n{summary}")
         new_messages = [summary_message, *suffix]
 
-        removals = [RemoveMessage(id=str(message.id)) for message in messages if getattr(message, "id", None)]
+        removals = _remove_messages(messages)
         await self._graph.aupdate_state(config, {"messages": [*removals, *new_messages]})
 
         after = await self._graph.aget_state(config)
@@ -67,6 +72,10 @@ class CheckpointCompactor:
             "after_count": after_count,
             "prefix_count": len(prefix),
             "kept_count": len(suffix),
+            "summary_format": summary_model.format_version,
+            "sections_present": _sections_present(summary_model),
+            "summary_chars": len(summary),
+            "summary_model": summary_model.model_copy(update={"summary_chars": len(summary)}).model_dump(mode="json"),
         }
         log.info(
             "Compacted checkpoint for thread %s: %d -> %d messages",
@@ -90,18 +99,160 @@ def _split_messages_for_compaction(
     return messages[:split_index], messages[split_index:]
 
 
-def _build_deterministic_summary(messages: list[BaseMessage], max_chars: int) -> str:
-    lines: list[str] = []
+def _remove_messages(messages: list[BaseMessage]) -> list[RemoveMessage]:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=LangChainBetaWarning)
+        return [RemoveMessage(id=str(message.id)) for message in messages if getattr(message, "id", None)]
+
+
+def build_checkpoint_summary_model(
+    messages: list[BaseMessage],
+    *,
+    policy: MemoryPolicyConfig,
+    kept_recent_turns: int = 0,
+) -> CheckpointCompactionSummary:
+    buckets: dict[str, list[str]] = {
+        "task_context": [],
+        "decisions_made": [],
+        "important_facts": [],
+        "tool_results": [],
+        "open_questions": [],
+        "do_not_carry_forward": [],
+    }
+    dropped_counts = {key: 0 for key in buckets}
+    per_section_limit = max(1, policy.checkpoint_compact_keep_recent_turns)
     for message in messages:
         role = _message_role(message)
         text = _message_text(message).strip()
-        if not text:
+        if not text or _is_memory_injection_text(text):
             continue
-        lines.append(f"- {role}: {_truncate(text, min(240, max_chars))}")
-    body = "\n".join(lines).strip() or "No prior conversational content."
-    header = "Earlier conversation summary (deterministic):"
-    summary = f"{header}\n{body}"
-    return _truncate(summary, max_chars)
+        key = _summary_bucket(message, text)
+        item = f"{role}: {_truncate(_normalize_summary_text(text), 240)}"
+        if len(buckets[key]) >= per_section_limit:
+            dropped_counts[key] += 1
+            continue
+        buckets[key].append(item)
+
+    if not any(buckets.values()):
+        buckets["important_facts"].append("No prior conversational content.")
+
+    return CheckpointCompactionSummary(
+        task_context=CheckpointSummarySection(
+            title="Task Context",
+            items=buckets["task_context"],
+            dropped_count=dropped_counts["task_context"],
+        ),
+        decisions_made=CheckpointSummarySection(
+            title="Decisions Made",
+            items=buckets["decisions_made"],
+            dropped_count=dropped_counts["decisions_made"],
+        ),
+        important_facts=CheckpointSummarySection(
+            title="Important Facts",
+            items=buckets["important_facts"],
+            dropped_count=dropped_counts["important_facts"],
+        ),
+        tool_results=CheckpointSummarySection(
+            title="Tool Results",
+            items=buckets["tool_results"],
+            dropped_count=dropped_counts["tool_results"],
+        ),
+        open_questions=CheckpointSummarySection(
+            title="Open Questions",
+            items=buckets["open_questions"],
+            dropped_count=dropped_counts["open_questions"],
+        ),
+        do_not_carry_forward=CheckpointSummarySection(
+            title="Do Not Carry Forward",
+            items=buckets["do_not_carry_forward"],
+            dropped_count=dropped_counts["do_not_carry_forward"],
+        ),
+        source_message_count=len(messages),
+        kept_recent_turns=kept_recent_turns,
+    )
+
+
+def render_checkpoint_summary(summary: CheckpointCompactionSummary, max_chars: int) -> str:
+    return summary.render_for_prompt(max_chars=max_chars)
+
+
+def _build_deterministic_summary(messages: list[BaseMessage], max_chars: int) -> str:
+    policy = MemoryPolicyConfig(checkpoint_compact_summary_max_chars=max_chars)
+    summary = build_checkpoint_summary_model(messages, policy=policy)
+    return render_checkpoint_summary(summary, max_chars)
+
+
+def _summary_bucket(message: BaseMessage, text: str) -> str:
+    lower = text.lower()
+    if _looks_stale_or_failed(lower):
+        return "do_not_carry_forward"
+    if isinstance(message, ToolMessage):
+        return "tool_results"
+    if isinstance(message, HumanMessage):
+        if "?" in text or "？" in text:
+            return "open_questions"
+        return "task_context"
+    if isinstance(message, AIMessage):
+        if _looks_decision(lower):
+            return "decisions_made"
+        return "important_facts"
+    if isinstance(message, SystemMessage):
+        return "important_facts"
+    return "important_facts"
+
+
+def _looks_decision(lower: str) -> bool:
+    markers = (
+        "decide",
+        "decision",
+        "implemented",
+        "completed",
+        "fixed",
+        "use ",
+        "采用",
+        "决定",
+        "已完成",
+        "实现",
+        "修复",
+    )
+    return any(marker in lower for marker in markers)
+
+
+def _looks_stale_or_failed(lower: str) -> bool:
+    markers = (
+        "error",
+        "failed",
+        "cancelled",
+        "rejected",
+        "obsolete",
+        "deprecated",
+        "失败",
+        "取消",
+        "拒绝",
+        "过期",
+        "废弃",
+    )
+    return any(marker in lower for marker in markers)
+
+
+def _is_memory_injection_text(text: str) -> bool:
+    return text.startswith(_MEMORY_INJECTION_PREFIXES)
+
+
+def _normalize_summary_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _sections_present(summary: CheckpointCompactionSummary) -> list[str]:
+    sections = [
+        summary.task_context,
+        summary.decisions_made,
+        summary.important_facts,
+        summary.tool_results,
+        summary.open_questions,
+        summary.do_not_carry_forward,
+    ]
+    return [section.title for section in sections if section.items]
 
 
 def _message_role(message: BaseMessage) -> str:

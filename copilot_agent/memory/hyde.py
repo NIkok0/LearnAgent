@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any
 
-from copilot_agent.memory.policy import MemoryPolicyConfig
+from copilot_agent.memory.policy_config import MemoryPolicyConfig
 from copilot_agent.settings import settings
 
 log = logging.getLogger(__name__)

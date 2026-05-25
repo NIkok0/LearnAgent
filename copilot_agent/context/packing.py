@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from copilot_agent.context.constants import RAG_PRERETRIEVAL_PREFIX, ROUTER_SYSTEM_PREFIX
-from copilot_agent.memory.policy import EPISODIC_MEMORY_PREFIX
+from copilot_agent.memory.injection_render import EPISODIC_MEMORY_PREFIX
 from copilot_agent.memory.item_schema import LONG_TERM_MEMORY_PREFIX
 
 

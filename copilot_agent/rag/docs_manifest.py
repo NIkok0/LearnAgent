@@ -19,7 +19,7 @@ class DocsManifest:
     version: int
     load_order: tuple[str, ...]
     doc_types: dict[str, str]
-    include_glob: str = "*.md"
+    include_glob: str = "*.md,*.pdf"
     doc_security: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def filenames(self, *, docs_dir: Path | None = None) -> tuple[str, ...]:
@@ -27,7 +27,8 @@ class DocsManifest:
         if docs_dir is not None and self.include_glob:
             extras = sorted(
                 path.name
-                for path in docs_dir.glob(self.include_glob)
+                for pattern in _include_patterns(self.include_glob)
+                for path in docs_dir.glob(pattern)
                 if path.is_file() and path.name not in ordered and path.name != MANIFEST_FILENAME
             )
             ordered.extend(extras)
@@ -45,7 +46,7 @@ def default_manifest() -> DocsManifest:
         version=1,
         load_order=_DEFAULT_LOAD_ORDER,
         doc_types=dict(_DEFAULT_DOC_TYPES),
-        include_glob="*.md",
+        include_glob="*.md,*.pdf",
         doc_security={},
     )
 
@@ -53,36 +54,37 @@ def default_manifest() -> DocsManifest:
 def manifest_from_docs_dir(docs_dir: Path) -> DocsManifest:
     ordered = sorted(
         path.name
-        for path in docs_dir.glob("*.md")
+        for pattern in ("*.md", "*.pdf")
+        for path in docs_dir.glob(pattern)
         if path.is_file() and path.name != MANIFEST_FILENAME
     )
-    return DocsManifest(version=1, load_order=tuple(ordered), doc_types={}, include_glob="*.md", doc_security={})
+    return DocsManifest(version=1, load_order=tuple(ordered), doc_types={}, include_glob="*.md,*.pdf", doc_security={})
 
 
 def load_docs_manifest(docs_dir: Path | None) -> DocsManifest:
     if docs_dir is None:
-        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md", doc_security={})
+        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md,*.pdf", doc_security={})
     path = docs_dir / MANIFEST_FILENAME
     if not path.is_file():
-        if any(docs_dir.glob("*.md")):
+        if _has_supported_docs(docs_dir):
             return manifest_from_docs_dir(docs_dir)
-        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md", doc_security={})
+        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md,*.pdf", doc_security={})
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         log.warning("Invalid docs manifest at %s: %s; falling back to glob", path, exc)
-        if any(docs_dir.glob("*.md")):
+        if _has_supported_docs(docs_dir):
             return manifest_from_docs_dir(docs_dir)
-        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md", doc_security={})
+        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md,*.pdf", doc_security={})
     if not isinstance(raw, dict):
-        if any(docs_dir.glob("*.md")):
+        if _has_supported_docs(docs_dir):
             return manifest_from_docs_dir(docs_dir)
-        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md")
+        return DocsManifest(version=1, load_order=(), doc_types={}, include_glob="*.md,*.pdf")
     load_order_raw = raw.get("load_order") or raw.get("files") or []
     if not isinstance(load_order_raw, list):
         load_order_raw = []
     load_order = tuple(str(name) for name in load_order_raw if str(name).strip())
-    if not load_order and any(docs_dir.glob("*.md")):
+    if not load_order and _has_supported_docs(docs_dir):
         load_order = manifest_from_docs_dir(docs_dir).load_order
     doc_types_raw = raw.get("doc_types") or {}
     doc_types: dict[str, str] = {}
@@ -94,7 +96,11 @@ def load_docs_manifest(docs_dir: Path | None) -> DocsManifest:
         for key, value in security_raw.items():
             if isinstance(value, dict):
                 doc_security[str(key)] = dict(value)
-    include_glob = str(raw.get("include_glob") or "*.md")
+    include_glob_raw = raw.get("include_glob") or raw.get("include_globs") or "*.md,*.pdf"
+    if isinstance(include_glob_raw, list):
+        include_glob = ",".join(str(item) for item in include_glob_raw if str(item).strip())
+    else:
+        include_glob = str(include_glob_raw)
     return DocsManifest(
         version=int(raw.get("version", 1)),
         load_order=load_order,
@@ -184,3 +190,12 @@ def _resolve_manifest_filename(manifest: DocsManifest, doc_id: str) -> str | Non
         if str(security.get("doc_id") or filename) == needle:
             return filename
     return None
+
+
+def _include_patterns(include_glob: str) -> tuple[str, ...]:
+    patterns = tuple(pattern.strip() for pattern in str(include_glob or "").split(",") if pattern.strip())
+    return patterns or ("*.md", "*.pdf")
+
+
+def _has_supported_docs(docs_dir: Path) -> bool:
+    return any(path.is_file() for pattern in ("*.md", "*.pdf") for path in docs_dir.glob(pattern))

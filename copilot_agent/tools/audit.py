@@ -145,6 +145,7 @@ def build_tool_side_effect_payload(
     reason: str | None = None,
     approval_status: str | None = None,
     policy_source: str | None = None,
+    policy_trace_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Build a first-class audit ledger event for high-risk write tools."""
     start = tool_start_payload if isinstance(tool_start_payload, dict) else {}
@@ -207,6 +208,7 @@ def build_tool_side_effect_payload(
         "compensatable": False,
         "reason": resolved_reason,
         "policy_source": policy_source,
+        "policy_trace_id": policy_trace_id,
     }
 
 
@@ -216,6 +218,7 @@ def build_blocked_tool_side_effect_payload(
     reason: str = "policy_blocked",
     policy_source: str | None = None,
     requires_approval: bool = True,
+    policy_trace_id: str | None = None,
 ) -> dict[str, Any] | None:
     name = str(tool_call.get("name") or "")
     args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
@@ -243,6 +246,7 @@ def build_blocked_tool_side_effect_payload(
         reason=reason,
         approval_status="policy_blocked" if reason != "approval_rejected" else "rejected",
         policy_source=policy_source,
+        policy_trace_id=policy_trace_id,
     )
 
 

@@ -19,7 +19,7 @@
 | `ExtractedRecord`（RAG + Memory 共用） | ✅ | `verify_extract_validate.py` |
 | `GET /events?validated=1` | ✅ | `verify_events_validated.py` |
 | Policy 文档与契约一致性 | ✅ | `verify_policy_docs_contract.py` |
-| 最终回答固定 JSON schema | ❌ | — |
+| 最终回答固定 JSON schema | ✅ | `contracts/final_answer.py`；`verify_final_answer_l7.py` |
 | MCP 结果进 `ToolResultModel` | ✅ PoC | `verify_mcp_capability.py` |
 
 套件归属见 [ci-design.md](./ci-design.md)；分层见 [eval-design.md](./eval-design.md)。
@@ -352,7 +352,7 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **3** | L7 Output | `FinalAnswerModel` v2：answer + citations + tool evidence + citation status + safety metadata | `verify_final_answer_l7.py` |
+| **3** | L7 Output | ~~`FinalAnswerModel` v1：answer + citations + tool evidence + citation status + safety metadata~~ | ✅ `verify_final_answer_l7.py` |
 | **3** | L7 | ToolMessage 摘要策略（全量 JSON vs 截断）文档化 + 配置项 | eval case |
 
 ---

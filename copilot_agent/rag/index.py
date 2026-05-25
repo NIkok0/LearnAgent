@@ -44,7 +44,12 @@ def _chunk_metadata(chunk: DocChunk) -> dict[str, str | int]:
         "tenant_id": chunk.tenant_id or "default",
         "classification": chunk.classification or "internal",
         "authority": int(getattr(chunk, "authority", 50) or 50),
+        "source_format": chunk.source_format or "markdown",
+        "ocr_used": int(bool(chunk.ocr_used)),
+        "ocr_required": int(bool(chunk.ocr_required)),
     }
+    if chunk.page_number is not None:
+        meta["page_number"] = int(chunk.page_number)
     if chunk.updated_at:
         meta["updated_at"] = chunk.updated_at
     if chunk.api_endpoint is not None:

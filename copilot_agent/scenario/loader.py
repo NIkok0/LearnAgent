@@ -19,7 +19,7 @@ from copilot_agent.scenario.schema import (
     ScenarioPolicyConfig,
     ScenarioResourcesConfig,
 )
-from copilot_agent.memory.policy import (
+from copilot_agent.memory.policy_config import (
     MemoryPolicyConfig,
     apply_memory_policy_overlay,
     memory_policy_from_settings,

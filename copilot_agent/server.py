@@ -218,6 +218,15 @@ class CreateRunRequest(BaseModel):
     idempotency_key: str | None = None
 
 
+class ContextPreviewRequest(BaseModel):
+    messages: list[ChatMessage]
+    confirm_dangerous: bool = Field(default=False, description="Preview route decisions with dangerous tool confirmation")
+
+
+class RejectMemoryItemRequest(BaseModel):
+    reason: str = "rejected"
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -511,11 +520,85 @@ def get_thread_memory(thread_id: str, goal: str | None = None) -> dict[str, obje
         "enabled": runner.memory.policy.enabled,
         "thread_summary": bundle.thread_summary,
         "recalled_runs": bundle.recalled_runs,
+        "recalled_long_term": bundle.recalled_long_term,
         "dropped_conflicts": bundle.dropped_conflicts,
+        "dropped_long_term": bundle.dropped_long_term,
         "inject_preview": bundle.inject_preview,
         "budget": bundle.budget_applied,
         "sources": bundle.sources,
+        "explainability": {
+            "long_term_pending_excluded": True,
+            "long_term_items_recalled": len(bundle.recalled_long_term),
+            "episodic_runs_recalled": len(bundle.recalled_runs),
+            "conflicts_dropped": len(bundle.dropped_conflicts),
+            "long_term_dropped": len(bundle.dropped_long_term),
+        },
     }
+
+
+@app.get("/v1/threads/{thread_id}/memory/items")
+def list_thread_memory_items(
+    thread_id: str,
+    status: Literal["active", "pending", "deprecated", "all"] = "active",
+    scope: Literal["user", "session"] | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    return {
+        "thread_id": thread_id,
+        "status": status,
+        "scope": scope,
+        "items": runner.memory.list_memory_items(thread_id, status=status, scope=scope, limit=limit),
+    }
+
+
+@app.post("/v1/threads/{thread_id}/memory/items/{item_id}/confirm")
+def confirm_thread_memory_item(thread_id: str, item_id: str) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    item = runner.memory.confirm_memory_item(item_id, thread_id=thread_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return {"thread_id": thread_id, "item": item}
+
+
+@app.post("/v1/threads/{thread_id}/memory/items/{item_id}/reject")
+def reject_thread_memory_item(
+    thread_id: str,
+    item_id: str,
+    request: RejectMemoryItemRequest | None = None,
+) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    item = runner.memory.reject_memory_item(
+        item_id,
+        thread_id=thread_id,
+        reason=(request.reason if request else "rejected"),
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return {"thread_id": thread_id, "item": item}
+
+
+@app.post("/v1/threads/{thread_id}/context/preview")
+async def preview_thread_context(thread_id: str, request: ContextPreviewRequest) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    bundle = await runner.preview_context(
+        thread_id=thread_id,
+        messages=[message.model_dump() for message in request.messages],
+        confirm_dangerous=request.confirm_dangerous,
+    )
+    return {"thread_id": thread_id, "dry_run": True, "context": bundle}
 
 
 @app.get("/v1/runs/{run_id}")

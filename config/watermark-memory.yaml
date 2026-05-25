@@ -1,3 +1,10 @@
 # Business memory tuning for watermark (overlays Kernel defaults from settings).
 long_term_recall_top_k: 3
 episodic_recall_top_k: 2
+long_term_inject_min_score: 0.35
+long_term_max_per_type: 2
+thread_summary_budget_chars: 260
+episodic_budget_chars: 420
+long_term_budget_chars: 520
+memory_type_boost_fact: 0.10
+memory_type_boost_task_summary: 0.16

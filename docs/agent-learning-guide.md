@@ -472,11 +472,11 @@ EventStore 通过 credential_binding_audit 只记录 binding id / scope / action
 | 真实 LLM E2E（`verify_demo_golden_e2e.py --mode live`） | ❌ | [tool-design §5](./tool-design.md) |
 | RAGAS 作为 PR 硬门禁 | ❌ | [eval-design §0](./eval-design.md)、[rag-design §11.2](./rag-design.md) |
 | `trace_id` / token usage 基础关联 | ✅ | [observability §0](./observability-design.md) |
-| generation span / cost 聚合 | ❌ | [observability §0](./observability-design.md) |
+| generation span / cost 聚合 | ✅ | [observability §0](./observability-design.md) |
 | EventStore/checkpoint **失败一致性 v1**（sequence、`tool_end` 幂等、`last_successful_event_id`） | ✅ | **本页 §2.6**、[runtime §7.3](./runtime-design.md) |
 | `running`/`queued` **durable resume** | ❌ | [runtime §8.1](./runtime-design.md) |
 | 策略表 YAML 版本化 + `policy_version` 事件 | ❌ | [guardrail §10.5](./guardrail-policy-design.md) |
-| 输出 Guard（secret/PII 模式检测） | ❌ | [guardrail §10.2](./guardrail-policy-design.md) |
+| 输出 Guard（secret/PII 模式检测） | ⚠️ 部分 | Private RAG output guard ✅；通用输出 Guard 见 [guardrail §10.2](./guardrail-policy-design.md) |
 | Promptfoo 场景编排 | ❌ | [eval-design §7](./eval-design.md) |
 | Memory GDPR 删除 / 服务端 `user_id` 鉴权 | ❌ | [memory §8.5](./memory-checkpoint-design.md) |
 
@@ -493,7 +493,7 @@ EventStore 通过 credential_binding_audit 只记录 binding id / scope / action
 | M02 | Runtime Contract     | `runtime/event_store.py`, `run_state.py`, `event_schema.py` | Thread/Run/Event 事实源、FSM、事件类型                      | LLM、工具实现                    | 高      | [runtime-design](./runtime-design.md) §8·§9；[data-flow-design](./data-flow-design.md) §8                           |
 | M03 | Execution Engine     | `runtime/execution_engine.py`                               | Run 调度、cancel/approve、超时、流队列、终态触发压缩                | 事件 schema、图逻辑               | 中      | [runtime-design](./runtime-design.md) §8·§9                                                                        |
 | M04 | Timeline 读模型         | `runtime/timeline.py`                                       | events → UI/API timeline 投影                        | 写入 EventStore               | 高      | [runtime-design](./runtime-design.md) §6.3、§8·§9                                                                   |
-| M05 | Contracts            | `copilot_agent/contracts/`                                  | Envelope、ToolResult、Adapter、validate               | 业务编排                        | 中      | [data-flow-design](./data-flow-design.md) §8                                                                       |
+| M05 | Contracts            | `copilot_agent/contracts/`                                  | Envelope、ToolResult、Adapter、validate、FinalAnswerModel | 业务编排                        | 中      | [data-flow-design](./data-flow-design.md) §8                                                                       |
 | M06 | Agent Graph          | `agent/graph.py`, `nodes.py`, `state.py`                    | LangGraph 图、路由、`safety_gate`                       | REST、Run API                | 中      | [memory-checkpoint-design](./memory-checkpoint-design.md) §8·§9；编排 [tech-selection](./tech-selection-design.md) §4 |
 | M07 | ChatRunner / 流映射     | `agent/runner.py`, `stream/event_mapper.py`                 | 图输入、astream、emit RuntimeEvent                      | EventStore SQL              | 中      | 同 M06；事件形状 [data-flow-design](./data-flow-design.md)                                                               |
 | M08 | LLM                  | `llm/provider.py`                                           | ChatOpenAI 配置与薄封装                                  | Tool、Memory 策略              | 中      | [tech-selection-design](./tech-selection-design.md) §4                                                             |
@@ -501,7 +501,7 @@ EventStore 通过 credential_binding_audit 只记录 binding id / scope / action
 | M10 | RAG                  | `rag/`、`scenarios/watermark/docs/`（业务语料）              | ingest、结构化 API 元数据、检索、Tool-grounded 注入             | Run/Event、审批                | **中高** | [rag-design](./rag-design.md) §0 |
 | M11 | Tool / Capability    | `tools/capability/*`, `agent/tool_handlers.py`                | ToolSpec（含 `required_scopes`）、注册、handlers、Tool-grounded 编排 | 最终授权、审批、Run FSM、EventStore 直写 | 中      | [tool-design](./tool-design.md)；契约 [data-flow](./data-flow-design.md) §0 |
 | M12 | Kernel PolicyGate    | `policy/registry.py`, `nodes.safety_gate`                   | allow/ask/deny、scenario allowlist、**required_scopes 裁决**、dangerous path、MCP allowlist | 工具 Handler 实现、secret 存储      | 中      | [guardrail-policy-design](./guardrail-policy-design.md) §10·§11；`verify_policy_credentials.py`                    |
-| M13 | Observability        | `observability/langfuse_tracer.py`                          | Langfuse trace/span、日志                             | EventStore 写入               | 低      | [observability-design](./observability-design.md) §9·§10                                                           |
+| M13 | Observability        | `observability/`、`runtime/timeline.py`                     | provider trace、`llm_generation`、token/cost 聚合       | EventStore 事实源               | 中      | [observability-design](./observability-design.md) §7·§8                                                           |
 | M14 | Credential / Session | `credentials/`（`CredentialManager`） | binding 元数据、scope gate、**`credential_binding_audit` 写入** | PolicyGate 裁决、平台账号体系、secret 持久化 | 中      | **本页 §2.7**                                                                                 |
 | M15 | Context Manager      | `context/manager.py`, `contracts/context.py`                | `ContextBundle` 装配、memory/router/RAG/preretrieval/packing | RAG 建索引、Memory 存储、LLM 生成、权限裁决    | **中**   | [context-manager-design.md](./context-manager-design.md) |
 
@@ -589,11 +589,11 @@ M04 只读 M02
 | **L3** Schema | 结构化抽取、API/记忆 schema | ✅ | `api_parse`；Memory 规则/LLM 抽取 + pending；统一 `ExtractedRecord` | [rag-design §0](./rag-design.md)、[data-flow §0](./data-flow-design.md) |
 | **L4** Pydantic | 边界契约、校验落库 | ✅ | `RuntimeEvent` / `ToolResultModel`；payload 子模型；`GET /events?validated=1` | [data-flow §0](./data-flow-design.md) |
 | **L5** Agent State | checkpoint、路由、上下文装配 | ⚠️ | LangGraph checkpoint；规则 `tool_router`；**Context Manager** + `ContextBundle`；episodic/LTM inject | [context-manager §0](./context-manager-design.md)、[memory-checkpoint §0](./memory-checkpoint-design.md)、[tool-design §0](./tool-design.md) |
-| **L6** Tool Exec | 受控工具、Policy、MCP | ⚠️ | `search_docs` + Scenario HTTP 白名单；PolicyGate + **required_scopes**；MCP adapter + Scenario `mcp/` | [tool-design §0](./tool-design.md)、[guardrail §0](./guardrail-policy-design.md) |
-| **L7** Output | 流式输出、引用、结构化交付 | ⚠️ | SSE token + ToolMessage；`retrieval_completed` 溯源；L4-lite citation | [data-flow §0](./data-flow-design.md)、[tool-design §0](./tool-design.md) |
-| **L8** Storage/Audit | EventStore、Timeline、eval、一致性 | ⚠️ | EventStore + Timeline；run-local `sequence`；`tool_end` 幂等；`run_failed_meta` / `checkpoint_sync_failed`；`checkpoint_compacted`；`credential_binding_audit`；eval suite（core + rag PR CI） | [runtime §0](./runtime-design.md)、[observability §0](./observability-design.md)、[eval-design §0](./eval-design.md) |
+| **L6** Tool Exec | 受控工具、Policy、MCP | ⚠️ | `search_docs` + Scenario HTTP 白名单；PolicyGate + **required_scopes**；MCP adapter；`ToolSpec.timeout_seconds` 强制 | [tool-design §0](./tool-design.md)、[guardrail §0](./guardrail-policy-design.md) |
+| **L7** Output | 流式输出、引用、结构化交付 | ⚠️ | SSE token + ToolMessage；`retrieval_completed` 溯源；L4-lite citation；`FinalAnswerModel` v1 | [data-flow §0](./data-flow-design.md)、[tool-design §0](./tool-design.md) |
+| **L8** Storage/Audit | EventStore、Timeline、eval、一致性 | ⚠️ | EventStore + Timeline；run-local `sequence`；`tool_end` 幂等；`llm_generation` cost；checkpoint / credential audit；eval suite（core + rag PR CI） | [runtime §0](./runtime-design.md)、[observability §0](./observability-design.md)、[eval-design §0](./eval-design.md) |
 
 **图例**：✅ Demo 基线已闭环；⚠️ 主路径可用，仍有 §2.8 / design doc 待办。
 
 **L1–L4 未做（远期）**：网页/DB 同步 ingest、PDF/OCR/HTML 通用预处理流水线。  
-**L5–L8 主要待办**：`plan_updated` / live LLM E2E、path merge 进 `tool_route`、`timeout_seconds` 强制、策略表 YAML、`FinalAnswerModel`、generation span/cost、durable resume — 详见 **§2.8** 与各 design doc。
+**L5–L8 主要待办**：live LLM E2E、策略表 YAML、通用输出 Guard、durable resume、Promptfoo 场景编排 — 详见 **§2.8** 与各 design doc。

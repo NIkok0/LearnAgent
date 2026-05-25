@@ -532,6 +532,11 @@ conda run -n learnagent312 python scripts/verify_live_llm_e2e_acceptance.py --re
 # RAG compliance lifecycle: ingest/delete audit + deletion proof export.
 conda run -n learnagent312 python scripts/verify_rag_document_lifecycle_v1.py
 conda run -n learnagent312 python scripts/export_rag_deletion_proof.py --doc-id <doc_id>
+
+# RAG lightweight deterministic cases.
+conda run -n learnagent312 python scripts/verify_rag_domain.py --case all
+conda run -n learnagent312 python scripts/verify_rag_domain.py --case api_ingest
+conda run -n learnagent312 python scripts/verify_rag_domain.py --case retrieval_quality
 ```
 
 ---

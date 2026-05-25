@@ -42,11 +42,11 @@ checkout → pip install -r requirements.txt
 
 | Profile | 套件数 | CI 是否跑 |
 |---|---:|---|
-| `core-fast` | 13 | ❌ 仅本地 |
-| `core` | **21** | ✅ |
-| `rag` | **14** | ✅ |
+| `core-fast` | 24 | ❌ 仅本地 |
+| `core` | **33** | ✅ |
+| `rag` | **15** | ✅ |
 | `e2e` | 1 | ❌（在 `full` 中） |
-| `full` | 38 | Nightly |
+| `full` | 51 | Nightly |
 
 Nightly `eval_full_nightly` 额外步骤：
 
@@ -59,15 +59,20 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 
 ---
 
-## 3. core profile（21 套件）
+## 3. core profile（33 套件）
 
-### 3.1 Contract + K/C/S（9）
+### 3.1 Contract + K/C/S（14）
 
 | 套件 | 脚本 | 验证点 |
 |---|---|---|
 | `contract_events` | `verify_contract_events.py` | `RuntimeEvent` round-trip |
 | `tool_audit_v1` | `verify_tool_audit_v1.py` | Tool 审计 payload |
+| `tool_execution_reliability` | `verify_tool_execution_reliability.py` | Tool timeout / retry |
+| `tool_side_effect_ledger_v1` | `verify_tool_side_effect_ledger_v1.py` | side-effect ledger |
+| `tool_side_effect_governance_v1` | `verify_tool_side_effect_governance_v1.py` | side-effect policy |
+| `policy_decision_audit_v1` | `verify_policy_decision_audit_v1.py` | policy decision audit |
 | `eval_cases_contract` | `verify_eval_cases_contract.py` | phase4 / golden JSON 契约 |
+| `eval_suite_timeout_v1` | `verify_eval_suite_timeout_v1.py` | suite timeout handling |
 | `scenario_loader` | `verify_scenario_loader.py` | Scenario 加载、HTTP 白名单 |
 | `mcp_capability` | `verify_mcp_capability.py` | MCP mock + stdio |
 | `context_manager` | `verify_context_manager.py` | assemble / `context_built` |
@@ -75,7 +80,7 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 | `policy_docs_contract` | `verify_policy_docs_contract.py` | Policy 文档与契约一致性 |
 | `events_validated` | `verify_events_validated.py` | `contract_validated` 落库 |
 
-### 3.2 Runtime + Memory + Golden（9）
+### 3.2 Runtime + Memory + Golden（16）
 
 | 套件 | 脚本 |
 |---|---|
@@ -84,7 +89,13 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 | `runtime_timeline` | `verify_runtime_timeline.py` |
 | `runtime_checkpoint_link` | `verify_runtime_checkpoint_link.py` |
 | `runtime_execution_engine` | `verify_runtime_execution_engine.py` |
+| `runtime_durability_v1` | `verify_runtime_durability_v1.py` |
 | `checkpoint_consistency_v2` | `verify_checkpoint_consistency_v2.py` |
+| `observability_correlation` | `verify_observability_correlation.py` |
+| `observability_provider` | `verify_observability_provider.py` |
+| `observability_cost_v1` | `verify_observability_cost_v1.py` |
+| `plan_module` | `verify_plan_module.py` |
+| `hitl_checkpoint_resume` | `verify_hitl_checkpoint_resume.py` |
 | `session_mvp` | `verify_session_mvp.py` |
 | `memory_checkpoint_consistency` | `verify_memory_checkpoint_consistency.py` |
 | `memory_production_v1` | `verify_memory_production_v1.py` |
@@ -100,36 +111,59 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 
 ---
 
-## 4. core-fast profile（13 套件，本地）
+## 4. core-fast profile（24 套件，本地）
 
-不含：`golden_scenarios`、`runtime_checkpoint_link`、`session_mvp`、memory 三件套、`phase3_checkpoint`、`mcp_capability`。
+不含：`golden_scenarios`、`runtime_checkpoint_link`、`session_mvp`、memory 三件套、`phase3_checkpoint`、`mcp_capability`、`observability_correlation`、`plan_module`。
 
-含 Contract 核心 + `runtime_event_store` / `runtime_timeline` / `runtime_execution_engine` + `phase3_safety_gate` / `phase4_dataset`。
+含 Contract 快集 + `runtime_event_store` / `runtime_timeline` / `runtime_execution_engine` / `runtime_durability_v1` + L7/observability 快检 + `phase3_safety_gate` / `phase4_dataset`。
 
 用途：提交前 **5–15 分钟** 级反馈；发 PR 前仍应跑完整 `core` + `rag`。
 
 ---
 
-## 5. rag profile（14 套件）
+## 5. rag profile（domain + 专项套件）
 
 | 套件 | 脚本 | 备注 |
 |---|---|---|
-| `rag_retrieval_scopes` | `verify_rag_retrieval_scopes.py` | credential + rag ACL scopes |
+| `rag_domain` | `verify_rag_domain.py` | 聚合轻量 deterministic RAG case：authority、API path、API ingest、doc security、retrieval scopes、retrieval quality |
 | `private_rag_context_guard_v1` | `verify_private_rag_context_guard_v1.py` | untrusted context header |
 | `private_rag_output_guard_v1` | `verify_private_rag_output_guard_v1.py` | 敏感输出检测 |
 | `phase4_ragas` | `verify_phase4_ragas.py` | PR：`--disable-vector` proxy |
 | `phase4_tool_trajectory` | `verify_phase4_tool_trajectory.py` | 28 case L5 图轨迹 |
-| `rag_api_path_extraction` | `verify_rag_api_path_extraction.py` | |
-| `rag_api_ingest` | `verify_rag_api_ingest.py` | |
 | `extract_validate` | `verify_extract_validate.py` | |
-| `rag_retrieval_quality` | `verify_rag_retrieval_quality.py` | 含 query router 权重 |
 | `citation_l4` | `verify_citation_l4.py` | |
+| `final_answer_l7` | `verify_final_answer_l7.py` | FinalAnswerModel |
+| `tool_message_policy` | `verify_tool_message_policy.py` | ToolMessage 摘要策略 |
 | `diagnosis_template` | `verify_diagnosis_template.py` | |
 | `tool_router` | `verify_tool_router.py` | 28 case 路由分类 |
 | `rag_hot_reload` | `verify_rag_hot_reload.py` | 无 docs 时可 SKIP |
 | `rag_rerank` | `verify_rag_rerank.py` | 无 rerank 依赖时跳过 rerank 段 |
 
-### 5.1 Nightly RAG 深测（Wave A + Wave C）
+新增 RAG 轻量验证优先加入 `verify_rag_domain.py`；只有生命周期、真实 Agent loop、外部模型/LLM、跨 API 端到端验证才新增独立脚本。
+
+单 case 调试优先使用：
+
+```powershell
+python scripts/verify_rag_domain.py --case api_ingest
+python scripts/verify_rag_domain.py --case retrieval_quality
+```
+
+### 5.1 Removed RAG wrappers
+
+以下 RAG 单 case wrapper 已删除，统一改用 `verify_rag_domain.py --case <case>`：
+
+| case | 命令 |
+|---|---|
+| authority dedup | `python scripts/verify_rag_domain.py --case authority_dedup` |
+| API path extraction | `python scripts/verify_rag_domain.py --case api_path_extraction` |
+| API ingest | `python scripts/verify_rag_domain.py --case api_ingest` |
+| doc security ingest | `python scripts/verify_rag_domain.py --case doc_security_ingest` |
+| retrieval scopes | `python scripts/verify_rag_domain.py --case retrieval_scopes` |
+| retrieval quality | `python scripts/verify_rag_domain.py --case retrieval_quality` |
+
+变更验收建议：`verify_rag_domain.py --case all`、`verify_eval_suite.py --profile rag`、`verify_eval_suite.py --profile core-fast`。
+
+### 5.2 Nightly RAG 深测（Wave A + Wave C）
 
 | 套件 | 脚本 | 备注 |
 |---|---|---|
@@ -148,9 +182,9 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 | Profile | 内容 |
 |---|---|
 | `e2e` | `demo_golden_e2e`（Demo 1–6 proxy） |
-| `full` | core（21）+ rag（15）+ nightly（2）+ e2e（1）= **39** |
+| `full` | core（33）+ rag（15）+ nightly（2）+ e2e（1）= **51** |
 
-Nightly schedule 默认带 `--enable-ragas`，将 `phase4_ragas` 切为 `--mode auto`。
+Nightly schedule 默认带 `--enable-ragas`，仅将 `phase4_ragas` 切为 `--mode auto --disable-vector --allow-missing-docs`；其他 RAG 套件保持各自参数，向量 + rerank 趋势仍由 `phase4_ragas_nightly` 负责。
 
 ---
 
@@ -187,7 +221,7 @@ conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --
 | `session_mvp` FAIL / 超时 | ChatRunner 段需 `copilot_capabilities=rag,http`；`agent_tool_route_enforce=False`；engine task 清理 |
 | `phase4_ragas` FAIL | Scenario docs 路径、`ingest`、proxy 阈值 |
 | core / rag 聚合 FAIL | 对应 `eval-suite-summary.json` / `eval-rag-summary.json` 的 `failed_suites` |
-| 套件超时 | `--suite-timeout-seconds`（默认 180）；长套件：`session_mvp`、memory 系列 |
+| 套件超时 | `--suite-timeout-seconds`（默认 180）；聚合层会保留 stdout/stderr tail；RAGAS auto 另有软超时并回退 proxy |
 
 ---
 

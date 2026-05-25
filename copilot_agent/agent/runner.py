@@ -116,6 +116,33 @@ class ChatRunner:
     def graph(self):
         return self._graph
 
+    async def preview_context(
+        self,
+        *,
+        thread_id: str,
+        messages: list[dict[str, Any]],
+        confirm_dangerous: bool = False,
+    ) -> dict[str, Any]:
+        turn_messages = current_turn_messages(messages)
+        goal = last_user_content(turn_messages)
+        bundle = await self._context_manager.preview(
+            thread_id=thread_id,
+            turn_messages=self._to_lc_messages(turn_messages),
+            goal=goal,
+            confirm_dangerous=confirm_dangerous,
+            allow_job_post=settings.copilot_allow_job_post,
+        )
+        return {
+            **bundle.model_dump(exclude={"graph_messages"}),
+            "graph_messages_preview": [
+                {
+                    "type": message.__class__.__name__,
+                    "content": str(getattr(message, "content", "") or ""),
+                }
+                for message in bundle.graph_messages
+            ],
+        }
+
     async def run_stream(
         self,
         *,

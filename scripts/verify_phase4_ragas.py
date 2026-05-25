@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import statistics
 import sys
@@ -249,6 +250,42 @@ def _maybe_run_ragas(records: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         return {}, errors
 
 
+def _ragas_worker(records: list[dict[str, Any]], queue: Any) -> None:
+    try:
+        queue.put(_maybe_run_ragas(records))
+    except BaseException as exc:  # pragma: no cover - child process defensive boundary
+        queue.put(({}, [f"ragas_worker_error: {exc}"]))
+
+
+def _maybe_run_ragas_with_timeout(
+    records: list[dict[str, Any]],
+    *,
+    timeout_seconds: int,
+) -> tuple[dict[str, Any], list[str]]:
+    timeout = max(1, int(timeout_seconds))
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue(maxsize=1)
+    proc = ctx.Process(target=_ragas_worker, args=(records, queue), daemon=True)
+    proc.start()
+    proc.join(timeout)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5)
+        return {}, [f"ragas_timeout_after_seconds={timeout}"]
+    if proc.exitcode not in (0, None):
+        return {}, [f"ragas_process_exit_code={proc.exitcode}"]
+    if queue.empty():
+        return {}, ["ragas_process_returned_no_result"]
+    result = queue.get()
+    if isinstance(result, tuple) and len(result) == 2:
+        metrics, errors = result
+        return (
+            metrics if isinstance(metrics, dict) else {},
+            errors if isinstance(errors, list) else [str(errors)],
+        )
+    return {}, ["ragas_process_returned_invalid_result"]
+
+
 def _docs_precondition() -> tuple[bool, dict[str, Any]]:
     from copilot_agent.rag.docs_manifest import load_docs_manifest
     from copilot_agent.rag.ingest import repo_docs_dir  # noqa: WPS433
@@ -303,6 +340,64 @@ def _write_rag_metrics(path: Path, *, proxy_metrics: dict[str, Any], profile: st
     history_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _hf_model_cached(model_name: str) -> bool:
+    """Best-effort HuggingFace cache check that never contacts the network."""
+    normalized = model_name.strip().replace("/", "--")
+    if not normalized:
+        return False
+    candidates: list[Path] = []
+    for env_name in ("HF_HUB_CACHE", "TRANSFORMERS_CACHE"):
+        raw = os.environ.get(env_name, "").strip()
+        if raw:
+            candidates.append(Path(raw))
+    hf_home = os.environ.get("HF_HOME", "").strip()
+    if hf_home:
+        candidates.append(Path(hf_home) / "hub")
+    candidates.append(Path.home() / ".cache" / "huggingface" / "hub")
+    return any((base / f"models--{normalized}").exists() for base in candidates)
+
+
+def _skip_summary(
+    *,
+    dataset_path: Path,
+    summary_path: Path,
+    precondition: dict[str, Any],
+    reason: str,
+    errors: list[str] | None = None,
+    proxy_metrics: dict[str, Any] | None = None,
+    records: list[dict[str, Any]] | None = None,
+) -> None:
+    metrics = proxy_metrics or {
+        "docs_cases": 0,
+        "vector_enabled": False,
+        "avg_required_source_coverage": 0.0,
+        "required_source_full_match_rate": 0.0,
+        "retrieval_hit_rate": 0.0,
+    }
+    summary = {
+        "dataset_path": str(dataset_path),
+        "eval_mode": "proxy",
+        "proxy_metrics": metrics,
+        "ragas_metrics": {},
+        "ragas_warnings": [],
+        "errors": errors or [],
+        "records": records or [],
+        "preconditions": precondition,
+        "skip_reason": reason,
+        "phase4_ragas": "SKIP",
+    }
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"dataset_path={summary['dataset_path']}")
+    print(f"eval_mode={summary['eval_mode']}")
+    print(f"docs_cases={metrics.get('docs_cases', 0)}")
+    print(f"retrieval_hit_rate={metrics.get('retrieval_hit_rate', 0.0)}")
+    print(f"required_source_full_match_rate={metrics.get('required_source_full_match_rate', 0.0)}")
+    print(f"avg_required_source_coverage={metrics.get('avg_required_source_coverage', 0.0)}")
+    print(f"summary_json={summary_path}")
+    print(f"skip_reason={reason}")
+    print("phase4_ragas=SKIP")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify Phase 4 RAG quality (RAGAS optional).")
     parser.add_argument(
@@ -353,6 +448,12 @@ def main() -> int:
         action="store_true",
         help="Return SKIP when --enable-vector is set but vector backend is unavailable.",
     )
+    parser.add_argument(
+        "--ragas-timeout-seconds",
+        type=int,
+        default=60,
+        help="Soft timeout for optional RAGAS scoring in auto/ragas mode.",
+    )
     args = parser.parse_args()
 
     _bootstrap_scenario()
@@ -370,32 +471,12 @@ def main() -> int:
 
     docs_ready, precondition = _docs_precondition()
     if not docs_ready and args.allow_missing_docs:
-        summary = {
-            "dataset_path": str(dataset_path),
-            "eval_mode": "proxy",
-            "proxy_metrics": {
-                "docs_cases": 0,
-                "vector_enabled": False,
-                "avg_required_source_coverage": 0.0,
-                "required_source_full_match_rate": 0.0,
-                "retrieval_hit_rate": 0.0,
-            },
-            "ragas_metrics": {},
-            "ragas_warnings": [],
-            "errors": [],
-            "records": [],
-            "preconditions": precondition,
-            "phase4_ragas": "SKIP",
-        }
-        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"dataset_path={summary['dataset_path']}")
-        print(f"eval_mode={summary['eval_mode']}")
-        print("docs_cases=0")
-        print("retrieval_hit_rate=0.0")
-        print("required_source_full_match_rate=0.0")
-        print("avg_required_source_coverage=0.0")
-        print(f"summary_json={summary_path}")
-        print("phase4_ragas=SKIP")
+        _skip_summary(
+            dataset_path=dataset_path,
+            summary_path=summary_path,
+            precondition=precondition,
+            reason="docs_precondition_failed",
+        )
         return 0
     if not docs_ready:
         errors.append(
@@ -403,25 +484,44 @@ def main() -> int:
         )
 
     disable_vector = bool(args.disable_vector and not args.enable_vector)
-    records, proxy_metrics = _build_proxy_records(cases, top_k=args.top_k, disable_vector=disable_vector)
+    if args.enable_vector and args.allow_vector_skip:
+        embedding_model = os.environ.get("RAG_EMBEDDING_MODEL", "").strip()
+        if not embedding_model:
+            from copilot_agent.settings import settings  # noqa: WPS433
+
+            embedding_model = settings.rag_embedding_model
+        if not _hf_model_cached(embedding_model):
+            _skip_summary(
+                dataset_path=dataset_path,
+                summary_path=summary_path,
+                precondition=precondition,
+                reason="vector_embedding_model_not_cached",
+                errors=[f"vector_embedding_model_not_cached: {embedding_model}"],
+            )
+            return 0
+    try:
+        records, proxy_metrics = _build_proxy_records(cases, top_k=args.top_k, disable_vector=disable_vector)
+    except Exception as exc:
+        if args.enable_vector and args.allow_vector_skip:
+            _skip_summary(
+                dataset_path=dataset_path,
+                summary_path=summary_path,
+                precondition=precondition,
+                reason="vector_backend_unavailable",
+                errors=[f"vector_backend_unavailable: {exc}"],
+            )
+            return 0
+        raise
 
     if args.enable_vector and not proxy_metrics.get("vector_enabled") and args.allow_vector_skip:
-        summary = {
-            "dataset_path": str(dataset_path),
-            "eval_mode": "proxy",
-            "proxy_metrics": proxy_metrics,
-            "ragas_metrics": {},
-            "ragas_warnings": [],
-            "errors": [],
-            "records": records,
-            "preconditions": precondition,
-            "phase4_ragas": "SKIP",
-        }
-        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"dataset_path={summary['dataset_path']}")
-        print("phase4_ragas=SKIP")
-        print("skip_reason=vector_backend_unavailable")
-        print(f"summary_json={summary_path}")
+        _skip_summary(
+            dataset_path=dataset_path,
+            summary_path=summary_path,
+            precondition=precondition,
+            reason="vector_backend_unavailable",
+            proxy_metrics=proxy_metrics,
+            records=records,
+        )
         return 0
 
     ragas_metrics: dict[str, Any] = {}
@@ -429,7 +529,10 @@ def main() -> int:
     eval_mode = "proxy"
 
     if args.mode in ("auto", "ragas"):
-        ragas_metrics, ragas_errors = _maybe_run_ragas(records)
+        ragas_metrics, ragas_errors = _maybe_run_ragas_with_timeout(
+            records,
+            timeout_seconds=args.ragas_timeout_seconds,
+        )
         if ragas_metrics:
             eval_mode = "ragas"
         elif args.mode == "ragas":

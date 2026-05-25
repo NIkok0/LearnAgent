@@ -37,9 +37,11 @@ from copilot_agent.policy import PolicyRegistry
 from copilot_agent.contracts.plan import PlanModel
 from copilot_agent.runtime.event_schema import (
     EVENT_CREDENTIAL_BINDING_AUDIT,
+    EVENT_POLICY_DECISION_RECORDED,
     EVENT_PLAN_UPDATED,
     EVENT_TOOL_SIDE_EFFECT_RECORDED,
 )
+from copilot_agent.runtime.policy_audit import build_policy_decision_payload
 
 from copilot_agent.settings import settings
 
@@ -265,14 +267,31 @@ class AgentNodes:
             for audit in decision.credential_audits:
 
                 self._memory.append_event(thread_id, run_id, EVENT_CREDENTIAL_BINDING_AUDIT, audit)
+                self._append_credential_policy_decision(thread_id=thread_id, run_id=run_id, audit=audit)
 
         if not decision.allowed:
+            policy_payload = build_policy_decision_payload(
+                scope="credential" if decision.policy_source == "credential_scope" else "tool",
+                source=decision.policy_source,
+                subject=decision.tool_name,
+                action="tool_call",
+                resource=str((decision.metadata or {}).get("path") or decision.tool_name or ""),
+                decision="deny",
+                reason=decision.reason or "policy_denied",
+                risk_level=_risk_level_for(self._tool_registry, decision.tool_name),
+                requires_approval=False,
+                related_call_id=decision.call_id or None,
+                metadata=decision.metadata,
+            )
+            if thread_id and run_id:
+                self._memory.append_event(thread_id, run_id, EVENT_POLICY_DECISION_RECORDED, policy_payload)
             self._append_blocked_side_effects(
                 thread_id=thread_id,
                 run_id=run_id,
                 tool_calls=list(last.tool_calls),
                 reason=decision.reason or "policy_blocked",
                 policy_source=decision.policy_source,
+                policy_trace_id=str(policy_payload.get("policy_trace_id") or ""),
             )
 
             return {"messages": [AIMessage(content=decision.message)]}
@@ -310,6 +329,32 @@ class AgentNodes:
                 ]
 
                 if blocked:
+                    route_policy_by_call_id: dict[str, str] = {}
+                    for call in last.tool_calls:
+                        name = str(call.get("name", ""))
+                        if name not in blocked:
+                            continue
+                        call_id = str(call.get("id") or call.get("call_id") or "")
+                        payload = build_policy_decision_payload(
+                            scope="route",
+                            source="tool_route_policy",
+                            subject=name,
+                            action="tool_call",
+                            resource=str(route.kind),
+                            decision="block",
+                            reason="tool_route_forbidden",
+                            risk_level=_risk_level_for(self._tool_registry, name),
+                            requires_approval=_requires_approval_for(self._tool_registry, call),
+                            related_call_id=call_id or None,
+                            metadata={
+                                "route_kind": route.kind,
+                                "recommended_tools": list(route.recommended_tools),
+                                "forbidden_tools": list(route.forbidden_tools),
+                            },
+                        )
+                        self._memory.append_event(thread_id, run_id, EVENT_POLICY_DECISION_RECORDED, payload)
+                        if call_id:
+                            route_policy_by_call_id[call_id] = str(payload.get("policy_trace_id") or "")
                     self._append_blocked_side_effects(
                         thread_id=thread_id,
                         run_id=run_id,
@@ -320,6 +365,7 @@ class AgentNodes:
                         ],
                         reason="policy_blocked",
                         policy_source="tool_route_policy",
+                        policy_trace_id_by_call_id=route_policy_by_call_id,
                     )
 
                     return {
@@ -345,6 +391,25 @@ class AgentNodes:
                     }
 
         if decision.requires_approval:
+            if thread_id and run_id:
+                self._memory.append_event(
+                    thread_id,
+                    run_id,
+                    EVENT_POLICY_DECISION_RECORDED,
+                    build_policy_decision_payload(
+                        scope="tool",
+                        source=decision.policy_source,
+                        subject=decision.tool_name,
+                        action="tool_call",
+                        resource=str((decision.metadata or {}).get("path") or decision.tool_name or ""),
+                        decision="ask",
+                        reason=decision.reason or "approval_required",
+                        risk_level=_risk_level_for(self._tool_registry, decision.tool_name),
+                        requires_approval=True,
+                        related_call_id=decision.call_id or None,
+                        metadata=decision.metadata,
+                    ),
+                )
 
             approved = interrupt(
 
@@ -376,6 +441,8 @@ class AgentNodes:
         tool_calls: list[dict[str, Any]],
         reason: str,
         policy_source: str,
+        policy_trace_id: str | None = None,
+        policy_trace_id_by_call_id: dict[str, str] | None = None,
     ) -> None:
         if not thread_id or not run_id:
             return
@@ -395,10 +462,42 @@ class AgentNodes:
                 reason=reason or "policy_blocked",
                 policy_source=policy_source or "policy",
                 requires_approval=_requires_approval_for(self._tool_registry, call),
+                policy_trace_id=(policy_trace_id_by_call_id or {}).get(call_id) or policy_trace_id,
             )
             if payload is None:
                 continue
             self._memory.append_event(thread_id, run_id, EVENT_TOOL_SIDE_EFFECT_RECORDED, payload)
+
+    def _append_credential_policy_decision(
+        self,
+        *,
+        thread_id: str,
+        run_id: str,
+        audit: dict[str, Any],
+    ) -> None:
+        action = str(audit.get("action") or "")
+        if action not in {"scope_denied", "credential_read_denied"}:
+            return
+        self._memory.append_event(
+            thread_id,
+            run_id,
+            EVENT_POLICY_DECISION_RECORDED,
+            build_policy_decision_payload(
+                scope="credential",
+                source=str(audit.get("provider") or "credential_scope"),
+                subject=str(audit.get("tool_name") or ""),
+                action="credential_scope_check",
+                resource=str(audit.get("binding_id") or ""),
+                decision="deny",
+                reason=str(audit.get("reason") or "credential_denied"),
+                risk_level=_risk_level_for(self._tool_registry, str(audit.get("tool_name") or "")),
+                metadata={
+                    "required_scopes": audit.get("required_scopes") if isinstance(audit.get("required_scopes"), list) else [],
+                    "granted_scopes": audit.get("granted_scopes") if isinstance(audit.get("granted_scopes"), list) else [],
+                    "binding_id": audit.get("binding_id"),
+                },
+            ),
+        )
 
 
 def _requires_approval_for(registry: ToolRegistry, call: dict[str, Any]) -> bool:
@@ -408,5 +507,12 @@ def _requires_approval_for(registry: ToolRegistry, call: dict[str, Any]) -> bool
     if spec is None:
         return name == "http_post"
     return bool(spec.requires_approval_for(args))
+
+
+def _risk_level_for(registry: ToolRegistry, tool_name: str) -> str:
+    spec = registry.get_spec(tool_name)
+    if spec is None:
+        return "high" if tool_name == "http_post" else ""
+    return str(spec.risk_level or "")
 
 

@@ -16,7 +16,12 @@ from copilot_agent.contracts.adapters.tool_rag import RagSearchAdapter
 from copilot_agent.contracts.context import ContextBundle
 from copilot_agent.credentials import CredentialManager
 from copilot_agent.memory import MemoryManager
-from copilot_agent.runtime.event_schema import EVENT_CONTEXT_BUILT, EVENT_RETRIEVAL_COMPLETED
+from copilot_agent.runtime.event_schema import (
+    EVENT_CONTEXT_BUILT,
+    EVENT_POLICY_DECISION_RECORDED,
+    EVENT_RETRIEVAL_COMPLETED,
+)
+from copilot_agent.runtime.policy_audit import build_rag_policy_decision_payloads
 from copilot_agent.scenario.loader import LoadedScenario
 from copilot_agent.scenario.router import RouterEngine
 from copilot_agent.scenario.router.types import ToolRoute, build_route_system_message
@@ -161,9 +166,20 @@ class ContextManager:
         goal: str,
         confirm_dangerous: bool = False,
         allow_job_post: bool | None = None,
+        emit_events: bool = True,
+        persist_checkpoint_pack: bool = True,
+        record_memory_access: bool = True,
     ) -> ContextBundle:
         if self._graph is None:
             raise RuntimeError("ContextManager.bind_graph() must be called before assemble()")
+
+        route = await self.resolve_route(goal, confirm_dangerous=confirm_dangerous, allow_job_post=allow_job_post)
+        route_message = self.route_system_message(route)
+        route_context = {
+            "kind": route.kind,
+            "recommended_tools": list(route.recommended_tools),
+            "forbidden_tools": list(route.forbidden_tools),
+        }
 
         budget_max = self._budget_max_chars()
         memory_context = self._memory.build_context(
@@ -171,13 +187,12 @@ class ContextManager:
             run_id=run_id,
             messages=[{"role": "user", "content": goal}] if goal else [],
             goal=goal,
+            record_memory_access=record_memory_access,
+            route_context=route_context,
         )
         memory_dict = memory_context.as_dict()
         policy = self._memory.policy
         memory_inject_chars = self._memory_inject_chars(memory_dict)
-
-        route = await self.resolve_route(goal, confirm_dangerous=confirm_dangerous, allow_job_post=allow_job_post)
-        route_message = self.route_system_message(route)
 
         hits, rag_message, retrieved_context, pr_meta = preretrieve_docs(
             self._memory,
@@ -192,21 +207,26 @@ class ContextManager:
                 user_id=self._memory.resolve_user_id(thread_id) if thread_id else "",
             ),
         )
-        if hits and run_id and settings.context_emit_built_event:
-            self._memory.append_event(
-                thread_id,
-                run_id,
-                EVENT_RETRIEVAL_COMPLETED,
-                RagSearchAdapter.to_retrieval_completed_payload(
-                    goal,
-                    hits,
-                    excerpt_chars=int(pr_meta.get("excerpt_chars") or 0),
-                    retrieval_mode="preretrieval",
-                    retrieval_route={"kind": route.kind, "phase": "context_assemble"},
-                    policy_result=pr_meta.get("policy_result"),
-                    context_guard=pr_meta.get("context_guard") if isinstance(pr_meta.get("context_guard"), dict) else None,
-                ),
+        if emit_events and hits and run_id and settings.context_emit_built_event:
+            retrieval_payload = RagSearchAdapter.to_retrieval_completed_payload(
+                goal,
+                hits,
+                excerpt_chars=int(pr_meta.get("excerpt_chars") or 0),
+                retrieval_mode="preretrieval",
+                retrieval_route={"kind": route.kind, "phase": "context_assemble"},
+                policy_result=pr_meta.get("policy_result"),
+                context_guard=pr_meta.get("context_guard") if isinstance(pr_meta.get("context_guard"), dict) else None,
             )
+            event_store = self._memory.event_store
+            if event_store is not None:
+                retrieval_event = event_store.append_event(thread_id, run_id, EVENT_RETRIEVAL_COMPLETED, retrieval_payload)
+                for policy_payload in build_rag_policy_decision_payloads(
+                    retrieval_event.get("payload") if isinstance(retrieval_event.get("payload"), dict) else {},
+                    related_event_id=int(retrieval_event.get("id") or 0) or None,
+                ):
+                    self._memory.append_event(thread_id, run_id, EVENT_POLICY_DECISION_RECORDED, policy_payload)
+            else:
+                self._memory.append_event(thread_id, run_id, EVENT_RETRIEVAL_COMPLETED, retrieval_payload)
 
         extra_system: list[SystemMessage] = []
         if route_message is not None:
@@ -231,6 +251,7 @@ class ContextManager:
             max_total_chars=budget_max,
             new_turn_chars=new_turn_chars,
             policy=policy,
+            persist=persist_checkpoint_pack,
         )
         remaining_budget = max(0, budget_max - int(checkpoint_pack.get("checkpoint_chars") or 0))
 
@@ -243,15 +264,42 @@ class ContextManager:
         preretrieval_cache = build_preretrieval_cache(query=goal, hits=hits) if hits else None
 
         episodic = memory_dict.get("episodic") if isinstance(memory_dict.get("episodic"), dict) else {}
-        long_term = memory_dict.get("long_term") if isinstance(memory_dict.get("long_term"), dict) else {}
+        recalled_runs = list(episodic.get("recalled_runs") or [])
+        recalled_long_term = list(episodic.get("recalled_long_term") or [])
+        dropped_conflicts = list(episodic.get("dropped_conflicts") or [])
+        dropped_long_term = list(episodic.get("dropped_long_term") or [])
 
         bundle = ContextBundle(
             thread_id=thread_id,
             run_id=run_id,
             user_message=goal,
             memory_injections=[
-                {"kind": "episodic", "preview_chars": len(str(episodic.get("inject_preview") or ""))},
-                {"kind": "long_term", "items": len(long_term.get("items") or [])},
+                {
+                    "kind": "episodic",
+                    "preview_chars": len(str(episodic.get("inject_preview") or "")),
+                    "recalled_runs": len(recalled_runs),
+                    "dropped_conflicts": len(dropped_conflicts),
+                    "dropped_long_term": len(dropped_long_term),
+                    "sources": list(episodic.get("sources") or []),
+                    "budget": episodic.get("budget_applied") or {},
+                },
+                {
+                    "kind": "long_term",
+                    "items": len(recalled_long_term),
+                    "pending_excluded": True,
+                    "dropped": len(dropped_long_term),
+                    "sources": [
+                        {
+                            "id": item.get("id"),
+                            "scope": item.get("scope"),
+                            "memory_type": item.get("memory_type"),
+                            "score": item.get("score"),
+                            "source_run_id": item.get("source_run_id"),
+                        }
+                        for item in recalled_long_term
+                        if isinstance(item, dict)
+                    ],
+                },
             ],
             retrieved_context=retrieved_context,
             scenario_prompts=[self._system_prompt] if self._system_prompt else [],
@@ -279,8 +327,40 @@ class ContextManager:
             },
             graph_messages=packed.messages,
         )
-        self._emit_context_built(thread_id=thread_id, run_id=run_id, goal=goal, bundle=bundle)
+        if emit_events:
+            self._emit_context_built(thread_id=thread_id, run_id=run_id, goal=goal, bundle=bundle)
         return bundle
+
+    async def preview(
+        self,
+        *,
+        thread_id: str,
+        turn_messages: list[BaseMessage],
+        goal: str,
+        confirm_dangerous: bool = False,
+        allow_job_post: bool | None = None,
+    ) -> ContextBundle:
+        """Assemble a dry-run ContextBundle without RuntimeEvent or checkpoint side effects."""
+        bundle = await self.assemble(
+            thread_id=thread_id,
+            run_id=None,
+            turn_messages=turn_messages,
+            goal=goal,
+            confirm_dangerous=confirm_dangerous,
+            allow_job_post=allow_job_post,
+            emit_events=False,
+            persist_checkpoint_pack=False,
+            record_memory_access=False,
+        )
+        report = dict(bundle.truncation_report)
+        report["dry_run"] = True
+        report["side_effects"] = {
+            "event_store_written": False,
+            "checkpoint_persisted": False,
+            "tools_executed": False,
+            "memory_items_written": False,
+        }
+        return bundle.model_copy(update={"truncation_report": report})
 
     def plan_created_payload(
         self,

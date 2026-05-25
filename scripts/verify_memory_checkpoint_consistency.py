@@ -24,7 +24,7 @@ from copilot_agent.agent.graph import _build_checkpointer, close_graph_checkpoin
 from copilot_agent.agent.message_utils import current_turn_messages  # noqa: E402
 from copilot_agent.agent.stream.event_mapper import GraphEventMapper  # noqa: E402
 from copilot_agent.memory.checkpoint_compactor import CheckpointCompactor  # noqa: E402
-from copilot_agent.memory.policy import MemoryPolicyConfig  # noqa: E402
+from copilot_agent.memory.policy_config import MemoryPolicyConfig  # noqa: E402
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader  # noqa: E402
 from copilot_agent.runtime.event_store import RUN_STATUS_RUNNING  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402

@@ -17,32 +17,14 @@ if str(ROOT) not in sys.path:
 from copilot_agent.memory import MemoryManager  # noqa: E402
 from copilot_agent.memory.item_schema import MemoryScope, MemoryType  # noqa: E402
 from copilot_agent.memory.item_store import MemoryItemStore, content_hash  # noqa: E402
-from copilot_agent.memory.item_writer import MemoryItemWriter, recall_long_term_items  # noqa: E402
-from copilot_agent.memory.policy import MemoryPolicyConfig  # noqa: E402
+from copilot_agent.memory.item_writer import MemoryItemWriter  # noqa: E402
+from copilot_agent.memory.policy_config import MemoryPolicyConfig  # noqa: E402
+from copilot_agent.memory.recall_policy import recall_long_term_items  # noqa: E402
 from copilot_agent.rag.retriever import RagStore  # noqa: E402
 from copilot_agent.rag.schema import DocChunk  # noqa: E402
-from copilot_agent.runtime.event_store import EventStore, RUN_STATUS_RUNNING  # noqa: E402
+from copilot_agent.runtime.event_store import EventStore  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
-
-
-def _seed_completed_run(
-    memory: MemoryManager,
-    store: EventStore,
-    thread_id: str,
-    *,
-    goal: str,
-    token: str,
-) -> str:
-    run = store.create_run(thread_id)
-    run_id = str(run["id"])
-    store.update_run_status(run_id, RUN_STATUS_RUNNING)
-    memory.append_event(thread_id, run_id, "plan_created", {"goal": goal})
-    memory.append_event(thread_id, run_id, "token", {"text": token})
-    memory.append_event(thread_id, run_id, "done", {})
-    store.complete_run(run_id)
-    memory.summarize_run(thread_id, run_id, fallback_goal=goal)
-    memory.update_thread_summary(thread_id, run_id)
-    return run_id
+from scripts._memory_verify_helpers import latest_run_summary, seed_completed_run  # noqa: E402
 
 
 def main() -> int:
@@ -70,6 +52,11 @@ def main() -> int:
         long_term_protected_importance=0.95,
         thread_summary_max_chars=1200,
         episodic_recall_top_k=2,
+        write_gate_enabled=True,
+        write_min_confidence=0.7,
+        write_require_reusable=True,
+        contradiction_pending_enabled=True,
+        contradiction_pending_threshold=0.25,
     )
     memory = MemoryManager(
         rag_store=rag,
@@ -84,7 +71,7 @@ def main() -> int:
     demo_user_id = f"user-demo-{uuid.uuid4().hex[:8]}"
     thread_a = f"ltm-a-{uuid.uuid4().hex[:8]}"
     store.ensure_thread(thread_a, user_id=demo_user_id)
-    run1 = _seed_completed_run(
+    run1 = seed_completed_run(
         memory,
         store,
         thread_a,
@@ -97,12 +84,13 @@ def main() -> int:
         goal="redis stream health",
         current_run_id=run1,
     )
+    run1_summary = latest_run_summary(store, run1)
     recalled_ids = preview.sources.get("memory_item_ids") or []
 
     dedup_thread = f"ltm-dedup-{uuid.uuid4().hex[:8]}"
     store.ensure_thread(dedup_thread, user_id="user-dedup")
-    r1 = _seed_completed_run(memory, store, dedup_thread, goal="same goal text", token="output one")
-    r2 = _seed_completed_run(memory, store, dedup_thread, goal="same goal text", token="output two")
+    r1 = seed_completed_run(memory, store, dedup_thread, goal="same goal text", token="output one")
+    r2 = seed_completed_run(memory, store, dedup_thread, goal="same goal text", token="output two")
     active_after_dedup = item_store.list_active(user_id="user-dedup", thread_id=dedup_thread)
     task_summaries = [item for item in active_after_dedup if item.memory_type == MemoryType.TASK_SUMMARY]
 
@@ -137,6 +125,34 @@ def main() -> int:
     )
     old_item = item_store.get(first.item.id) if first.item else None
     new_item = second.item
+    pending_conflict_thread = f"ltm-pending-conflict-{uuid.uuid4().hex[:8]}"
+    pending_user = f"user-pending-conflict-{uuid.uuid4().hex[:8]}"
+    store.ensure_thread(pending_conflict_thread, user_id=pending_user)
+    baseline_pref = writer.upsert_candidate(
+        user_id=pending_user,
+        thread_id=pending_conflict_thread,
+        candidate={
+            "scope": MemoryScope.USER,
+            "memory_type": MemoryType.PREFERENCE,
+            "content": "prefer short concise deployment answers",
+            "importance": 0.9,
+            "confidence": 0.95,
+            "source_run_id": "manual",
+        },
+    )
+    contradictory_pref = writer.upsert_candidate(
+        user_id=pending_user,
+        thread_id=pending_conflict_thread,
+        candidate={
+            "scope": MemoryScope.USER,
+            "memory_type": MemoryType.PREFERENCE,
+            "content": "prefer long detailed deployment answers",
+            "importance": 0.9,
+            "confidence": 0.95,
+            "source_run_id": "manual",
+        },
+    )
+    baseline_after_pending = item_store.get(baseline_pref.item.id) if baseline_pref.item else None
 
     ttl_thread = f"ltm-ttl-{uuid.uuid4().hex[:8]}"
     store.ensure_thread(ttl_thread, user_id="user-ttl")
@@ -181,10 +197,26 @@ def main() -> int:
             "source_run_id": "manual",
         },
     )
+    low_confidence = writer.persist_run_memories(
+        user_id="user-low-confidence",
+        thread_id=conflict_thread,
+        goal="maybe remember this one-off scratch note",
+        key_outputs=["unstable scratch note"],
+        outcome="completed",
+        run_id="low-confidence-run",
+    )
+    failed_results = writer.persist_run_memories(
+        user_id="user-failed",
+        thread_id=conflict_thread,
+        goal="failed transient operation",
+        key_outputs=["temporary failure output"],
+        outcome="failed",
+        run_id="failed-run",
+    )
 
     pref_thread = f"ltm-pref-{uuid.uuid4().hex[:8]}"
     store.ensure_thread(pref_thread, user_id="user-pref")
-    _seed_completed_run(
+    seed_completed_run(
         memory,
         store,
         pref_thread,
@@ -196,13 +228,21 @@ def main() -> int:
 
     checks = {
         "run_summary_persisted": len(item_store.list_active(user_id=demo_user_id, thread_id=thread_a)) >= 1,
+        "run_summary_structured": isinstance(run1_summary.get("memory_candidates_seed"), list)
+        and "final_answer" in run1_summary
+        and "completed_actions" in run1_summary,
         "long_term_recall_in_preview": len(recalled_ids) >= 1 or len(preview.recalled_long_term) >= 1,
         "dedup_identical_goal": len(task_summaries) == 1,
-        "conflict_supersede": second.action == "supersede" and old_item is not None and old_item.is_deprecated,
+        "conflict_supersede_or_pending": second.action in {"supersede", "pending"},
         "conflict_version_bump": new_item is not None and new_item.version >= 2,
+        "contradiction_pending": contradictory_pref.action == "pending"
+        and contradictory_pref.pending_reason == "contradiction_pending",
+        "pending_does_not_deprecate_old": baseline_after_pending is not None and not baseline_after_pending.is_deprecated,
         "ttl_deleted": deleted >= 1,
         "cross_thread_user_scope": len(cross_recall) >= 1,
         "importance_filter": low_importance.action == "skip",
+        "write_gate_low_confidence": any(result.reason in {"low_confidence", "non_reusable"} for result in low_confidence),
+        "write_gate_unstable_outcome": any(result.reason == "unstable_outcome" for result in failed_results),
         "preference_rule_extract": pref_hit,
         "resolve_user_id": memory.resolve_user_id(thread_a) == demo_user_id,
         "content_hash_stable": content_hash(" Hello ") == content_hash("hello"),
@@ -214,6 +254,7 @@ def main() -> int:
         "run1": run1,
         "recalled_long_term": preview.recalled_long_term,
         "conflict_actions": {"first": first.action, "second": second.action},
+        "pending_conflict_action": contradictory_pref.action,
         "checks": checks,
         "memory_production_v1": "PASS" if passed else "FAIL",
     }

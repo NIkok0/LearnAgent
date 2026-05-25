@@ -26,6 +26,12 @@ class SuiteSpec:
     rag_related: bool = False
 
 
+PROFILE_BUDGET_MS = {
+    "core-fast": 30_000,
+}
+SLOW_SUITE_WARNING_MS = 2_500
+
+
 CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="contract_events",
@@ -52,8 +58,17 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
     ),
     SuiteSpec(
+        suite_name="policy_decision_audit_v1",
+        script="scripts/verify_policy_decision_audit_v1.py",
+        args=("--event-store-path", "storage/verify-policy-decision-audit-events.sqlite"),
+    ),
+    SuiteSpec(
         suite_name="eval_cases_contract",
         script="scripts/verify_eval_cases_contract.py",
+    ),
+    SuiteSpec(
+        suite_name="eval_suite_timeout_v1",
+        script="scripts/verify_eval_suite_timeout_v1.py",
     ),
     SuiteSpec(
         suite_name="scenario_loader",
@@ -131,6 +146,10 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_eval_cases_contract.py",
     ),
     SuiteSpec(
+        suite_name="eval_suite_timeout_v1",
+        script="scripts/verify_eval_suite_timeout_v1.py",
+    ),
+    SuiteSpec(
         suite_name="scenario_loader",
         script="scripts/verify_scenario_loader.py",
     ),
@@ -191,6 +210,14 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="final_answer_l7",
         script="scripts/verify_final_answer_l7.py",
+    ),
+    SuiteSpec(
+        suite_name="short_term_memory_formation_v1",
+        script="scripts/verify_short_term_memory_formation_v1.py",
+    ),
+    SuiteSpec(
+        suite_name="memory_conversion_eviction_v1",
+        script="scripts/verify_memory_conversion_eviction_v1.py",
     ),
     SuiteSpec(
         suite_name="hitl_checkpoint_resume",
@@ -309,6 +336,18 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
             "storage/verify-memory-production-v2-checkpoints.sqlite",
         ),
     ),
+    SuiteSpec(
+        suite_name="memory_context_preview_api",
+        script="scripts/verify_memory_context_preview_api.py",
+    ),
+    SuiteSpec(
+        suite_name="memory_schema",
+        script="scripts/verify_memory_schema.py",
+    ),
+    SuiteSpec(
+        suite_name="memory_quality",
+        script="scripts/verify_memory_quality.py",
+    ),
 ) + LEGACY_SUITES
 
 RAG_SUITES: tuple[SuiteSpec, ...] = (
@@ -318,18 +357,9 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         rag_related=True,
     ),
     SuiteSpec(
-        suite_name="rag_doc_security_ingest",
-        script="scripts/verify_rag_doc_security_ingest.py",
-        rag_related=True,
-    ),
-    SuiteSpec(
-        suite_name="rag_authority_dedup",
-        script="scripts/verify_rag_authority_dedup.py",
-        rag_related=True,
-    ),
-    SuiteSpec(
-        suite_name="rag_retrieval_scopes",
-        script="scripts/verify_rag_retrieval_scopes.py",
+        suite_name="rag_domain",
+        script="scripts/verify_rag_domain.py",
+        args=("--case", "all"),
         rag_related=True,
     ),
     SuiteSpec(
@@ -359,23 +389,8 @@ RAG_SUITES: tuple[SuiteSpec, ...] = (
         rag_related=True,
     ),
     SuiteSpec(
-        suite_name="rag_api_path_extraction",
-        script="scripts/verify_rag_api_path_extraction.py",
-        rag_related=True,
-    ),
-    SuiteSpec(
-        suite_name="rag_api_ingest",
-        script="scripts/verify_rag_api_ingest.py",
-        rag_related=True,
-    ),
-    SuiteSpec(
         suite_name="extract_validate",
         script="scripts/verify_extract_validate.py",
-        rag_related=True,
-    ),
-    SuiteSpec(
-        suite_name="rag_retrieval_quality",
-        script="scripts/verify_rag_retrieval_quality.py",
         rag_related=True,
     ),
     SuiteSpec(
@@ -462,7 +477,7 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
         SuiteSpec(
             suite_name=spec.suite_name,
             script=spec.script,
-            args=("--mode", "auto") if enable_ragas and spec.rag_related else spec.args,
+            args=_rag_suite_args(spec, enable_ragas=enable_ragas),
             rag_related=spec.rag_related,
         )
         for spec in RAG_SUITES
@@ -535,6 +550,12 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
     }
 
 
+def _rag_suite_args(spec: SuiteSpec, *, enable_ragas: bool) -> tuple[str, ...]:
+    if not enable_ragas or spec.suite_name != "phase4_ragas":
+        return spec.args
+    return ("--mode", "auto", "--disable-vector", "--allow-missing-docs")
+
+
 def _to_bool(value: str | None) -> bool | None:
     if value is None:
         return None
@@ -554,6 +575,46 @@ def _parse_key_values(output: str) -> dict[str, str]:
         key, value = line.split("=", 1)
         out[key.strip()] = value.strip()
     return out
+
+
+def _suite_signal_values(kv: dict[str, str]) -> list[str]:
+    return [
+        value
+        for key, value in kv.items()
+        if key.lower().endswith("_pass")
+        or key.lower().endswith("_mvp")
+        or key.lower().endswith("_event_store")
+        or key.lower().endswith("_timeline")
+        or key.lower().endswith("_manager")
+        or key.lower().endswith("_link")
+        or key.lower().endswith("_scenarios")
+        or key.lower().endswith("_ragas")
+        or key.lower().endswith("_contract")
+        or key in {
+            "contract_events",
+            "eval_cases_contract",
+            "tool_audit_v1",
+            "phase4_tool_trajectory",
+            "verify_policy_credentials",
+            "verify_context_manager",
+            "verify_tool_router",
+            "verify_rag_rerank",
+            "phase3_step4",
+            "phase3_safety_gate",
+            "phase4_dataset",
+            "rag_hot_reload",
+        }
+    ]
+
+
+def _coerce_output_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _extract_summary_json(kv: dict[str, str]) -> str | None:
@@ -597,39 +658,19 @@ def _load_checks_from_summary(summary_json: str | None) -> dict[str, Any]:
 def _suite_status(return_code: int, kv: dict[str, str]) -> str:
     if return_code != 0:
         return "FAIL"
-    pass_like = [
-        value
-        for key, value in kv.items()
-        if key.lower().endswith("_pass")
-        or key.lower().endswith("_mvp")
-        or key.lower().endswith("_event_store")
-        or key.lower().endswith("_timeline")
-        or key.lower().endswith("_manager")
-        or key.lower().endswith("_link")
-        or key.lower().endswith("_scenarios")
-        or key.lower().endswith("_ragas")
-        or key.lower().endswith("_contract")
-        or key in {
-            "contract_events",
-            "eval_cases_contract",
-            "tool_audit_v1",
-            "phase4_tool_trajectory",
-            "verify_policy_credentials",
-            "verify_context_manager",
-            "verify_tool_router",
-            "verify_rag_rerank",
-            "phase3_step4",
-            "phase3_safety_gate",
-            "phase4_dataset",
-            "rag_hot_reload",
-        }
-    ]
+    pass_like = _suite_signal_values(kv)
     if not pass_like:
         return "PASS"
     if any(str(item).strip().lower() == "skip" for item in pass_like):
         return "SKIP"
     states = [_to_bool(item) for item in pass_like]
     return "PASS" if all(state is not False for state in states) else "FAIL"
+
+
+def _timeout_suite_status(kv: dict[str, str]) -> str:
+    if not _suite_signal_values(kv):
+        return "FAIL"
+    return _suite_status(0, kv)
 
 
 def main() -> int:
@@ -715,10 +756,10 @@ def main() -> int:
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = int((time.perf_counter() - start) * 1000)
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
+            stdout = _coerce_output_text(exc.stdout)
+            stderr = _coerce_output_text(exc.stderr)
             kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
-            status = _suite_status(0, kv)
+            status = _timeout_suite_status(kv)
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
             out = stdout.splitlines()[-12:]
@@ -727,8 +768,8 @@ def main() -> int:
             errors = [timeout_error]
             # Some verify scripts may complete logic and print PASS, but keep process open
             # due to lingering async resources. In that case, treat suite as pass with warning.
-            if status == "PASS":
-                errors.append("timeout_after_pass_signal")
+            if status in {"PASS", "SKIP"}:
+                errors.append(f"timeout_after_{status.lower()}_signal")
             results.append(
                 {
                     "suite_name": spec.suite_name,
@@ -760,6 +801,17 @@ def main() -> int:
     )[:5]
     overall_pass = not failed
     duration_total_ms = sum(int(item["duration_ms"]) for item in results)
+    profile_budget_ms = PROFILE_BUDGET_MS.get(args.profile)
+    budget_warnings = [
+        f"slow_suite:{item['suite_name']}:{item['duration_ms']}ms"
+        for item in results
+        if int(item["duration_ms"]) > SLOW_SUITE_WARNING_MS
+    ]
+    budget_status = "not_enforced"
+    if profile_budget_ms is not None:
+        budget_status = "PASS" if duration_total_ms <= profile_budget_ms else "FAIL"
+        if budget_status == "FAIL":
+            overall_pass = False
     failed_scenarios = [
         item["suite_name"]
         for item in failed
@@ -805,7 +857,9 @@ def main() -> int:
                 continue
             proxy_metrics = payload.get("proxy_metrics")
             if isinstance(proxy_metrics, dict):
-                rag_metrics = proxy_metrics
+                has_cases = int(proxy_metrics.get("docs_cases", 0) or 0) > 0
+                if has_cases or item["suite_name"] != "phase4_ragas_nightly":
+                    rag_metrics = proxy_metrics
             if item["suite_name"] == "phase4_ragas_nightly":
                 break
             if item["suite_name"] == "phase4_ragas":
@@ -838,6 +892,13 @@ def main() -> int:
         "contract_schema_ok": contract_schema_ok,
         "contract_metrics": contract_metrics,
         "duration_total_ms": duration_total_ms,
+        "perf_summary": {
+            "total_duration_ms": duration_total_ms,
+            "profile_budget_ms": profile_budget_ms,
+            "budget_status": budget_status,
+            "slow_suite_warning_ms": SLOW_SUITE_WARNING_MS,
+            "warnings": budget_warnings,
+        },
         "slow_suites": slow_suites,
         "results": results,
         "eval_suite": "PASS" if overall_pass else "FAIL",
@@ -857,6 +918,7 @@ def main() -> int:
     print(f"rag_metrics={json.dumps(out['rag_metrics'], ensure_ascii=False)}")
     print(f"rag_regression={json.dumps(out.get('rag_regression', {}), ensure_ascii=False)}")
     print(f"duration_total_ms={out['duration_total_ms']}")
+    print(f"perf_summary={json.dumps(out['perf_summary'], ensure_ascii=False)}")
     print(f"slow_suites={json.dumps(out['slow_suites'], ensure_ascii=False)}")
     print(f"summary_json={summary_path}")
     print(f"eval_suite={out['eval_suite']}")

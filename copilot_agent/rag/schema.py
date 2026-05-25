@@ -49,6 +49,10 @@ class DocChunk(BaseModel):
     source_hash: str = ""
     retention_policy: str = "default"
     authority: int = 50
+    source_format: str = "markdown"
+    page_number: int | None = None
+    ocr_used: bool = False
+    ocr_required: bool = False
 
     @property
     def key(self) -> tuple[str, int]:
@@ -75,7 +79,8 @@ def format_chunks_for_prompt(parts: list[DocChunk], max_chars: int = 12000) -> s
         endpoint = ""
         if p.api_endpoint is not None:
             endpoint = f" | {p.api_endpoint.method} {p.api_endpoint.path}"
-        header = f"--- {p.source}{location}{dtype}{endpoint} ---\n"
+        page = f" | page {p.page_number}" if p.page_number else ""
+        header = f"--- {p.source}{page}{location}{dtype}{endpoint} ---\n"
         block = header + p.text
         if n + len(block) > max_chars:
             break
@@ -94,7 +99,8 @@ def estimate_chunk_prompt_chars(chunk: DocChunk) -> int:
     endpoint = ""
     if chunk.api_endpoint is not None:
         endpoint = f" | {chunk.api_endpoint.method} {chunk.api_endpoint.path}"
-    header = f"--- {chunk.source}{location}{dtype}{endpoint} ---\n"
+    page = f" | page {chunk.page_number}" if chunk.page_number else ""
+    header = f"--- {chunk.source}{page}{location}{dtype}{endpoint} ---\n"
     return len(header) + len(chunk.text) + 2
 
 

@@ -46,7 +46,15 @@ from copilot_agent.rag.schema import dynamic_search_top_k
 from copilot_agent.context.retrieval import enrich_retrieval_payload
 from copilot_agent.context.preretrieval_dedupe import apply_preretrieval_dedupe
 
-from copilot_agent.runtime.event_schema import EVENT_CREDENTIAL_BINDING_AUDIT, EVENT_RETRIEVAL_COMPLETED
+from copilot_agent.runtime.event_schema import (
+    EVENT_CREDENTIAL_BINDING_AUDIT,
+    EVENT_POLICY_DECISION_RECORDED,
+    EVENT_RETRIEVAL_COMPLETED,
+)
+from copilot_agent.runtime.policy_audit import (
+    build_policy_decision_payload,
+    build_rag_policy_decision_payloads,
+)
 
 from copilot_agent.settings import settings
 
@@ -127,6 +135,28 @@ class ToolHandlers:
             user_id=user_id,
         )
         self._memory.append_event(thread_id, run_id, EVENT_CREDENTIAL_BINDING_AUDIT, payload)
+        if action == "credential_read_denied":
+            self._memory.append_event(
+                thread_id,
+                run_id,
+                EVENT_POLICY_DECISION_RECORDED,
+                build_policy_decision_payload(
+                    scope="credential",
+                    source="credential_binding",
+                    subject=tool_name,
+                    action="credential_scope_check",
+                    resource=str(payload.get("binding_id") or ""),
+                    decision="deny",
+                    reason=reason or "credential_denied",
+                    risk_level="high" if tool_name == "http_post" else "medium",
+                    metadata={
+                        "required_scopes": payload.get("required_scopes")
+                        if isinstance(payload.get("required_scopes"), list)
+                        else [],
+                        "binding_id": payload.get("binding_id"),
+                    },
+                ),
+            )
 
 
 
@@ -191,9 +221,9 @@ class ToolHandlers:
 
             call_id = get_current_call_id()
 
-            if thread_id and run_id:
+            if thread_id and run_id and self._memory.event_store is not None:
 
-                self._memory.append_event(
+                retrieval_event = self._memory.event_store.append_event(
 
                     thread_id,
 
@@ -220,6 +250,16 @@ class ToolHandlers:
                     ),
 
                 )
+                for policy_payload in build_rag_policy_decision_payloads(
+                    retrieval_event.get("payload") if isinstance(retrieval_event.get("payload"), dict) else {},
+                    related_event_id=int(retrieval_event.get("id") or 0) or None,
+                ):
+                    self._memory.append_event(
+                        thread_id,
+                        run_id,
+                        EVENT_POLICY_DECISION_RECORDED,
+                        policy_payload,
+                    )
 
             end_tool_span(
 
@@ -509,4 +549,3 @@ class ToolHandlers:
         elif data is not None:
             reused["body"] = data
         return reused
-

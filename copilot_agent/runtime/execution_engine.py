@@ -21,11 +21,13 @@ from copilot_agent.runtime.event_store import (
 from copilot_agent.runtime.checkpoint_reader import CheckpointReader
 from copilot_agent.runtime.event_schema import (
     EVENT_CHECKPOINT_CONSISTENCY_CHECKED,
+    EVENT_POLICY_DECISION_RECORDED,
     EVENT_RUN_COMPLETED_META,
     EVENT_RUN_CONSISTENCY_CHECKED,
     EVENT_RUN_FAILED_META,
     EVENT_TOOL_SIDE_EFFECT_RECORDED,
 )
+from copilot_agent.runtime.policy_audit import build_policy_decision_payload
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
@@ -514,11 +516,30 @@ class ExecutionEngine:
             call_id = str(call.get("id") or "").strip()
             if not call_id or call_id in existing_call_ids:
                 continue
+            policy_payload = build_policy_decision_payload(
+                scope="tool",
+                source="human_approval",
+                subject=name,
+                action="tool_call",
+                resource=str((call.get("args") if isinstance(call.get("args"), dict) else {}).get("path") or name),
+                decision="deny",
+                reason="approval_rejected",
+                risk_level="high" if name == "http_post" else "",
+                requires_approval=True,
+                related_call_id=call_id,
+            )
+            self._events.append_event(
+                managed.thread_id,
+                managed.run_id,
+                EVENT_POLICY_DECISION_RECORDED,
+                policy_payload,
+            )
             payload = build_blocked_tool_side_effect_payload(
                 tool_call=call,
                 reason="approval_rejected",
                 policy_source="human_approval",
                 requires_approval=True,
+                policy_trace_id=str(policy_payload.get("policy_trace_id") or ""),
             )
             if payload is None:
                 continue

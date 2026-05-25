@@ -289,6 +289,52 @@ class TimelineProjector:
                 items.append(item)
                 continue
 
+            if event_type == "policy_decision_recorded":
+                decision = str(payload.get("decision") or "")
+                items.append(
+                    {
+                        "kind": "policy",
+                        "title": "Policy decision",
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "policy_trace_id": payload.get("policy_trace_id"),
+                        "scope": payload.get("scope"),
+                        "source": payload.get("source"),
+                        "subject": payload.get("subject"),
+                        "action": payload.get("action"),
+                        "resource": payload.get("resource"),
+                        "decision": decision,
+                        "reason": payload.get("reason"),
+                        "risk_level": payload.get("risk_level"),
+                        "requires_approval": bool(payload.get("requires_approval", False)),
+                        "related_call_id": payload.get("related_call_id"),
+                        "related_event_id": payload.get("related_event_id"),
+                        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+                        "payload": payload,
+                    }
+                )
+                if decision == "block":
+                    warnings.append(
+                        {
+                            "code": "policy_blocked",
+                            "message": "policy blocked an action",
+                            "event_id": event_id,
+                            "scope": payload.get("scope"),
+                            "reason": payload.get("reason"),
+                        }
+                    )
+                elif decision == "deny":
+                    warnings.append(
+                        {
+                            "code": "policy_denied",
+                            "message": "policy denied an action",
+                            "event_id": event_id,
+                            "scope": payload.get("scope"),
+                            "reason": payload.get("reason"),
+                        }
+                    )
+                continue
+
             if event_type == "tool_side_effect_recorded":
                 side_effect_status = str(payload.get("side_effect_status") or "")
                 items.append(
@@ -310,6 +356,7 @@ class TimelineProjector:
                         "idempotency_reused": bool(payload.get("idempotency_reused", False)),
                         "compensatable": bool(payload.get("compensatable", False)),
                         "reason": payload.get("reason"),
+                        "policy_trace_id": payload.get("policy_trace_id"),
                         "payload": payload,
                     }
                 )
@@ -685,6 +732,7 @@ def _debugger_summary(
     final_answer_items = [item for item in items if item.get("kind") == "final_answer"]
     output_guard_items = [item for item in items if item.get("kind") == "output_guard"]
     side_effect_items = [item for item in items if item.get("kind") == "side_effect"]
+    policy_items = [item for item in items if item.get("kind") == "policy"]
     observability = _observability_summary(events)
     cost = _cost_summary(events)
     checkpoint = _checkpoint_summary(
@@ -718,6 +766,18 @@ def _debugger_summary(
         "unknown_side_effect_count": sum(
             1 for item in side_effect_items if item.get("side_effect_status") == "unknown"
         ),
+        "policy_decisions": {
+            "total": len(policy_items),
+            "allow": sum(1 for item in policy_items if item.get("decision") == "allow"),
+            "ask": sum(1 for item in policy_items if item.get("decision") == "ask"),
+            "deny": sum(1 for item in policy_items if item.get("decision") == "deny"),
+            "block": sum(1 for item in policy_items if item.get("decision") == "block"),
+            "redact": sum(1 for item in policy_items if item.get("decision") == "redact"),
+        },
+        "policy_decision_count": len(policy_items),
+        "policy_block_count": sum(1 for item in policy_items if item.get("decision") == "block"),
+        "policy_ask_count": sum(1 for item in policy_items if item.get("decision") == "ask"),
+        "policy_deny_count": sum(1 for item in policy_items if item.get("decision") == "deny"),
         "approval": {
             "count": len(approval_items),
             "waiting": any(item.get("status") == "waiting" for item in approval_items),

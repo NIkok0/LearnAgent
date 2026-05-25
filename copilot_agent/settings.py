@@ -142,6 +142,23 @@ class Settings(BaseSettings):
     memory_llm_extract_enabled: bool = True
     memory_llm_confirm_threshold: float = 0.7
     memory_emit_checkpoint_compacted: bool = True
+    memory_long_term_inject_min_score: float = 0.35
+    memory_long_term_max_per_type: int = 2
+    memory_type_boost_fact: float = 0.08
+    memory_type_boost_preference: float = 0.03
+    memory_type_boost_behavior: float = 0.03
+    memory_type_boost_task_summary: float = 0.12
+    memory_thread_summary_budget_chars: int = 260
+    memory_episodic_budget_chars: int = 420
+    memory_long_term_budget_chars: int = 520
+    memory_write_gate_enabled: bool = True
+    memory_write_min_confidence: float = 0.7
+    memory_write_require_reusable: bool = True
+    memory_recall_confidence_weight: float = 0.15
+    memory_recall_access_weight: float = 0.1
+    memory_access_decay_half_life_days: float = 30.0
+    memory_contradiction_pending_enabled: bool = True
+    memory_contradiction_pending_threshold: float = 0.3
 
     scenario: str = "minimal"
     scenarios_root: str = ""

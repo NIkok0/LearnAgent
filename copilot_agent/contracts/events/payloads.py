@@ -67,6 +67,25 @@ class ToolSideEffectRecordedPayload(BaseModel):
     compensatable: bool = False
     reason: str = ""
     policy_source: str | None = None
+    policy_trace_id: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PolicyDecisionRecordedPayload(BaseModel):
+    policy_trace_id: str
+    scope: Literal["tool", "route", "credential", "rag", "output_guard"]
+    source: str
+    subject: str = ""
+    action: str
+    resource: str = ""
+    decision: Literal["allow", "ask", "deny", "block", "redact"]
+    reason: str = ""
+    risk_level: str = ""
+    requires_approval: bool = False
+    related_call_id: str | None = None
+    related_event_id: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -188,6 +207,13 @@ class MemoryRunSummaryPayload(BaseModel):
     outcome: str = ""
     tools_used: list[str] = Field(default_factory=list)
     tool_details: list[ToolDetailItem] = Field(default_factory=list)
+    final_answer: str = ""
+    completed_actions: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    retrieval_sources: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    memory_candidates_seed: list[dict[str, Any]] = Field(default_factory=list)
     key_outputs: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     source_event_ids: list[int] = Field(default_factory=list)
@@ -205,6 +231,22 @@ class MemoryThreadSummaryPayload(BaseModel):
     open_items: list[str] = Field(default_factory=list)
     source_run_ids: list[str] = Field(default_factory=list)
     source_event_ids: list[int] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CheckpointCompactedPayload(BaseModel):
+    compacted: bool = True
+    thread_id: str = ""
+    before_count: int | None = None
+    after_count: int | None = None
+    prefix_count: int | None = None
+    kept_count: int | None = None
+    checkpoint_path: str | None = None
+    summary_format: str | None = None
+    sections_present: list[str] = Field(default_factory=list)
+    summary_chars: int | None = None
+    summary_model: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="allow")
 

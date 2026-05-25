@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import time
+import warnings
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+
+from langchain_core._api import LangChainBetaWarning
 
 from copilot_agent.agent.final_answer import build_final_answer
 from copilot_agent.agent.tool_call_context import clear_tool_call_context, set_tool_call_context
@@ -30,8 +33,13 @@ from copilot_agent.runtime.event_schema import (
     EVENT_CHECKPOINT_SYNC_FAILED,
     EVENT_LLM_GENERATION,
     EVENT_OUTPUT_GUARD_CHECKED,
+    EVENT_POLICY_DECISION_RECORDED,
     EVENT_RUN_COMPLETED_META,
     EVENT_TOOL_SIDE_EFFECT_RECORDED,
+)
+from copilot_agent.runtime.policy_audit import (
+    build_output_guard_policy_decision_payload,
+    build_policy_decision_payload,
 )
 from copilot_agent.runtime.execution_engine import CheckpointSyncFailed, GraphInterrupted
 from copilot_agent.settings import settings
@@ -115,6 +123,7 @@ class GraphEventMapper:
             self._memory.get_thread_events(thread_id, run_id=run_id)
         )
         approved_tool_call_ids = set(pending_tool_call_ids.values())
+        policy_trace_by_call_id = _policy_trace_by_call_id(thread_id, run_id, self._memory)
         last_assistant_output = ""
         last_reasoning_content = ""
         generation_started_at: dict[str, float] = {}
@@ -122,7 +131,11 @@ class GraphEventMapper:
         generation_outputs: dict[str, str] = {}
         generation_tool_names: dict[str, set[str]] = {}
 
-        async for event in graph.astream_events(graph_input, config=graph_config, version="v2"):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=LangChainBetaWarning)
+            event_stream = graph.astream_events(graph_input, config=graph_config, version="v2")
+
+        async for event in event_stream:
             kind = str(event.get("event", ""))
             interrupt_payload = extract_interrupt_payload(event)
             if interrupt_payload is not None:
@@ -310,6 +323,33 @@ class GraphEventMapper:
                 )
                 if call_id:
                     tracker.start_payloads[call_id] = start_payload
+                policy_payload = build_policy_decision_payload(
+                    scope="tool",
+                    source="tool_execution_policy",
+                    subject=name,
+                    action="tool_call",
+                    resource=_tool_resource(args if isinstance(args, dict) else {}),
+                    decision="allow",
+                    reason="tool_execution_started",
+                    risk_level=str(metadata.get("risk_level", "")),
+                    requires_approval=bool(metadata.get("requires_approval", False)),
+                    related_call_id=call_id or None,
+                    policy_trace_id=policy_trace_by_call_id.get(call_id or ""),
+                    metadata={
+                        "category": metadata.get("category"),
+                        "idempotency_key_present": bool(metadata.get("idempotency_key")),
+                    },
+                )
+                if call_id and policy_payload.get("policy_trace_id"):
+                    policy_trace_by_call_id[call_id] = str(policy_payload.get("policy_trace_id") or "")
+                yield _runtime_event(
+                    EVENT_POLICY_DECISION_RECORDED,
+                    policy_payload,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                    tool_call_id=call_id,
+                )
                 yield _runtime_event(
                     "tool_start",
                     start_payload,
@@ -356,6 +396,7 @@ class GraphEventMapper:
                     tool_start_payload=start_payload,
                     tool_end_payload=end_payload,
                     approval_status="approved" if call_id in approved_tool_call_ids else None,
+                    policy_trace_id=policy_trace_by_call_id.get(call_id or ""),
                 )
                 if side_effect_payload is not None:
                     yield _runtime_event(
@@ -412,6 +453,7 @@ class GraphEventMapper:
                     tool_start_payload=start_payload,
                     tool_end_payload=end_payload,
                     approval_status="approved" if call_id in approved_tool_call_ids else None,
+                    policy_trace_id=policy_trace_by_call_id.get(call_id or ""),
                 )
                 if side_effect_payload is not None:
                     yield _runtime_event(
@@ -425,7 +467,14 @@ class GraphEventMapper:
                 clear_tool_call_context()
                 continue
 
-        for missing in self._missing_tool_end_events(thread_id, run_id, tracker, trace_id=trace_id):
+        for missing in self._missing_tool_end_events(
+            thread_id,
+            run_id,
+            tracker,
+            trace_id=trace_id,
+            approved_tool_call_ids=approved_tool_call_ids,
+            policy_trace_by_call_id=policy_trace_by_call_id,
+        ):
             yield missing
 
         checkpoint_payload: dict[str, Any] | None = None
@@ -470,6 +519,15 @@ class GraphEventMapper:
                 run_id=run_id,
                 trace_id=trace_id,
             )
+            policy_payload = build_output_guard_policy_decision_payload(guard_payload)
+            if policy_payload is not None:
+                yield _runtime_event(
+                    EVENT_POLICY_DECISION_RECORDED,
+                    policy_payload,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                )
             if final_output:
                 yield _runtime_event(
                     "token",
@@ -545,6 +603,8 @@ class GraphEventMapper:
         tracker: _ToolTracker,
         *,
         trace_id: str | None = None,
+        approved_tool_call_ids: set[str] | None = None,
+        policy_trace_by_call_id: dict[str, str] | None = None,
     ) -> list[RuntimeEvent]:
         if not run_id:
             return []
@@ -596,7 +656,8 @@ class GraphEventMapper:
             side_effect_payload = build_tool_side_effect_payload(
                 tool_start_payload=start_payload,
                 tool_end_payload=end_payload,
-                approval_status="approved" if call_id in approved_tool_call_ids else None,
+                approval_status="approved" if call_id in (approved_tool_call_ids or set()) else None,
+                policy_trace_id=(policy_trace_by_call_id or {}).get(call_id),
             )
             if side_effect_payload is not None:
                 out.append(
@@ -629,6 +690,26 @@ def _runtime_event(
         trace_id=trace_id,
         tool_call_id=tool_call_id,
     )
+
+
+def _policy_trace_by_call_id(thread_id: str, run_id: str | None, memory: MemoryManager) -> dict[str, str]:
+    if not run_id:
+        return {}
+    out: dict[str, str] = {}
+    for event in memory.get_thread_events(thread_id, run_id=run_id):
+        if event.get("type") != EVENT_POLICY_DECISION_RECORDED:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        call_id = str(payload.get("related_call_id") or "")
+        trace_id = str(payload.get("policy_trace_id") or "")
+        if call_id and trace_id:
+            out[call_id] = trace_id
+    return out
+
+
+def _tool_resource(args: dict[str, Any]) -> str:
+    path = args.get("path")
+    return str(path or "")
 
 
 def _extract_token_usage(output: Any) -> dict[str, int]:

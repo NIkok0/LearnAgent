@@ -193,7 +193,7 @@ Wave2 基线（单入口、preretrieval、packing、`context_built`）见 **§0*
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
 | **2** | L5 | 续轮 inject 与 Context 装配去重收尾（与 memory §8.5 联动） | `verify_memory_checkpoint_consistency.py` 扩展 |
-| **2** | L5 | planner 硬 merge 检索 path → `tool_route.suggested_paths` | [tool-design §5](./tool-design.md) |
+| **2** | L5 | ~~planner 硬 merge 检索 path → `tool_route.suggested_paths`~~ | ✅ [tool-design §3.7](./tool-design.md) |
 | **3** | L5 | 语义级 context 压缩（LLM 摘要替代 deterministic 截断） | 新 eval case |
 | **4** | L5 | 多 Agent 子目标各自的 context partition | tech-selection §4 |
 

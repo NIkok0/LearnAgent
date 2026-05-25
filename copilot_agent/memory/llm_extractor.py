@@ -7,7 +7,7 @@ from typing import Any
 
 from copilot_agent.memory.item_schema import MemoryScope, MemoryType
 from copilot_agent.memory.rule_extract import extract_memory_candidates
-from copilot_agent.memory.policy import MemoryPolicyConfig
+from copilot_agent.memory.policy_config import MemoryPolicyConfig
 from copilot_agent.settings import settings
 
 log = logging.getLogger(__name__)
@@ -39,12 +39,14 @@ def extract_memories_for_run(
     run_id: str,
     policy: MemoryPolicyConfig,
     llm_provider: Any | None = None,
+    memory_candidates_seed: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     rule_candidates = extract_memory_candidates(
         goal=goal,
         key_outputs=key_outputs,
         outcome=outcome,
         run_id=run_id,
+        memory_candidates_seed=memory_candidates_seed,
     )
     if not policy.llm_extract_enabled:
         return _apply_pending_flags(rule_candidates, policy)

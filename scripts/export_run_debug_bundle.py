@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.policy_audit import build_policy_read_model  # noqa: E402
 from copilot_agent.runtime.side_effects import build_side_effect_read_model  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
@@ -39,11 +40,15 @@ def build_debug_bundle(
     events = store.list_run_events(run_id)
     timeline = TimelineProjector().project_run(run, events)
     side_effects = build_side_effect_read_model(run, events)
+    policy = build_policy_read_model(run, events)
     return {
         "run": run,
         "thread": thread,
         "events": events,
         "timeline": timeline,
+        "policy_decisions": policy["policy_decisions"],
+        "policy_summary": policy["summary"],
+        "policy_warnings": policy["warnings"],
         "side_effects": side_effects["side_effects"],
         "side_effect_summary": side_effects["summary"],
         "side_effect_warnings": side_effects["warnings"],

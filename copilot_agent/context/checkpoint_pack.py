@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
+from langchain_core._api import LangChainBetaWarning
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph.message import RemoveMessage
 
@@ -11,7 +13,7 @@ from copilot_agent.memory.checkpoint_compactor import (
     _build_deterministic_summary,
     _split_messages_for_compaction,
 )
-from copilot_agent.memory.policy import MemoryPolicyConfig
+from copilot_agent.memory.policy_config import MemoryPolicyConfig
 from copilot_agent.settings import settings
 
 
@@ -95,8 +97,14 @@ async def _persist_checkpoint_messages(
     updated: list[BaseMessage],
 ) -> None:
     config = {"configurable": {"thread_id": thread_id}}
-    removals = [RemoveMessage(id=str(message.id)) for message in prior if getattr(message, "id", None)]
+    removals = _remove_messages(prior)
     await graph.aupdate_state(config, {"messages": [*removals, *updated]})
+
+
+def _remove_messages(messages: list[BaseMessage]) -> list[RemoveMessage]:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=LangChainBetaWarning)
+        return [RemoveMessage(id=str(message.id)) for message in messages if getattr(message, "id", None)]
 
 
 async def pack_checkpoint_for_budget(
@@ -106,6 +114,7 @@ async def pack_checkpoint_for_budget(
     max_total_chars: int,
     new_turn_chars: int,
     policy: MemoryPolicyConfig,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """§2.5.4: shrink checkpoint working memory when history + new turn exceeds budget."""
     messages = await load_checkpoint_messages(graph, thread_id)
@@ -118,15 +127,15 @@ async def pack_checkpoint_for_budget(
     }
 
     if not settings.context_checkpoint_pack_enabled or max_total_chars <= 0:
-        return {**base, "compacted": False, "reason": "disabled"}
+        return {**base, "compacted": False, "reason": "disabled", "persisted": False}
 
     if checkpoint_chars + new_turn_chars <= max_total_chars:
-        return {**base, "compacted": False, "reason": "within_budget"}
+        return {**base, "compacted": False, "reason": "within_budget", "persisted": False}
 
     target_checkpoint_chars = max(0, max_total_chars - new_turn_chars)
     steps: list[str] = []
 
-    if policy.checkpoint_compact_enabled and len(messages) > policy.checkpoint_compact_message_threshold:
+    if persist and policy.checkpoint_compact_enabled and len(messages) > policy.checkpoint_compact_message_threshold:
         compactor = CheckpointCompactor(graph, policy=policy)
         compact_result = await compactor.compact_if_needed(thread_id)
         if compact_result.get("compacted"):
@@ -138,6 +147,7 @@ async def pack_checkpoint_for_budget(
                     **base,
                     "compacted": True,
                     "reason": "compactor",
+                    "persisted": True,
                     "checkpoint_message_count": len(messages),
                     "checkpoint_chars": checkpoint_chars,
                     "truncation_steps": steps,
@@ -149,9 +159,10 @@ async def pack_checkpoint_for_budget(
     if prefix and checkpoint_chars > target_checkpoint_chars:
         summary = _build_deterministic_summary(prefix, policy.checkpoint_compact_summary_max_chars)
         updated = [SystemMessage(content=f"{COMPACTION_PREFIX}\n{summary}"), *[_clone_message(message) for message in suffix]]
-        await _persist_checkpoint_messages(graph, thread_id, messages, updated)
+        if persist:
+            await _persist_checkpoint_messages(graph, thread_id, messages, updated)
         steps.append("summarized_prefix")
-        messages = await load_checkpoint_messages(graph, thread_id)
+        messages = await load_checkpoint_messages(graph, thread_id) if persist else updated
         checkpoint_chars = total_message_chars(messages)
 
     prior = messages
@@ -173,16 +184,19 @@ async def pack_checkpoint_for_budget(
         checkpoint_chars = total_message_chars(working)
         changed = True
 
-    if changed:
+    if changed and persist:
         await _persist_checkpoint_messages(graph, thread_id, prior, working)
+    elif changed:
+        messages = working
 
-    messages = await load_checkpoint_messages(graph, thread_id)
+    messages = await load_checkpoint_messages(graph, thread_id) if persist else messages
     checkpoint_chars = total_message_chars(messages)
 
     return {
         **base,
         "compacted": bool(steps),
         "reason": "char_budget" if steps else "nothing_to_trim",
+        "persisted": bool(persist and steps),
         "checkpoint_message_count": len(messages),
         "checkpoint_chars": checkpoint_chars,
         "truncation_steps": steps,

@@ -17,13 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from copilot_agent.agent.stream.event_mapper import GraphEventMapper  # noqa: E402
-from copilot_agent.memory import MemoryManager  # noqa: E402
-from copilot_agent.rag.retriever import RagStore  # noqa: E402
-from copilot_agent.runtime.event_store import EventStore, RUN_STATUS_RUNNING  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
 from copilot_agent.settings import settings  # noqa: E402
-from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
+from scripts._verify_helpers import build_mapper_fixture  # noqa: E402
 
 
 class FakeGraph:
@@ -73,37 +69,29 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_prefix: s
     settings.openai_provider = "openai-compatible"
     thread_id = f"{thread_prefix}-cost"
     try:
-        store = EventStore(str(event_store_path))
-        run = store.create_run(thread_id)
-        run_id = str(run["id"])
-        store.update_run_status(run_id, RUN_STATUS_RUNNING)
-        memory = MemoryManager(
-            rag_store=RagStore([]),
-            event_store=store,
-            checkpoint_path=str(checkpoint_path),
-        )
-        mapper = GraphEventMapper(
-            memory=memory,
-            tool_registry=ToolRegistry(),
+        fixture = build_mapper_fixture(
+            event_store_path=event_store_path,
+            checkpoint_path=checkpoint_path,
+            thread_id=thread_id,
             checkpoint_reader=FakeCheckpointReader(),  # type: ignore[arg-type]
         )
         events: list[dict[str, Any]] = []
-        async for runtime_event in mapper.map(
+        async for runtime_event in fixture.mapper.map(
             graph=FakeGraph(),
             graph_input={"messages": [HumanMessage(content="cost check")]},
             graph_config={
                 "configurable": {
                     "thread_id": thread_id,
                     "trace": None,
-                    "trace_id": f"local-{thread_id}-{run_id}",
+                    "trace_id": f"local-{thread_id}-{fixture.run_id}",
                     "observability_provider": "none",
                 }
             },
             thread_id=thread_id,
-            run_id=run_id,
+            run_id=fixture.run_id,
         ):
             payload = runtime_event.to_store_payload()
-            memory.append_event(thread_id, run_id, runtime_event.kind, payload)
+            fixture.memory.append_event(thread_id, fixture.run_id, runtime_event.kind, payload)
             events.append(
                 {
                     "type": runtime_event.kind,
@@ -111,8 +99,12 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_prefix: s
                     "payload": payload,
                 }
             )
-        stored_events = store.list_run_events(run_id)
-        run = store.get_run(run_id) or {"id": run_id, "thread_id": thread_id, "status": "completed"}
+        stored_events = fixture.store.list_run_events(fixture.run_id)
+        run = fixture.store.get_run(fixture.run_id) or {
+            "id": fixture.run_id,
+            "thread_id": thread_id,
+            "status": "completed",
+        }
         timeline = TimelineProjector().project_run(run, stored_events)
         generation = next((event for event in events if event["type"] == "llm_generation"), {})
         completed_meta = next((event for event in events if event["type"] == "run_completed_meta"), {})

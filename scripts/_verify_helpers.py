@@ -29,6 +29,49 @@ class VerifyGraphFixture:
     run_id: str
 
 
+@dataclass
+class VerifyMapperFixture:
+    store: EventStore
+    memory: MemoryManager
+    mapper: GraphEventMapper
+    thread_id: str
+    run_id: str
+
+
+def build_mapper_fixture(
+    *,
+    event_store_path: Path,
+    checkpoint_path: Path,
+    thread_id: str,
+    run_status: str | None = RUN_STATUS_RUNNING,
+    rag_store: RagStore | None = None,
+    tool_registry: ToolRegistry | None = None,
+    checkpoint_reader: Any | None = None,
+) -> VerifyMapperFixture:
+    store = EventStore(str(event_store_path))
+    run = store.create_run(thread_id)
+    run_id = str(run["id"])
+    if run_status:
+        store.update_run_status(run_id, run_status)
+    memory = MemoryManager(
+        rag_store=rag_store if rag_store is not None else RagStore([]),
+        event_store=store,
+        checkpoint_path=str(checkpoint_path),
+    )
+    mapper = GraphEventMapper(
+        memory=memory,
+        tool_registry=tool_registry if tool_registry is not None else ToolRegistry(),
+        checkpoint_reader=checkpoint_reader,
+    )
+    return VerifyMapperFixture(
+        store=store,
+        memory=memory,
+        mapper=mapper,
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+
+
 def build_verify_fixture(
     *,
     event_store_path: Path,

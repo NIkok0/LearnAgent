@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from copilot_agent.memory.eviction_policy import memory_eviction_score
 from copilot_agent.memory.item_schema import MemoryItemRecord, MemoryScope, MemoryType
+from copilot_agent.memory.item_store_queries import build_list_active_query, build_list_items_query
+from copilot_agent.memory.item_store_rows import encode_embedding, encode_history, row_to_memory_item
 from copilot_agent.runtime.event_store import utc_now_iso
 
 
@@ -95,7 +97,7 @@ class MemoryItemStore:
                     item.content_hash,
                     item.importance,
                     item.confidence,
-                    json.dumps(item.embedding) if item.embedding else None,
+                    encode_embedding(item),
                     item.version,
                     item.supersedes_id,
                     1 if item.is_deprecated else 0,
@@ -106,7 +108,7 @@ class MemoryItemStore:
                     item.updated_at,
                     item.source_run_id,
                     1 if item.pending_confirmation else 0,
-                    json.dumps(item.history, ensure_ascii=False),
+                    encode_history(item),
                 ),
             )
         return item
@@ -127,7 +129,7 @@ class MemoryItemStore:
                     item.content_hash,
                     item.importance,
                     item.confidence,
-                    json.dumps(item.embedding) if item.embedding else None,
+                    encode_embedding(item),
                     item.version,
                     item.supersedes_id,
                     1 if item.is_deprecated else 0,
@@ -136,7 +138,7 @@ class MemoryItemStore:
                     item.last_accessed_at,
                     item.updated_at,
                     1 if item.pending_confirmation else 0,
-                    json.dumps(item.history, ensure_ascii=False),
+                    encode_history(item),
                     item.id,
                 ),
             )
@@ -177,7 +179,7 @@ class MemoryItemStore:
     def get(self, item_id: str) -> MemoryItemRecord | None:
         with self._lock, self._connect() as conn:
             row = conn.execute("SELECT * FROM memory_items WHERE id = ?", (item_id,)).fetchone()
-        return _row_to_record(row) if row is not None else None
+        return row_to_memory_item(row) if row is not None else None
 
     def list_active(
         self,
@@ -187,23 +189,41 @@ class MemoryItemStore:
         scopes: tuple[MemoryScope, ...] | None = None,
         include_pending: bool = False,
     ) -> list[MemoryItemRecord]:
-        sql = "SELECT * FROM memory_items WHERE user_id = ? AND is_deprecated = 0"
-        params: list[Any] = [user_id]
-        if not include_pending:
-            sql += " AND pending_confirmation = 0"
-        if scopes:
-            placeholders = ",".join("?" for _ in scopes)
-            sql += f" AND scope IN ({placeholders})"
-            params.extend(scope.value for scope in scopes)
-        if thread_id is not None:
-            sql += " AND (scope = ? OR thread_id = ?)"
-            params.extend([MemoryScope.USER.value, thread_id])
-        sql += " ORDER BY updated_at DESC"
+        sql, params = build_list_active_query(
+            user_id=user_id,
+            thread_id=thread_id,
+            scopes=scopes,
+            include_pending=include_pending,
+        )
         with self._lock, self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         now = utc_now_iso()
-        items = [_row_to_record(row) for row in rows]
+        items = [row_to_memory_item(row) for row in rows]
         return [item for item in items if item.expires_at is None or item.expires_at > now]
+
+    def list_items(
+        self,
+        *,
+        user_id: str,
+        thread_id: str | None = None,
+        status: str = "active",
+        scopes: tuple[MemoryScope, ...] | None = None,
+        limit: int = 100,
+    ) -> list[MemoryItemRecord]:
+        sql, params = build_list_items_query(
+            user_id=user_id,
+            thread_id=thread_id,
+            status=status,
+            scopes=scopes,
+            limit=limit,
+        )
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        items = [row_to_memory_item(row) for row in rows]
+        if status in {"active", "pending"}:
+            now = utc_now_iso()
+            return [item for item in items if item.expires_at is None or item.expires_at > now]
+        return items
 
     def delete_expired(self) -> int:
         now = utc_now_iso()
@@ -246,13 +266,14 @@ class MemoryItemStore:
         keep_count: int,
         protected_importance: float,
     ) -> list[str]:
-        items = self.list_active(user_id=user_id)
+        items = self.list_items(user_id=user_id, status="all", limit=10000)
+        items = [item for item in items if not item.is_deprecated]
         if len(items) <= keep_count:
             return []
         scored = sorted(
             (
                 (
-                    item.importance + (0.05 if item.last_accessed_at else 0.0),
+                    memory_eviction_score(item),
                     item.updated_at,
                     item,
                 )
@@ -263,10 +284,15 @@ class MemoryItemStore:
         )
         to_remove = len(items) - keep_count
         removed: list[str] = []
-        for _score, _updated, item in scored[:to_remove]:
+        for score, _updated, item in scored[:to_remove]:
             self.deprecate(
                 item.id,
-                history_entry={"action": "evicted", "at": utc_now_iso(), "reason": "capacity_limit"},
+                history_entry={
+                    "action": "evicted",
+                    "at": utc_now_iso(),
+                    "reason": "capacity_limit_v2",
+                    "eviction_score": round(score, 4),
+                },
             )
             removed.append(item.id)
         return removed
@@ -302,33 +328,4 @@ class MemoryItemStore:
 
     def new_id(self) -> str:
         return f"mem_{uuid4().hex[:12]}"
-
-
-def _row_to_record(row: sqlite3.Row) -> MemoryItemRecord:
-    embedding_raw = row["embedding_json"]
-    embedding = json.loads(embedding_raw) if embedding_raw else None
-    history_raw = row["history_json"] or "[]"
-    history = json.loads(history_raw)
-    return MemoryItemRecord(
-        id=str(row["id"]),
-        user_id=str(row["user_id"]),
-        thread_id=str(row["thread_id"]) if row["thread_id"] else None,
-        scope=MemoryScope(str(row["scope"])),
-        memory_type=MemoryType(str(row["memory_type"])),
-        content=str(row["content"]),
-        content_hash=str(row["content_hash"]),
-        importance=float(row["importance"]),
-        confidence=float(row["confidence"]),
-        version=int(row["version"]),
-        supersedes_id=str(row["supersedes_id"]) if row["supersedes_id"] else None,
-        is_deprecated=bool(row["is_deprecated"]),
-        pending_confirmation=bool(row["pending_confirmation"]) if "pending_confirmation" in row.keys() else False,
-        expires_at=str(row["expires_at"]) if row["expires_at"] else None,
-        access_count=int(row["access_count"]),
-        last_accessed_at=str(row["last_accessed_at"]) if row["last_accessed_at"] else None,
-        created_at=str(row["created_at"]),
-        updated_at=str(row["updated_at"]),
-        source_run_id=str(row["source_run_id"]) if row["source_run_id"] else None,
-        history=history if isinstance(history, list) else [],
-        embedding=embedding if isinstance(embedding, list) else None,
-    )
+_row_to_record = row_to_memory_item
