@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from copilot_agent.contracts.events.payloads import ToolEndPayload, ToolStartPayload
 from copilot_agent.contracts.tool_data import ToolResultAuditEnvelope
@@ -13,9 +14,11 @@ __all__ = [
     "ToolResult",
     "ToolResultModel",
     "audit_payload_has_secret",
+    "build_blocked_tool_side_effect_payload",
     "build_tool_side_effect_payload",
     "build_tool_end_payload",
     "build_tool_start_payload",
+    "canonicalize_side_effect_path",
     "normalize_tool_result",
 ]
 
@@ -141,6 +144,7 @@ def build_tool_side_effect_payload(
     tool_end_payload: dict[str, Any] | None = None,
     reason: str | None = None,
     approval_status: str | None = None,
+    policy_source: str | None = None,
 ) -> dict[str, Any] | None:
     """Build a first-class audit ledger event for high-risk write tools."""
     start = tool_start_payload if isinstance(tool_start_payload, dict) else {}
@@ -159,7 +163,7 @@ def build_tool_side_effect_payload(
     result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
     result_metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     method = str(result_data.get("method") or "POST").upper()
-    path = str(result_data.get("path") or arguments.get("path") or "")
+    path = canonicalize_side_effect_path(str(result_data.get("path") or arguments.get("path") or ""))
     status_code = _int_or_none(result_metadata.get("status_code") or result_data.get("status_code"))
     success = bool(end.get("success", False))
     idempotency_reused = bool(end.get("idempotency_reused") or result_metadata.get("idempotency_reused"))
@@ -171,12 +175,20 @@ def build_tool_side_effect_payload(
         error_type=error_type,
         error_text=error_text,
     )
-    status = _side_effect_status(
-        success=success,
-        idempotency_reused=idempotency_reused,
-        error_type=error_type,
-        error_text=error_text,
-        reason=resolved_reason,
+    resolved_approval_status = _approval_status(
+        approval_status=approval_status,
+        requires_approval=bool(start.get("requires_approval", False)),
+    )
+    status = (
+        "blocked"
+        if resolved_approval_status in {"policy_blocked", "rejected"}
+        else _side_effect_status(
+            success=success,
+            idempotency_reused=idempotency_reused,
+            error_type=error_type,
+            error_text=error_text,
+            reason=resolved_reason,
+        )
     )
 
     return {
@@ -186,7 +198,7 @@ def build_tool_side_effect_payload(
         "method": method,
         "risk_level": risk_level,
         "requires_approval": bool(start.get("requires_approval", False)),
-        "approval_status": approval_status or ("required" if start.get("requires_approval") else "not_required"),
+        "approval_status": resolved_approval_status,
         "side_effect_status": status,
         "success": success,
         "status_code": status_code,
@@ -194,7 +206,54 @@ def build_tool_side_effect_payload(
         "idempotency_reused": idempotency_reused,
         "compensatable": False,
         "reason": resolved_reason,
+        "policy_source": policy_source,
     }
+
+
+def build_blocked_tool_side_effect_payload(
+    *,
+    tool_call: dict[str, Any],
+    reason: str = "policy_blocked",
+    policy_source: str | None = None,
+    requires_approval: bool = True,
+) -> dict[str, Any] | None:
+    name = str(tool_call.get("name") or "")
+    args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
+    call_id = str(tool_call.get("id") or tool_call.get("call_id") or "").strip()
+    start_payload = {
+        "name": name,
+        "call_id": call_id,
+        "category": "http" if name == "http_post" else "",
+        "risk_level": "high" if name == "http_post" else "",
+        "requires_approval": bool(requires_approval),
+        "arguments": args,
+        "idempotency_key": args.get("idempotency_key"),
+    }
+    end_payload = {
+        "name": name,
+        "call_id": call_id,
+        "success": False,
+        "error": "tool execution was blocked before side effect",
+        "idempotency_key": start_payload.get("idempotency_key"),
+        "result": {"success": False, "error": reason, "metadata": {}},
+    }
+    return build_tool_side_effect_payload(
+        tool_start_payload=start_payload,
+        tool_end_payload=end_payload,
+        reason=reason,
+        approval_status="policy_blocked" if reason != "approval_rejected" else "rejected",
+        policy_source=policy_source,
+    )
+
+
+def canonicalize_side_effect_path(path: str) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    parts = urlsplit(text)
+    if parts.scheme or parts.netloc:
+        return urlunsplit(("", "", parts.path or "/", "", ""))
+    return text.split("?", 1)[0]
 
 
 def _side_effect_status(
@@ -240,6 +299,13 @@ def _ambiguous_error(*, error_type: str, error_text: str) -> bool:
         "did not produce a result event",
     )
     return any(marker in text for marker in markers)
+
+
+def _approval_status(*, approval_status: str | None, requires_approval: bool) -> str:
+    allowed = {"not_required", "pending", "approved", "rejected", "policy_blocked"}
+    if approval_status in allowed:
+        return approval_status
+    return "pending" if requires_approval else "not_required"
 
 
 def _int_or_none(value: Any) -> int | None:

@@ -81,6 +81,7 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_id: str) 
             "api_has_secret": audit_payload_has_secret(api_payload),
             "api_mentions_json_body": "json_body" in encoded_api,
             "api_mentions_cookie": "WMSESSIONID=" in encoded_api or "cookie_header" in encoded_api,
+            "api_mentions_token_query": "secret-token" in encoded_api or "?token=" in encoded_api,
             "api_mentions_raw_body": "raw response" in encoded_api.lower(),
             "debug_side_effects_have_secret": audit_payload_has_secret(
                 {
@@ -92,6 +93,8 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_id: str) 
             "debug_mentions_json_body": "json_body" in encoded_bundle_side_effects,
             "debug_mentions_cookie": "WMSESSIONID=" in encoded_bundle_side_effects
             or "cookie_header" in encoded_bundle_side_effects,
+            "debug_mentions_token_query": "secret-token" in encoded_bundle_side_effects
+            or "?token=" in encoded_bundle_side_effects,
         },
     }
 
@@ -163,6 +166,7 @@ def main() -> int:
         "api_sanitized": not audit["api_has_secret"]
         and not audit["api_mentions_json_body"]
         and not audit["api_mentions_cookie"]
+        and not audit["api_mentions_token_query"]
         and not audit["api_mentions_raw_body"],
         "missing_run_404": summary["missing"]["status_code"] == 404
         and summary["missing"]["detail"] == "run not found",
@@ -171,7 +175,8 @@ def main() -> int:
         and "side_effect_unknown" in debug_bundle["warning_codes"],
         "debug_bundle_sanitized": not audit["debug_side_effects_have_secret"]
         and not audit["debug_mentions_json_body"]
-        and not audit["debug_mentions_cookie"],
+        and not audit["debug_mentions_cookie"]
+        and not audit["debug_mentions_token_query"],
     }
     passed = all(checks.values())
     summary["checks"] = checks

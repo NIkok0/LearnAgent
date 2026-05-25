@@ -61,7 +61,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
         risk_level="high",
         requires_approval=True,
         arguments={
-            "path": "/api/jobs",
+            "path": "/api/jobs?token=secret-token&safe=1",
             "json_body": {"title": "demo", "token": "secret-token"},
             "cookie_header": "WMSESSIONID=secret-cookie",
         },
@@ -70,7 +70,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
     confirmed_end = build_tool_end_payload(
         name="http_post",
         call_id="post-confirmed",
-        result={"ok": True, "status_code": 201, "path": "/api/jobs", "method": "POST", "body": {"id": "j1"}},
+        result={"ok": True, "status_code": 201, "path": "/api/jobs?token=secret-token&safe=1", "method": "POST", "body": {"id": "j1"}},
         duration_ms=31,
         idempotency_key="idem-confirmed",
     )
@@ -247,6 +247,14 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
         str((event.get("payload") or {}).get("call_id")): (event.get("payload") or {}).get("side_effect_status")
         for event in ledger_events
     }
+    approval_statuses = {
+        str((event.get("payload") or {}).get("call_id")): (event.get("payload") or {}).get("approval_status")
+        for event in ledger_events
+    }
+    paths = {
+        str((event.get("payload") or {}).get("call_id")): (event.get("payload") or {}).get("path")
+        for event in ledger_events
+    }
     encoded_ledger = json.dumps([event.get("payload") for event in ledger_events], ensure_ascii=False)
     row_validation = validate_event_rows(events)
 
@@ -265,6 +273,8 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
         },
         "ledger_count": len(ledger_events),
         "side_effect_statuses": side_effect_statuses,
+        "approval_statuses": approval_statuses,
+        "paths": paths,
         "timeline": {
             "side_effect_count": len(side_effect_items),
             "warning_codes": [warning["code"] for warning in timeline["warnings"]],
@@ -277,6 +287,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
             "ledger_has_secret": audit_payload_has_secret([event.get("payload") for event in ledger_events]),
             "ledger_mentions_json_body": "json_body" in encoded_ledger,
             "ledger_mentions_cookie": "WMSESSIONID=" in encoded_ledger or "cookie_header" in encoded_ledger,
+            "ledger_mentions_token_query": "secret-token" in encoded_ledger or "?token=" in encoded_ledger,
             "ledger_mentions_raw_body": "raw response" in encoded_ledger.lower(),
         },
         "validation": row_validation,
@@ -300,6 +311,8 @@ def main() -> int:
     event_store_path.parent.mkdir(parents=True, exist_ok=True)
     summary = verify(event_store_path, args.thread_id)
     statuses = summary["side_effect_statuses"]
+    approval_statuses = summary["approval_statuses"]
+    paths = summary["paths"]
     timeline = summary["timeline"]
     audit = summary["audit_safety"]
     validation = summary["validation"]
@@ -309,6 +322,9 @@ def main() -> int:
         "none_recorded": statuses.get("post-none") == "none",
         "unknown_recorded": statuses.get("post-unknown") == "unknown",
         "blocked_recorded": statuses.get("post-blocked") == "blocked",
+        "approval_statuses": approval_statuses.get("post-confirmed") == "pending"
+        and approval_statuses.get("post-blocked") == "rejected",
+        "path_canonicalized": paths.get("post-confirmed") == "/api/jobs",
         "read_tools_excluded": summary["direct_payloads"]["excluded_get"] is None
         and summary["direct_payloads"]["excluded_search"] is None,
         "ledger_count": summary["ledger_count"] == 5,
@@ -319,6 +335,7 @@ def main() -> int:
         "payload_sanitized": not audit["ledger_has_secret"]
         and not audit["ledger_mentions_json_body"]
         and not audit["ledger_mentions_cookie"]
+        and not audit["ledger_mentions_token_query"]
         and not audit["ledger_mentions_raw_body"],
         "contract_schema_ok": bool(validation.get("model_validate_ok")),
     }

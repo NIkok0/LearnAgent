@@ -35,11 +35,15 @@ from copilot_agent.memory import MemoryManager
 from copilot_agent.policy import PolicyRegistry
 
 from copilot_agent.contracts.plan import PlanModel
-from copilot_agent.runtime.event_schema import EVENT_CREDENTIAL_BINDING_AUDIT, EVENT_PLAN_UPDATED
+from copilot_agent.runtime.event_schema import (
+    EVENT_CREDENTIAL_BINDING_AUDIT,
+    EVENT_PLAN_UPDATED,
+    EVENT_TOOL_SIDE_EFFECT_RECORDED,
+)
 
 from copilot_agent.settings import settings
 
-from copilot_agent.tools.audit import sanitize_tool_payload
+from copilot_agent.tools.audit import build_blocked_tool_side_effect_payload, sanitize_tool_payload
 
 from copilot_agent.tools.registry import ToolRegistry
 
@@ -263,6 +267,13 @@ class AgentNodes:
                 self._memory.append_event(thread_id, run_id, EVENT_CREDENTIAL_BINDING_AUDIT, audit)
 
         if not decision.allowed:
+            self._append_blocked_side_effects(
+                thread_id=thread_id,
+                run_id=run_id,
+                tool_calls=list(last.tool_calls),
+                reason=decision.reason or "policy_blocked",
+                policy_source=decision.policy_source,
+            )
 
             return {"messages": [AIMessage(content=decision.message)]}
 
@@ -299,6 +310,17 @@ class AgentNodes:
                 ]
 
                 if blocked:
+                    self._append_blocked_side_effects(
+                        thread_id=thread_id,
+                        run_id=run_id,
+                        tool_calls=[
+                            call
+                            for call in last.tool_calls
+                            if str(call.get("name", "")) in blocked
+                        ],
+                        reason="policy_blocked",
+                        policy_source="tool_route_policy",
+                    )
 
                     return {
 
@@ -345,5 +367,46 @@ class AgentNodes:
                 return {"messages": [AIMessage(content="Dangerous tool call was rejected by the user.")]}
 
         return {}
+
+    def _append_blocked_side_effects(
+        self,
+        *,
+        thread_id: str,
+        run_id: str,
+        tool_calls: list[dict[str, Any]],
+        reason: str,
+        policy_source: str,
+    ) -> None:
+        if not thread_id or not run_id:
+            return
+        existing_call_ids = {
+            str((event.get("payload") or {}).get("call_id") or "")
+            for event in self._memory.get_thread_events(thread_id, run_id=run_id)
+            if event.get("type") == EVENT_TOOL_SIDE_EFFECT_RECORDED
+        }
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            call_id = str(call.get("id") or call.get("call_id") or "").strip()
+            if call_id and call_id in existing_call_ids:
+                continue
+            payload = build_blocked_tool_side_effect_payload(
+                tool_call=call,
+                reason=reason or "policy_blocked",
+                policy_source=policy_source or "policy",
+                requires_approval=_requires_approval_for(self._tool_registry, call),
+            )
+            if payload is None:
+                continue
+            self._memory.append_event(thread_id, run_id, EVENT_TOOL_SIDE_EFFECT_RECORDED, payload)
+
+
+def _requires_approval_for(registry: ToolRegistry, call: dict[str, Any]) -> bool:
+    name = str(call.get("name") or "")
+    args = call.get("args") if isinstance(call.get("args"), dict) else {}
+    spec = registry.get_spec(name)
+    if spec is None:
+        return name == "http_post"
+    return bool(spec.requires_approval_for(args))
 
 

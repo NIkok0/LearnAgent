@@ -20,6 +20,7 @@ from copilot_agent.contracts.events.payloads import (
     RetrievalCompletedPayload,
     TokenPayload,
     ToolEndPayload,
+    ToolSideEffectRecordedPayload,
     ToolStartPayload,
 )
 from copilot_agent.runtime.event_schema import (
@@ -78,7 +79,6 @@ _LOOSE_KINDS = frozenset(
         EVENT_RAG_DOCUMENT_INGESTED,
         EVENT_RAG_DOCUMENT_DELETED,
         EVENT_RAG_DOCUMENT_DELETE_PROOF,
-        EVENT_TOOL_SIDE_EFFECT_RECORDED,
         EVENT_CANCEL_REQUESTED,
         EVENT_CANCELLED,
     }
@@ -88,6 +88,7 @@ _STRICT_MODELS: dict[str, type[BaseModel]] = {
     EVENT_TOKEN: TokenPayload,
     EVENT_TOOL_START: ToolStartPayload,
     EVENT_TOOL_END: ToolEndPayload,
+    EVENT_TOOL_SIDE_EFFECT_RECORDED: ToolSideEffectRecordedPayload,
     EVENT_RETRIEVAL_COMPLETED: RetrievalCompletedPayload,
     EVENT_CONTEXT_BUILT: ContextBuiltPayload,
     EVENT_CREDENTIAL_BINDING_AUDIT: CredentialBindingAuditPayload,

@@ -51,6 +51,26 @@ class ToolEndPayload(BaseModel):
     idempotency_reused: bool = False
 
 
+class ToolSideEffectRecordedPayload(BaseModel):
+    tool_name: Literal["http_post"]
+    call_id: str = ""
+    path: str = ""
+    method: str = "POST"
+    risk_level: str = "high"
+    requires_approval: bool = False
+    approval_status: Literal["not_required", "pending", "approved", "rejected", "policy_blocked"]
+    side_effect_status: Literal["confirmed", "reused", "none", "unknown", "blocked"]
+    success: bool = False
+    status_code: int | None = None
+    idempotency_key: str | None = None
+    idempotency_reused: bool = False
+    compensatable: bool = False
+    reason: str = ""
+    policy_source: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RetrievalSourceItem(BaseModel):
     source_file: str
     section_title: str | None = None

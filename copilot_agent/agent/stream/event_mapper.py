@@ -114,6 +114,7 @@ class GraphEventMapper:
         pending_tool_call_ids = approval_tool_call_ids(
             self._memory.get_thread_events(thread_id, run_id=run_id)
         )
+        approved_tool_call_ids = set(pending_tool_call_ids.values())
         last_assistant_output = ""
         last_reasoning_content = ""
         generation_started_at: dict[str, float] = {}
@@ -354,6 +355,7 @@ class GraphEventMapper:
                 side_effect_payload = build_tool_side_effect_payload(
                     tool_start_payload=start_payload,
                     tool_end_payload=end_payload,
+                    approval_status="approved" if call_id in approved_tool_call_ids else None,
                 )
                 if side_effect_payload is not None:
                     yield _runtime_event(
@@ -409,6 +411,7 @@ class GraphEventMapper:
                 side_effect_payload = build_tool_side_effect_payload(
                     tool_start_payload=start_payload,
                     tool_end_payload=end_payload,
+                    approval_status="approved" if call_id in approved_tool_call_ids else None,
                 )
                 if side_effect_payload is not None:
                     yield _runtime_event(
@@ -593,6 +596,7 @@ class GraphEventMapper:
             side_effect_payload = build_tool_side_effect_payload(
                 tool_start_payload=start_payload,
                 tool_end_payload=end_payload,
+                approval_status="approved" if call_id in approved_tool_call_ids else None,
             )
             if side_effect_payload is not None:
                 out.append(

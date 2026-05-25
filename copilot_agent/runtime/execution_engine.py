@@ -29,7 +29,7 @@ from copilot_agent.runtime.event_schema import (
 from copilot_agent.contracts.adapters.sse import SseAdapter
 from copilot_agent.contracts.base import RuntimeEvent
 from copilot_agent.settings import settings
-from copilot_agent.tools.audit import build_tool_side_effect_payload
+from copilot_agent.tools.audit import build_blocked_tool_side_effect_payload
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -47,13 +47,6 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _call_arg(call: dict[str, Any], key: str) -> Any:
-    args = call.get("args")
-    if isinstance(args, dict):
-        return args.get(key)
-    return None
 
 
 @dataclass
@@ -521,28 +514,11 @@ class ExecutionEngine:
             call_id = str(call.get("id") or "").strip()
             if not call_id or call_id in existing_call_ids:
                 continue
-            start_payload = {
-                "name": name,
-                "call_id": call_id,
-                "category": "http" if name == "http_post" else "",
-                "risk_level": "high" if name == "http_post" else "",
-                "requires_approval": True,
-                "arguments": call.get("args") if isinstance(call.get("args"), dict) else {},
-                "idempotency_key": _call_arg(call, "idempotency_key"),
-            }
-            end_payload = {
-                "name": name,
-                "call_id": call_id,
-                "success": False,
-                "error": "tool execution was blocked by approval rejection",
-                "idempotency_key": start_payload.get("idempotency_key"),
-                "result": {"success": False, "error": "approval rejected", "metadata": {}},
-            }
-            payload = build_tool_side_effect_payload(
-                tool_start_payload=start_payload,
-                tool_end_payload=end_payload,
+            payload = build_blocked_tool_side_effect_payload(
+                tool_call=call,
                 reason="approval_rejected",
-                approval_status="rejected",
+                policy_source="human_approval",
+                requires_approval=True,
             )
             if payload is None:
                 continue

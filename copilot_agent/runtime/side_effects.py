@@ -5,6 +5,7 @@ from typing import Any
 from copilot_agent.runtime.event_schema import EVENT_TOOL_SIDE_EFFECT_RECORDED
 
 SIDE_EFFECT_STATUSES = ("confirmed", "reused", "none", "unknown", "blocked")
+SIDE_EFFECT_STATUS_SET = set(SIDE_EFFECT_STATUSES)
 
 
 def build_side_effect_read_model(run: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -17,7 +18,8 @@ def build_side_effect_read_model(run: dict[str, Any], events: list[dict[str, Any
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
         item = _side_effect_item(event, payload)
         side_effects.append(item)
-        if item.get("side_effect_status") == "unknown":
+        status = str(item.get("side_effect_status") or "")
+        if status == "unknown":
             warnings.append(
                 {
                     "code": "side_effect_unknown",
@@ -26,6 +28,17 @@ def build_side_effect_read_model(run: dict[str, Any], events: list[dict[str, Any
                     "call_id": item.get("call_id"),
                     "tool": item.get("tool_name"),
                     "reason": item.get("reason"),
+                }
+            )
+        elif status not in SIDE_EFFECT_STATUS_SET:
+            warnings.append(
+                {
+                    "code": "side_effect_unknown_status",
+                    "message": "write tool side effect used an unknown status",
+                    "event_id": item.get("event_id"),
+                    "call_id": item.get("call_id"),
+                    "tool": item.get("tool_name"),
+                    "side_effect_status": status,
                 }
             )
     summary = _summary(side_effects)

@@ -47,6 +47,11 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
     ),
     SuiteSpec(
+        suite_name="tool_side_effect_governance_v1",
+        script="scripts/verify_tool_side_effect_governance_v1.py",
+        args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
+    ),
+    SuiteSpec(
         suite_name="eval_cases_contract",
         script="scripts/verify_eval_cases_contract.py",
     ),
@@ -115,6 +120,11 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         suite_name="tool_side_effect_read_model_v1",
         script="scripts/verify_tool_side_effect_read_model_v1.py",
         args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
+    ),
+    SuiteSpec(
+        suite_name="tool_side_effect_governance_v1",
+        script="scripts/verify_tool_side_effect_governance_v1.py",
+        args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
     ),
     SuiteSpec(
         suite_name="eval_cases_contract",
@@ -492,6 +502,11 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
                 suite_name="tool_side_effect_read_model_v1",
                 script="scripts/verify_tool_side_effect_read_model_v1.py",
                 args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
+            ),
+            SuiteSpec(
+                suite_name="tool_side_effect_governance_v1",
+                script="scripts/verify_tool_side_effect_governance_v1.py",
+                args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
             ),
             SuiteSpec(
                 suite_name="policy_aware_rag_v1",
