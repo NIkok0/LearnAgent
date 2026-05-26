@@ -250,11 +250,31 @@ def _maybe_run_ragas(records: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         return {}, errors
 
 
-def _ragas_worker(records: list[dict[str, Any]], queue: Any) -> None:
+def _ragas_worker(records: list[dict[str, Any]], conn: Any) -> None:
     try:
-        queue.put(_maybe_run_ragas(records))
+        conn.send(_maybe_run_ragas(records))
     except BaseException as exc:  # pragma: no cover - child process defensive boundary
-        queue.put(({}, [f"ragas_worker_error: {exc}"]))
+        try:
+            conn.send(({}, [f"ragas_worker_error: {exc}"]))
+        except BaseException:
+            pass
+    finally:
+        try:
+            conn.close()
+        except BaseException:
+            pass
+
+
+def _stop_ragas_process(proc: mp.Process) -> None:
+    if not proc.is_alive():
+        return
+    proc.terminate()
+    proc.join(2)
+    if proc.is_alive():
+        kill = getattr(proc, "kill", None)
+        if callable(kill):
+            kill()
+            proc.join(2)
 
 
 def _maybe_run_ragas_with_timeout(
@@ -264,19 +284,29 @@ def _maybe_run_ragas_with_timeout(
 ) -> tuple[dict[str, Any], list[str]]:
     timeout = max(1, int(timeout_seconds))
     ctx = mp.get_context("spawn")
-    queue = ctx.Queue(maxsize=1)
-    proc = ctx.Process(target=_ragas_worker, args=(records, queue), daemon=True)
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_ragas_worker, args=(records, child_conn), daemon=True)
     proc.start()
-    proc.join(timeout)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(5)
+    child_conn.close()
+    received = parent_conn.poll(timeout)
+    if received:
+        try:
+            result = parent_conn.recv()
+        except EOFError:
+            result = None
+        finally:
+            parent_conn.close()
+        proc.join(2)
+    else:
+        parent_conn.close()
+        _stop_ragas_process(proc)
         return {}, [f"ragas_timeout_after_seconds={timeout}"]
+    if proc.is_alive():
+        _stop_ragas_process(proc)
     if proc.exitcode not in (0, None):
         return {}, [f"ragas_process_exit_code={proc.exitcode}"]
-    if queue.empty():
+    if result is None:
         return {}, ["ragas_process_returned_no_result"]
-    result = queue.get()
     if isinstance(result, tuple) and len(result) == 2:
         metrics, errors = result
         return (

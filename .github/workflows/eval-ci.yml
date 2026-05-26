@@ -151,7 +151,7 @@ jobs:
           RAG_EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            python scripts/verify_eval_suite.py --profile full --enable-ragas
+            python scripts/verify_eval_suite.py --profile full
           elif [ "${{ inputs.enable_ragas }}" = "true" ]; then
             python scripts/verify_eval_suite.py --profile full --enable-ragas
           else

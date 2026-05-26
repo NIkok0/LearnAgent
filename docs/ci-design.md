@@ -184,7 +184,7 @@ python scripts/verify_rag_domain.py --case retrieval_quality
 | `e2e` | `demo_golden_e2e`（Demo 1–6 proxy） |
 | `full` | core（33）+ rag（15）+ nightly（2）+ e2e（1）= **51** |
 
-Nightly schedule 默认带 `--enable-ragas`，仅将 `phase4_ragas` 切为 `--mode auto --disable-vector --allow-missing-docs`；其他 RAG 套件保持各自参数，向量 + rerank 趋势仍由 `phase4_ragas_nightly` 负责。
+Nightly schedule 默认不带 `--enable-ragas`，因此 `phase4_ragas` 走 deterministic proxy；向量 + rerank 趋势仍由 `phase4_ragas_nightly` 负责。只有手工 `workflow_dispatch` 且 `enable_ragas=true` 时，才将 `phase4_ragas` 切为 `--mode auto --disable-vector --allow-missing-docs`。
 
 ---
 
@@ -203,7 +203,10 @@ conda run -n learnagent312 python scripts/verify_eval_suite.py --profile rag --s
 # Demo proxy
 conda run -n learnagent312 python scripts/verify_eval_suite.py --profile e2e
 
-# 夜跑
+# 夜跑默认路径
+conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full
+
+# 手工 RAGAS 增强路径
 conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --enable-ragas
 ```
 

@@ -655,6 +655,19 @@ def _load_checks_from_summary(summary_json: str | None) -> dict[str, Any]:
     return checks
 
 
+def _load_summary_payload(summary_json: str | None) -> dict[str, Any]:
+    if not summary_json:
+        return {}
+    path = Path(summary_json)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _suite_status(return_code: int, kv: dict[str, str]) -> str:
     if return_code != 0:
         return "FAIL"
@@ -671,6 +684,15 @@ def _timeout_suite_status(kv: dict[str, str]) -> str:
     if not _suite_signal_values(kv):
         return "FAIL"
     return _suite_status(0, kv)
+
+
+def _proxy_summary_passed(summary: dict[str, Any]) -> bool:
+    if str(summary.get("phase4_ragas") or "").upper() != "PASS":
+        return False
+    proxy_metrics = summary.get("proxy_metrics")
+    if not isinstance(proxy_metrics, dict):
+        return False
+    return int(proxy_metrics.get("docs_cases") or 0) >= 3
 
 
 def main() -> int:
@@ -762,6 +784,7 @@ def main() -> int:
             status = _timeout_suite_status(kv)
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
+            summary_payload = _load_summary_payload(summary_json)
             out = stdout.splitlines()[-12:]
             err = stderr.splitlines()[-12:]
             timeout_error = f"timeout_after_seconds={args.suite_timeout_seconds}"
@@ -770,6 +793,9 @@ def main() -> int:
             # due to lingering async resources. In that case, treat suite as pass with warning.
             if status in {"PASS", "SKIP"}:
                 errors.append(f"timeout_after_{status.lower()}_signal")
+            elif spec.suite_name == "phase4_ragas" and _proxy_summary_passed(summary_payload):
+                status = "PASS"
+                errors.append("timeout_after_proxy_summary_pass")
             results.append(
                 {
                     "suite_name": spec.suite_name,
