@@ -146,7 +146,7 @@ class MemoryItemWriter:
                 history.append(
                     {
                         "version": old.version,
-                        "content": old.content,
+                        "content_hash": old.content_hash,
                         "updated_at": old.updated_at,
                         "action": "superseded",
                     }

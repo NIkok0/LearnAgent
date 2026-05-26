@@ -107,7 +107,7 @@ def _detail(response: httpx.Response) -> str:
     return str(data.get("detail", ""))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify LearnAgent tool side-effect read model v1.")
     parser.add_argument(
         "--event-store-path",
@@ -122,7 +122,12 @@ def main() -> int:
         "--summary-json",
         default=str(ROOT / "artifacts/runtime/tool-side-effect-read-model-v1-summary.json"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if argv is None:
+        print(
+            "deprecated_wrapper=verify_tool_side_effect_read_model_v1.py; "
+            "use=scripts/verify_tool_governance_domain.py --case read_model"
+        )
 
     import asyncio
 

@@ -6,8 +6,8 @@ from copilot_agent.contracts.retrieval import RetrievalRequest
 from copilot_agent.memory.context_builder import build_memory_context, build_memory_preview
 from copilot_agent.memory.policy_config import MemoryPolicyConfig, memory_policy_from_settings
 from copilot_agent.memory.schema import EpisodicInjectBundle
-from copilot_agent.memory.item_store import MemoryItemStore
-from copilot_agent.memory.item_schema import MemoryScope
+from copilot_agent.memory.item_store import DELETED_MEMORY_CONTENT, MemoryItemStore
+from copilot_agent.memory.item_schema import MemoryItemRecord, MemoryScope
 from copilot_agent.memory.schema import MemoryContext
 from copilot_agent.memory.item_writer import MemoryItemWriter
 from copilot_agent.memory.summary_service import (
@@ -17,7 +17,14 @@ from copilot_agent.memory.summary_service import (
     MemorySummaryService,
 )
 from copilot_agent.rag import RagStore
-from copilot_agent.runtime.event_store import EventStore, utc_now_iso
+from copilot_agent.runtime.event_schema import (
+    EVENT_MEMORY_ITEM_CONFIRMED,
+    EVENT_MEMORY_ITEM_DELETED,
+    EVENT_MEMORY_ITEM_DELETE_PROOF,
+    EVENT_MEMORY_ITEM_REJECTED,
+)
+from copilot_agent.runtime.event_store import ActiveRunExistsError, EventStore, utc_now_iso
+from copilot_agent.runtime.run_state import RUN_STATUS_COMPLETED
 from copilot_agent.settings import settings
 
 
@@ -142,6 +149,14 @@ class MemoryManager:
             if existing is None or existing.user_id != self.resolve_user_id(thread_id):
                 return None
         confirmed = self._item_store.confirm_item(item_id)
+        if confirmed is not None:
+            self._record_memory_governance(
+                EVENT_MEMORY_ITEM_CONFIRMED,
+                confirmed,
+                action="confirmed",
+                reason="confirmed",
+                actor="user",
+            )
         return confirmed.as_dict() if confirmed is not None else None
 
     def reject_memory_item(
@@ -163,7 +178,76 @@ class MemoryManager:
             history_entry={"action": "rejected", "reason": reason, "at": utc_now_iso()},
         )
         rejected = self._item_store.get(item_id)
+        if rejected is not None:
+            self._record_memory_governance(
+                EVENT_MEMORY_ITEM_REJECTED,
+                rejected,
+                action="rejected",
+                reason=reason,
+                actor="user",
+            )
         return rejected.as_dict() if rejected is not None else None
+
+    def delete_memory_item(
+        self,
+        item_id: str,
+        *,
+        thread_id: str,
+        reason: str = "user_deleted",
+        actor: str = "user",
+    ) -> dict[str, Any] | None:
+        if self._item_store is None:
+            return None
+        item = self._item_store.get(item_id)
+        if item is None or item.user_id != self.resolve_user_id(thread_id):
+            return None
+        deleted_at = utc_now_iso()
+        deleted = self._item_store.delete_with_tombstone(
+            item_id,
+            history_entry={
+                "action": "deleted",
+                "reason": reason,
+                "at": deleted_at,
+                "actor": actor,
+                "content_redacted": True,
+                "embedding_removed": True,
+            },
+        )
+        if deleted is None:
+            return None
+        delete_event = self._record_memory_governance(
+            EVENT_MEMORY_ITEM_DELETED,
+            deleted,
+            action="deleted",
+            reason=reason,
+            actor=actor,
+            at=deleted_at,
+            content_redacted=True,
+            embedding_removed=True,
+        )
+        self._record_memory_delete_proof(
+            deleted,
+            reason=reason,
+            actor=actor,
+            deleted_at=deleted_at,
+            delete_event_id=int((delete_event or {}).get("id") or 0),
+        )
+        return deleted.as_dict()
+
+    def latest_memory_delete_proof(self, thread_id: str, item_id: str) -> dict[str, Any] | None:
+        if self._events is None:
+            return None
+        user_id = self.resolve_user_id(thread_id)
+        for event in reversed(self._events.list_events(thread_id)):
+            if str(event.get("type") or "") != EVENT_MEMORY_ITEM_DELETE_PROOF:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get("item_id") or "") != item_id:
+                continue
+            if str(payload.get("user_id") or "") != user_id:
+                continue
+            return payload
+        return None
 
     def list_memory_items(
         self,
@@ -180,7 +264,7 @@ class MemoryManager:
             scopes = (MemoryScope(scope),)
         user_id = self.resolve_user_id(thread_id)
         return [
-            item.as_dict()
+            _sanitize_memory_item_for_api(item)
             for item in self._item_store.list_items(
                 user_id=user_id,
                 thread_id=thread_id,
@@ -189,6 +273,75 @@ class MemoryManager:
                 limit=limit,
             )
         ]
+
+    def _record_memory_governance(
+        self,
+        event_type: str,
+        item: MemoryItemRecord,
+        *,
+        action: str,
+        reason: str,
+        actor: str,
+        at: str | None = None,
+        content_redacted: bool = False,
+        embedding_removed: bool = False,
+    ) -> dict[str, Any] | None:
+        if self._events is None:
+            return None
+        event_at = at or utc_now_iso()
+        run_id = self._memory_governance_run_id(item.thread_id or item.user_id)
+        payload = _memory_governance_payload(
+            item,
+            action=action,
+            reason=reason,
+            actor=actor,
+            at=event_at,
+            content_redacted=content_redacted,
+            embedding_removed=embedding_removed,
+        )
+        return self._events.append_event(item.thread_id or item.user_id, run_id, event_type, payload)
+
+    def _record_memory_delete_proof(
+        self,
+        item: MemoryItemRecord,
+        *,
+        reason: str,
+        actor: str,
+        deleted_at: str,
+        delete_event_id: int,
+    ) -> dict[str, Any] | None:
+        if self._events is None:
+            return None
+        run_id = self._memory_governance_run_id(item.thread_id or item.user_id)
+        payload = {
+            "item_id": item.id,
+            "user_id": item.user_id,
+            "thread_id": item.thread_id,
+            "scope": item.scope.value,
+            "memory_type": item.memory_type.value,
+            "source_run_id": item.source_run_id,
+            "deleted_at": deleted_at,
+            "reason": reason,
+            "deleted_by": actor,
+            "content_redacted": True,
+            "embedding_removed": True,
+            "delete_event_id": delete_event_id,
+        }
+        return self._events.append_event(item.thread_id or item.user_id, run_id, EVENT_MEMORY_ITEM_DELETE_PROOF, payload)
+
+    def _memory_governance_run_id(self, thread_id: str) -> str:
+        if self._events is None:
+            return ""
+        run_id = f"memory-governance-{thread_id}"
+        if self._events.get_run(run_id) is None:
+            try:
+                self._events.create_run(thread_id, run_id=run_id, status=RUN_STATUS_COMPLETED)
+            except ActiveRunExistsError:
+                runs = self._events.list_runs(thread_id)
+                if runs:
+                    return str(runs[-1].get("id") or run_id)
+                raise
+        return run_id
 
     def append_event(self, thread_id: str, run_id: str | None, event_type: str, payload: dict[str, Any]) -> None:
         if self._events is not None and run_id:
@@ -210,3 +363,40 @@ class MemoryManager:
 
     def get_thread_summary(self, thread_id: str) -> dict[str, Any] | None:
         return self._summary_service.get_thread_summary(thread_id)
+
+
+def _memory_governance_payload(
+    item: MemoryItemRecord,
+    *,
+    action: str,
+    reason: str,
+    actor: str,
+    at: str,
+    content_redacted: bool,
+    embedding_removed: bool,
+) -> dict[str, Any]:
+    return {
+        "item_id": item.id,
+        "user_id": item.user_id,
+        "thread_id": item.thread_id,
+        "scope": item.scope.value,
+        "memory_type": item.memory_type.value,
+        "source_run_id": item.source_run_id,
+        "action": action,
+        "reason": reason,
+        "actor": actor,
+        "at": at,
+        "deleted_at": at if action == "deleted" else None,
+        "deleted_by": actor if action == "deleted" else None,
+        "content_redacted": content_redacted,
+        "embedding_removed": embedding_removed,
+    }
+
+
+def _sanitize_memory_item_for_api(item: MemoryItemRecord) -> dict[str, Any]:
+    payload = item.as_dict()
+    if item.is_deprecated and item.content == DELETED_MEMORY_CONTENT:
+        payload.pop("content", None)
+        payload["content_redacted"] = True
+        payload["tombstone"] = True
+    return payload

@@ -294,7 +294,7 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify LearnAgent Tool Side Effect Ledger v1.")
     parser.add_argument(
         "--event-store-path",
@@ -305,7 +305,12 @@ def main() -> int:
         "--summary-json",
         default=str(ROOT / "artifacts/runtime/tool-side-effect-ledger-v1-summary.json"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if argv is None:
+        print(
+            "deprecated_wrapper=verify_tool_side_effect_ledger_v1.py; "
+            "use=scripts/verify_tool_governance_domain.py --case ledger"
+        )
 
     event_store_path = Path(args.event_store_path).resolve()
     event_store_path.parent.mkdir(parents=True, exist_ok=True)

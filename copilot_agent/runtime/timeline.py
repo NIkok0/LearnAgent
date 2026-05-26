@@ -21,7 +21,15 @@ CHECKPOINT_EVENTS = {
     "checkpoint_consistency_checked",
     "thread_checkpoint_purged",
 }
-MEMORY_EVENTS = {"memory_run_summary", "memory_thread_summary", "checkpoint_compacted"}
+MEMORY_EVENTS = {
+    "memory_run_summary",
+    "memory_thread_summary",
+    "checkpoint_compacted",
+    "memory_item_confirmed",
+    "memory_item_rejected",
+    "memory_item_deleted",
+    "memory_item_delete_proof",
+}
 
 
 class TimelineProjector:
@@ -733,6 +741,12 @@ def _debugger_summary(
     output_guard_items = [item for item in items if item.get("kind") == "output_guard"]
     side_effect_items = [item for item in items if item.get("kind") == "side_effect"]
     policy_items = [item for item in items if item.get("kind") == "policy"]
+    memory_items = [item for item in items if item.get("kind") == "memory"]
+    memory_governance_items = [
+        item
+        for item in memory_items
+        if str(item.get("title") or "").startswith("memory_item_")
+    ]
     observability = _observability_summary(events)
     cost = _cost_summary(events)
     checkpoint = _checkpoint_summary(
@@ -778,6 +792,16 @@ def _debugger_summary(
         "policy_block_count": sum(1 for item in policy_items if item.get("decision") == "block"),
         "policy_ask_count": sum(1 for item in policy_items if item.get("decision") == "ask"),
         "policy_deny_count": sum(1 for item in policy_items if item.get("decision") == "deny"),
+        "memory_governance": {
+            "total": len(memory_governance_items),
+            "confirmed": sum(1 for item in memory_governance_items if item.get("title") == "memory_item_confirmed"),
+            "rejected": sum(1 for item in memory_governance_items if item.get("title") == "memory_item_rejected"),
+            "deleted": sum(1 for item in memory_governance_items if item.get("title") == "memory_item_deleted"),
+            "delete_proof": sum(
+                1 for item in memory_governance_items if item.get("title") == "memory_item_delete_proof"
+            ),
+        },
+        "memory_governance_count": len(memory_governance_items),
         "approval": {
             "count": len(approval_items),
             "waiting": any(item.get("status") == "waiting" for item in approval_items),

@@ -22,7 +22,9 @@ from copilot_agent.settings import settings  # noqa: E402
 from scripts._memory_verify_helpers import make_memory_fixture, unique_sqlite_path  # noqa: E402
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        print("deprecated_wrapper=verify_memory_quality.py; use=scripts/verify_memory_domain.py --case quality")
     event_store_path = unique_sqlite_path("verify-memory-quality")
     policy = MemoryPolicyConfig(
         enabled=True,

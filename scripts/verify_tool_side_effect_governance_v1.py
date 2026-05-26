@@ -303,7 +303,7 @@ async def verify(event_store_path: Path, checkpoint_path: Path, thread_prefix: s
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify hardened side-effect governance v1.")
     parser.add_argument(
         "--event-store-path",
@@ -318,7 +318,12 @@ def main() -> int:
         "--summary-json",
         default=str(ROOT / "artifacts/runtime/tool-side-effect-governance-v1-summary.json"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if argv is None:
+        print(
+            "deprecated_wrapper=verify_tool_side_effect_governance_v1.py; "
+            "use=scripts/verify_tool_governance_domain.py --case governance"
+        )
 
     event_store_path = Path(args.event_store_path).resolve()
     checkpoint_path = Path(args.checkpoint_path).resolve()

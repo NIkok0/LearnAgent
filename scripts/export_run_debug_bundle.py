@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from copilot_agent.runtime.event_store import EventStore  # noqa: E402
+from copilot_agent.runtime.memory_governance import build_memory_governance_read_model  # noqa: E402
 from copilot_agent.runtime.policy_audit import build_policy_read_model  # noqa: E402
 from copilot_agent.runtime.side_effects import build_side_effect_read_model  # noqa: E402
 from copilot_agent.runtime.timeline import TimelineProjector  # noqa: E402
@@ -41,6 +42,7 @@ def build_debug_bundle(
     timeline = TimelineProjector().project_run(run, events)
     side_effects = build_side_effect_read_model(run, events)
     policy = build_policy_read_model(run, events)
+    memory_governance = build_memory_governance_read_model(events)
     return {
         "run": run,
         "thread": thread,
@@ -52,6 +54,9 @@ def build_debug_bundle(
         "side_effects": side_effects["side_effects"],
         "side_effect_summary": side_effects["summary"],
         "side_effect_warnings": side_effects["warnings"],
+        "memory_governance": memory_governance["events"],
+        "memory_governance_summary": memory_governance["summary"],
+        "latest_memory_delete_proof": memory_governance["latest_delete_proof"],
         "latest_run_consistency": _latest_payload(events, "run_consistency_checked"),
         "latest_checkpoint_consistency": _latest_payload(events, "checkpoint_consistency_checked"),
         "checkpoint_raw": inspect_checkpoint_sqlite(checkpoint_path, thread_id=thread_id),

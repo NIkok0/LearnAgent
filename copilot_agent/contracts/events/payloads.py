@@ -235,6 +235,42 @@ class MemoryThreadSummaryPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class MemoryItemGovernancePayload(BaseModel):
+    item_id: str
+    user_id: str = ""
+    thread_id: str | None = None
+    scope: Literal["user", "session", "global"]
+    memory_type: Literal["fact", "preference", "behavior", "task_summary"]
+    source_run_id: str | None = None
+    action: Literal["confirmed", "rejected", "deleted"]
+    reason: str = ""
+    actor: str = "system"
+    at: str
+    deleted_at: str | None = None
+    deleted_by: str | None = None
+    content_redacted: bool = False
+    embedding_removed: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MemoryItemDeleteProofPayload(BaseModel):
+    item_id: str
+    user_id: str = ""
+    thread_id: str | None = None
+    scope: Literal["user", "session", "global"]
+    memory_type: Literal["fact", "preference", "behavior", "task_summary"]
+    source_run_id: str | None = None
+    deleted_at: str
+    reason: str = ""
+    deleted_by: str = "system"
+    content_redacted: bool = True
+    embedding_removed: bool = True
+    delete_event_id: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CheckpointCompactedPayload(BaseModel):
     compacted: bool = True
     thread_id: str = ""

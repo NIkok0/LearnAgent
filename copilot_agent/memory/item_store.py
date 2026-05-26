@@ -18,6 +18,9 @@ def content_hash(content: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+DELETED_MEMORY_CONTENT = "[deleted memory item]"
+
+
 class MemoryItemStore:
     """SQLite-backed structured long-term memory items (same DB file as EventStore)."""
 
@@ -175,6 +178,38 @@ class MemoryItemStore:
             embedding=row.embedding,
         )
         self.update(updated)
+
+    def delete_with_tombstone(self, item_id: str, *, history_entry: dict[str, Any] | None = None) -> MemoryItemRecord | None:
+        row = self.get(item_id)
+        if row is None:
+            return None
+        history = list(row.history)
+        if history_entry:
+            history.append(history_entry)
+        updated = MemoryItemRecord(
+            id=row.id,
+            user_id=row.user_id,
+            thread_id=row.thread_id,
+            scope=row.scope,
+            memory_type=row.memory_type,
+            content=DELETED_MEMORY_CONTENT,
+            content_hash=content_hash(DELETED_MEMORY_CONTENT),
+            importance=0.0,
+            confidence=0.0,
+            version=row.version,
+            supersedes_id=row.supersedes_id,
+            is_deprecated=True,
+            pending_confirmation=False,
+            expires_at=row.expires_at,
+            access_count=row.access_count,
+            last_accessed_at=row.last_accessed_at,
+            created_at=row.created_at,
+            updated_at=utc_now_iso(),
+            source_run_id=row.source_run_id,
+            history=history,
+            embedding=None,
+        )
+        return self.update(updated)
 
     def get(self, item_id: str) -> MemoryItemRecord | None:
         with self._lock, self._connect() as conn:

@@ -66,7 +66,12 @@ def _expire_soon(store: MemoryItemStore, item_id: str) -> None:
         conn.execute("UPDATE memory_items SET expires_at = ? WHERE id = ?", (expires, item_id))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        print(
+            "deprecated_wrapper=verify_memory_conversion_eviction_v1.py; "
+            "use=scripts/verify_memory_domain.py --case conversion_eviction"
+        )
     db_path = Path(settings.agent_event_store_path).with_name(
         f"verify-memory-conversion-eviction-{uuid.uuid4().hex[:8]}.sqlite"
     )

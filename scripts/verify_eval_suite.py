@@ -127,19 +127,9 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_tool_execution_reliability.py",
     ),
     SuiteSpec(
-        suite_name="tool_side_effect_ledger_v1",
-        script="scripts/verify_tool_side_effect_ledger_v1.py",
-        args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="tool_side_effect_read_model_v1",
-        script="scripts/verify_tool_side_effect_read_model_v1.py",
-        args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="tool_side_effect_governance_v1",
-        script="scripts/verify_tool_side_effect_governance_v1.py",
-        args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
+        suite_name="tool_governance_domain",
+        script="scripts/verify_tool_governance_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="eval_cases_contract",
@@ -212,12 +202,9 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_final_answer_l7.py",
     ),
     SuiteSpec(
-        suite_name="short_term_memory_formation_v1",
-        script="scripts/verify_short_term_memory_formation_v1.py",
-    ),
-    SuiteSpec(
-        suite_name="memory_conversion_eviction_v1",
-        script="scripts/verify_memory_conversion_eviction_v1.py",
+        suite_name="memory_domain",
+        script="scripts/verify_memory_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="hitl_checkpoint_resume",
@@ -347,6 +334,10 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
     SuiteSpec(
         suite_name="memory_quality",
         script="scripts/verify_memory_quality.py",
+    ),
+    SuiteSpec(
+        suite_name="memory_governance_v1",
+        script="scripts/verify_memory_governance_v1.py",
     ),
 ) + LEGACY_SUITES
 

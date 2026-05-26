@@ -227,6 +227,10 @@ class RejectMemoryItemRequest(BaseModel):
     reason: str = "rejected"
 
 
+class DeleteMemoryItemRequest(BaseModel):
+    reason: str = "user_deleted"
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -585,6 +589,40 @@ def reject_thread_memory_item(
     if item is None:
         raise HTTPException(status_code=404, detail="memory item not found")
     return {"thread_id": thread_id, "item": item}
+
+
+@app.delete("/v1/threads/{thread_id}/memory/items/{item_id}")
+def delete_thread_memory_item(
+    thread_id: str,
+    item_id: str,
+    request: DeleteMemoryItemRequest | None = Body(default=None),
+) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    item = runner.memory.delete_memory_item(
+        item_id,
+        thread_id=thread_id,
+        reason=(request.reason if request else "user_deleted"),
+        actor="user",
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    proof = runner.memory.latest_memory_delete_proof(thread_id, item_id)
+    return {"thread_id": thread_id, "item": item, "deletion_proof": proof}
+
+
+@app.get("/v1/threads/{thread_id}/memory/items/{item_id}/deletion-proof")
+def get_thread_memory_item_deletion_proof(thread_id: str, item_id: str) -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    proof = runner.memory.latest_memory_delete_proof(thread_id, item_id)
+    if proof is None:
+        raise HTTPException(status_code=404, detail="deletion proof not found")
+    return {"thread_id": thread_id, "item_id": item_id, "proof": proof}
 
 
 @app.post("/v1/threads/{thread_id}/context/preview")
