@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify run-level side-effect read model and API."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -21,7 +21,7 @@ from copilot_agent.runtime.side_effects import build_side_effect_read_model  # n
 from copilot_agent.settings import settings  # noqa: E402
 from copilot_agent.tools.audit import audit_payload_has_secret  # noqa: E402
 from scripts.export_run_debug_bundle import build_debug_bundle  # noqa: E402
-from scripts.verify_tool_side_effect_ledger_v1 import verify as seed_side_effect_ledger  # noqa: E402
+from scripts.verify_cases.tool_side_effect_ledger_v1 import verify as seed_side_effect_ledger  # noqa: E402
 
 
 async def verify(event_store_path: Path, checkpoint_path: Path, thread_id: str) -> dict[str, Any]:
@@ -123,12 +123,6 @@ def main(argv: list[str] | None = None) -> int:
         default=str(ROOT / "artifacts/runtime/tool-side-effect-read-model-v1-summary.json"),
     )
     args = parser.parse_args(argv)
-    if argv is None:
-        print(
-            "deprecated_wrapper=verify_tool_side_effect_read_model_v1.py; "
-            "use=scripts/verify_tool_governance_domain.py --case read_model"
-        )
-
     import asyncio
 
     event_store_path = Path(args.event_store_path).resolve()

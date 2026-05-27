@@ -150,6 +150,16 @@ class ContextBuiltPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SkillSelectedPayload(BaseModel):
+    skills: list[str] = Field(default_factory=list)
+    trigger_reasons: dict[str, list[str]] = Field(default_factory=dict)
+    recommended_tools: list[str] = Field(default_factory=list)
+    missing_capabilities: list[str] = Field(default_factory=list)
+    route_kind: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CredentialBindingAuditPayload(BaseModel):
     action: Literal["scope_allowed", "scope_denied", "credential_set", "credential_read_denied"]
     binding_id: str

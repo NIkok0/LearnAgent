@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify thread/run/event persistence without requiring OPENAI_API_KEY."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

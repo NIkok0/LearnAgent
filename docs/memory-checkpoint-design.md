@@ -414,5 +414,5 @@ Eviction defaults:
 
 Verification:
 ```powershell
-python scripts/verify_memory_conversion_eviction_v1.py
+python scripts/verify_memory_domain.py --case conversion_eviction
 ```

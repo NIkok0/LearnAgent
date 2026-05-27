@@ -394,6 +394,26 @@ class TimelineProjector:
                 )
                 continue
 
+            if event_type == "skill_selected":
+                items.append(
+                    {
+                        "kind": "skill",
+                        "title": "Skill selected",
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "skills": payload.get("skills") if isinstance(payload.get("skills"), list) else [],
+                        "recommended_tools": payload.get("recommended_tools")
+                        if isinstance(payload.get("recommended_tools"), list)
+                        else [],
+                        "missing_capabilities": payload.get("missing_capabilities")
+                        if isinstance(payload.get("missing_capabilities"), list)
+                        else [],
+                        "route_kind": payload.get("route_kind"),
+                        "payload": payload,
+                    }
+                )
+                continue
+
             if event_type == "retrieval_completed":
                 sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
                 items.append(
@@ -741,6 +761,7 @@ def _debugger_summary(
     output_guard_items = [item for item in items if item.get("kind") == "output_guard"]
     side_effect_items = [item for item in items if item.get("kind") == "side_effect"]
     policy_items = [item for item in items if item.get("kind") == "policy"]
+    skill_items = [item for item in items if item.get("kind") == "skill"]
     memory_items = [item for item in items if item.get("kind") == "memory"]
     memory_governance_items = [
         item
@@ -792,6 +813,15 @@ def _debugger_summary(
         "policy_block_count": sum(1 for item in policy_items if item.get("decision") == "block"),
         "policy_ask_count": sum(1 for item in policy_items if item.get("decision") == "ask"),
         "policy_deny_count": sum(1 for item in policy_items if item.get("decision") == "deny"),
+        "skills": {
+            "total": len(skill_items),
+            "selected": [
+                skill
+                for item in skill_items
+                for skill in (item.get("skills") or [])
+            ],
+        },
+        "skill_selected_count": len(skill_items),
         "memory_governance": {
             "total": len(memory_governance_items),
             "confirmed": sum(1 for item in memory_governance_items if item.get("title") == "memory_item_confirmed"),

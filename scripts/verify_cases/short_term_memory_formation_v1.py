@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify deterministic short-term memory formation and long-term seed handoff."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -151,11 +151,6 @@ def _seed_failed_run(store: EventStore, memory: MemoryManager, thread_id: str) -
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        print(
-            "deprecated_wrapper=verify_short_term_memory_formation_v1.py; "
-            "use=scripts/verify_memory_domain.py --case short_term"
-        )
     event_store_path = Path(settings.agent_event_store_path).with_name(
         f"verify-short-term-memory-{uuid.uuid4().hex[:8]}.sqlite"
     )

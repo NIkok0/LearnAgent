@@ -66,6 +66,7 @@ class ScenarioConfig(BaseModel):
     docs_dir: str | None = None
     resources: ScenarioResourcesConfig | None = None
     memory_policy: str | dict[str, object] | None = None
+    skills: list[str] = Field(default_factory=list)
     eval: ScenarioEvalPaths = Field(default_factory=ScenarioEvalPaths)
     budgets: ScenarioBudgets = Field(default_factory=ScenarioBudgets)
 

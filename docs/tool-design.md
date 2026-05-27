@@ -454,7 +454,7 @@ ToolHandlers.search_docs → get_current_call_id() → retrieval_completed.call_
 Timeline: retrieval.call_id == search_docs tool_start.call_id
 ```
 
-实现：`agent/tool_call_context.py`；验收：`verify_runtime_timeline.py`（`retrieval_call_id_linked`）。
+实现：`agent/tool_call_context.py`；验收：`verify_runtime_domain.py --case timeline`（`retrieval_call_id_linked`）。
 
 ---
 

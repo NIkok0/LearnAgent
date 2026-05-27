@@ -488,7 +488,7 @@ context_guard{}         ← budget / truncated / source_files 审计
 preretrieval_dedupe{}   ← 与 turn 内预检索去重元数据
 ```
 
-Timeline 投影为 `kind: "retrieval"`；`call_id` 与 `kind: tool` 可关联（见 `verify_runtime_timeline.py`）。
+Timeline 投影为 `kind: "retrieval"`；`call_id` 与 `kind: tool` 可关联（见 `verify_runtime_domain.py --case timeline`）。
 
 ### 6.2 Turn 前预检索（Preretrieval）
 

@@ -27,6 +27,7 @@ from copilot_agent.memory.policy_config import (
 from copilot_agent.scenario.router import RouterEngine, load_router_rules
 from copilot_agent.scenario.router.schema import RouterRulesConfig
 from copilot_agent.settings import settings
+from copilot_agent.skills import SkillRegistry, load_skill_registry
 from copilot_agent.tools.extensions.mcp.registry import load_mcp_config
 from copilot_agent.tools.extensions.mcp.schema import McpResourcesConfig
 
@@ -49,6 +50,7 @@ class LoadedScenario:
     memory_policy_overlay: dict[str, Any] | None = None
     rag_rules: RagRulesOverlay | None = None
     diagnosis_templates: dict[str, DiagnosisTemplate] | None = None
+    skill_registry: SkillRegistry | None = None
 
     @property
     def router_engine(self) -> RouterEngine:
@@ -233,6 +235,7 @@ def _build_loaded(
         rag_rules = load_rag_rules_ref(resources.rag_rules, base=base)
     if resources.diagnosis:
         diagnosis_templates = load_diagnosis_ref(resources.diagnosis, base=base)
+    skill_registry = load_skill_registry(repo_root=repo_root(), enabled_names=config.skills)
     return LoadedScenario(
         config=config,
         root=base.resolve(),
@@ -246,6 +249,7 @@ def _build_loaded(
         memory_policy_overlay=memory_overlay,
         rag_rules=rag_rules,
         diagnosis_templates=diagnosis_templates,
+        skill_registry=skill_registry,
     )
 
 
@@ -297,6 +301,13 @@ def scenario_status(scenario: LoadedScenario) -> dict[str, object]:
         "router": {
             "enabled": scenario.router_rules is not None,
             "rules": len(scenario.router_rules.rules) if scenario.router_rules else 0,
+        },
+        "skills": {
+            "enabled": list(scenario.config.skills),
+            "available": scenario.skill_registry.public_specs(scenario.config.skills)
+            if scenario.skill_registry
+            else [],
+            "warnings": list(scenario.skill_registry.warnings) if scenario.skill_registry else [],
         },
         "memory_policy": {
             "overlay_keys": sorted((scenario.memory_policy_overlay or {}).keys()),

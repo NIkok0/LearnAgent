@@ -20,6 +20,7 @@ from copilot_agent.runtime.event_schema import (
     EVENT_CONTEXT_BUILT,
     EVENT_POLICY_DECISION_RECORDED,
     EVENT_RETRIEVAL_COMPLETED,
+    EVENT_SKILL_SELECTED,
 )
 from copilot_agent.runtime.policy_audit import build_rag_policy_decision_payloads
 from copilot_agent.scenario.loader import LoadedScenario
@@ -27,6 +28,7 @@ from copilot_agent.scenario.router import RouterEngine
 from copilot_agent.scenario.router.types import ToolRoute, build_route_system_message
 from copilot_agent.rag.request_context import retrieval_defaults_from_scenario
 from copilot_agent.settings import settings
+from copilot_agent.skills.selection import public_selected_skill, select_skills, skill_system_message
 from copilot_agent.tools.registry import ToolRegistry
 
 
@@ -180,6 +182,17 @@ class ContextManager:
             "recommended_tools": list(route.recommended_tools),
             "forbidden_tools": list(route.forbidden_tools),
         }
+        enabled_skills = (
+            self._scenario.skill_registry.enabled(self._scenario.config.skills)
+            if self._scenario.skill_registry
+            else []
+        )
+        selected_skills = select_skills(
+            enabled_skills,
+            goal=goal,
+            route_kind=route.kind,
+            enabled_capabilities=self._scenario.capabilities,
+        )
 
         budget_max = self._budget_max_chars()
         memory_context = self._memory.build_context(
@@ -231,6 +244,9 @@ class ContextManager:
         extra_system: list[SystemMessage] = []
         if route_message is not None:
             extra_system.append(route_message)
+        skill_message = skill_system_message(selected_skills)
+        if skill_message:
+            extra_system.append(SystemMessage(content=skill_message))
         if rag_message is not None:
             extra_system.append(rag_message)
 
@@ -301,12 +317,14 @@ class ContextManager:
                     ],
                 },
             ],
+            skill_injections=[public_selected_skill(item) for item in selected_skills],
             retrieved_context=retrieved_context,
             scenario_prompts=[self._system_prompt] if self._system_prompt else [],
             enabled_tool_schemas=self._tool_registry.public_specs(),
             policy_hints=[
                 {"tool_allowlist": self._scenario.policy.tool_allowlist},
                 {"tool_route": route.as_dict()},
+                {"skills": [item.get("name") for item in selected_skills]},
             ],
             budget={
                 "max_context_chars": budget_max,
@@ -323,11 +341,14 @@ class ContextManager:
                 "preretrieval_excerpt_chars": int(pr_meta.get("excerpt_chars") or 0),
                 "preretrieval_cache": preretrieval_cache,
                 "memory_inject_chars": memory_inject_chars,
+                "skill_injected": bool(selected_skills),
+                "skill_count": len(selected_skills),
                 "checkpoint_pack": checkpoint_pack,
             },
             graph_messages=packed.messages,
         )
         if emit_events:
+            self._emit_skill_selected(thread_id=thread_id, run_id=run_id, route_kind=route.kind, selected=selected_skills)
             self._emit_context_built(thread_id=thread_id, run_id=run_id, goal=goal, bundle=bundle)
         return bundle
 
@@ -380,3 +401,55 @@ class ContextManager:
             "strategy": "react_with_safety_gate",
             "available_tools": self._tool_registry.public_specs(),
         }
+
+    def preview_skills(self, goal: str, *, route_kind: str | None = None) -> list[dict[str, Any]]:
+        skills = (
+            self._scenario.skill_registry.enabled(self._scenario.config.skills)
+            if self._scenario.skill_registry
+            else []
+        )
+        if route_kind is None:
+            route_kind = self.plan_route(goal).kind
+        return select_skills(
+            skills,
+            goal=goal,
+            route_kind=route_kind,
+            enabled_capabilities=self._scenario.capabilities,
+        )
+
+    def preview_skills_public(self, goal: str, *, route_kind: str | None = None) -> list[dict[str, Any]]:
+        return [public_selected_skill(item) for item in self.preview_skills(goal, route_kind=route_kind)]
+
+    def enabled_skills(self) -> list[dict[str, object]]:
+        if self._scenario.skill_registry is None:
+            return []
+        return self._scenario.skill_registry.public_specs(self._scenario.config.skills)
+
+    def _emit_skill_selected(
+        self,
+        *,
+        thread_id: str,
+        run_id: str | None,
+        route_kind: str,
+        selected: list[dict[str, Any]],
+    ) -> None:
+        if not run_id or not selected:
+            return
+        recommended: list[str] = []
+        missing: list[str] = []
+        reasons: dict[str, list[str]] = {}
+        for item in selected:
+            name = str(item.get("name") or "")
+            if not name:
+                continue
+            reasons[name] = [str(value) for value in item.get("trigger_reasons") or []]
+            recommended.extend(str(value) for value in item.get("tool_allowlist") or [])
+            missing.extend(str(value) for value in item.get("missing_capabilities") or [])
+        payload = {
+            "skills": [str(item.get("name")) for item in selected if item.get("name")],
+            "trigger_reasons": reasons,
+            "recommended_tools": sorted(set(recommended)),
+            "missing_capabilities": sorted(set(missing)),
+            "route_kind": route_kind,
+        }
+        self._memory.append_event(thread_id, run_id, EVENT_SKILL_SELECTED, payload)

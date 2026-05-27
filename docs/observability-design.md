@@ -8,11 +8,11 @@ Related docs: [agent-learning-guide.md](./agent-learning-guide.md), [runtime-des
 
 | Item | Status | Verification |
 |---|---|---|
-| EventStore product timeline | Done | `verify_runtime_event_store.py`, `verify_runtime_timeline.py` |
-| `trace_id` in `RuntimeEvent.correlation` | Done | `verify_observability_correlation.py` |
-| token usage in `run_completed_meta` | Done | `verify_observability_correlation.py` |
-| Observability provider facade | Done | `verify_observability_provider.py` |
-| `llm_generation` event and cost summary | Done | `verify_observability_cost_v1.py` |
+| EventStore product timeline | Done | `verify_runtime_domain.py --case event_store`, `verify_runtime_domain.py --case timeline` |
+| `trace_id` in `RuntimeEvent.correlation` | Done | `verify_observability_domain.py --case correlation` |
+| token usage in `run_completed_meta` | Done | `verify_observability_domain.py --case correlation` |
+| Observability provider facade | Done | `verify_observability_domain.py --case provider` |
+| `llm_generation` event and cost summary | Done | `verify_observability_domain.py --case cost` |
 | Langfuse provider | Optional | disabled unless configured |
 | LangSmith provider | Optional | disabled unless configured |
 
@@ -113,9 +113,7 @@ The local EventStore and Timeline should still be checked first during debugging
 Core local checks:
 
 ```powershell
-E:\Conda\envs\learnagent312\python.exe scripts\verify_observability_provider.py
-E:\Conda\envs\learnagent312\python.exe scripts\verify_observability_cost_v1.py
-E:\Conda\envs\learnagent312\python.exe scripts\verify_observability_correlation.py
+E:\Conda\envs\learnagent312\python.exe scripts\verify_observability_domain.py --case all
 E:\Conda\envs\learnagent312\python.exe scripts\verify_eval_suite.py --profile core-fast
 ```
 

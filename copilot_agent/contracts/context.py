@@ -14,6 +14,7 @@ class ContextBundle(BaseModel):
     checkpoint_messages: list[dict[str, Any]] = Field(default_factory=list)
     retrieved_context: list[dict[str, Any]] = Field(default_factory=list)
     memory_injections: list[dict[str, Any]] = Field(default_factory=list)
+    skill_injections: list[dict[str, Any]] = Field(default_factory=list)
     scenario_prompts: list[str] = Field(default_factory=list)
     enabled_tool_schemas: list[dict[str, Any]] = Field(default_factory=list)
     policy_hints: list[dict[str, Any]] = Field(default_factory=list)

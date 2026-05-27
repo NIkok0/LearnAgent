@@ -24,6 +24,8 @@ router: config/watermark-router.yaml
 mcp: config/watermark-mcp.yaml
 docs_dir: scenarios/watermark/docs
 memory_policy: config/watermark-memory.yaml
+skills:
+  - watermark_diagnosis
 
 eval:
   golden: eval/golden/runtime-golden-scenarios.json

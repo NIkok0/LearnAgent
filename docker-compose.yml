@@ -5,13 +5,25 @@
 services:
   copilot-agent:
     build: .
+    restart: unless-stopped
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     env_file:
       - .env
     environment:
+      SCENARIO: ${SCENARIO:-watermark}
+      COPILOT_CAPABILITIES: ${COPILOT_CAPABILITIES:-rag,http}
+      AGENT_EVENT_STORE_PATH: ${AGENT_EVENT_STORE_PATH:-/app/storage/learnagent-events.sqlite}
+      AGENT_CHECKPOINT_PATH: ${AGENT_CHECKPOINT_PATH:-/app/storage/langgraph-checkpoints.sqlite}
       WATERMARK_API_BASE_URL: ${WATERMARK_API_BASE_URL:-http://host.docker.internal:8080}
       # Optional: mount ../backend-java/docs to /docs and set WATERMARK_DOCS_PATH=/docs
       # WATERMARK_DOCS_PATH: /docs
+    volumes:
+      - ./storage:/app/storage
+      - ./artifacts:/app/artifacts
+      # Optional: edit skills/config/scenario docs on the server without rebuilding.
+      # - ./skills:/app/skills:ro
+      # - ./config:/app/config:ro
+      # - ./scenarios:/app/scenarios:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"

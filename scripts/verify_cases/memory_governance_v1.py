@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify memory governance deletion audit and proof export."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -41,9 +41,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify memory governance deletion audit and proof export.")
     parser.add_argument("--include-subprocess-export", action="store_true")
     args = parser.parse_args(argv)
-    if argv is None:
-        print("deprecated_wrapper=verify_memory_governance_v1.py; use=scripts/verify_memory_domain.py --case governance")
-
     with TestClient(server.app) as client:
         thread_resp = client.post("/v1/threads", json={"title": "memory governance verify"})
         thread_resp.raise_for_status()

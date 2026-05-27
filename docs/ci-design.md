@@ -68,8 +68,7 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 | `contract_events` | `verify_contract_events.py` | `RuntimeEvent` round-trip |
 | `tool_audit_v1` | `verify_tool_audit_v1.py` | Tool 审计 payload |
 | `tool_execution_reliability` | `verify_tool_execution_reliability.py` | Tool timeout / retry |
-| `tool_side_effect_ledger_v1` | `verify_tool_side_effect_ledger_v1.py` | side-effect ledger |
-| `tool_side_effect_governance_v1` | `verify_tool_side_effect_governance_v1.py` | side-effect policy |
+| `tool_governance_domain` | `verify_tool_governance_domain.py --case all` | side-effect ledger / read model / policy |
 | `policy_decision_audit_v1` | `verify_policy_decision_audit_v1.py` | policy decision audit |
 | `eval_cases_contract` | `verify_eval_cases_contract.py` | phase4 / golden JSON 契约 |
 | `eval_suite_timeout_v1` | `verify_eval_suite_timeout_v1.py` | suite timeout handling |
@@ -85,15 +84,10 @@ env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-
 | 套件 | 脚本 |
 |---|---|
 | `golden_scenarios` | `verify_golden_scenarios.py` |
-| `runtime_event_store` | `verify_runtime_event_store.py` |
-| `runtime_timeline` | `verify_runtime_timeline.py` |
+| `runtime_domain` | `verify_runtime_domain.py --case all` |
 | `runtime_checkpoint_link` | `verify_runtime_checkpoint_link.py` |
-| `runtime_execution_engine` | `verify_runtime_execution_engine.py` |
-| `runtime_durability_v1` | `verify_runtime_durability_v1.py` |
 | `checkpoint_consistency_v2` | `verify_checkpoint_consistency_v2.py` |
-| `observability_correlation` | `verify_observability_correlation.py` |
-| `observability_provider` | `verify_observability_provider.py` |
-| `observability_cost_v1` | `verify_observability_cost_v1.py` |
+| `observability_domain` | `verify_observability_domain.py --case all` |
 | `plan_module` | `verify_plan_module.py` |
 | `hitl_checkpoint_resume` | `verify_hitl_checkpoint_resume.py` |
 | `session_mvp` | `verify_session_mvp.py` |

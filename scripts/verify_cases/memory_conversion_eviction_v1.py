@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify strict short-term to long-term conversion and composite eviction policy."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -67,11 +67,6 @@ def _expire_soon(store: MemoryItemStore, item_id: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        print(
-            "deprecated_wrapper=verify_memory_conversion_eviction_v1.py; "
-            "use=scripts/verify_memory_domain.py --case conversion_eviction"
-        )
     db_path = Path(settings.agent_event_store_path).with_name(
         f"verify-memory-conversion-eviction-{uuid.uuid4().hex[:8]}.sqlite"
     )

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify long-term memory quality gates for prompt injection."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import sys
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -23,8 +23,6 @@ from scripts._memory_verify_helpers import make_memory_fixture, unique_sqlite_pa
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        print("deprecated_wrapper=verify_memory_quality.py; use=scripts/verify_memory_domain.py --case quality")
     event_store_path = unique_sqlite_path("verify-memory-quality")
     policy = MemoryPolicyConfig(
         enabled=True,
@@ -90,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bundle = memory.get_memory_preview(
         thread_id,
-        goal="QUEUED watermark task 怎么排查 Redis stream worker?",
+        goal="QUEUED watermark task 鎬庝箞鎺掓煡 Redis stream worker?",
         route_context={"kind": "troubleshooting", "recommended_tools": ["search_docs", "http_get"]},
         record_access=False,
     )

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify local llm_generation events and timeline cost summary."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

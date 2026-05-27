@@ -1,0 +1,15 @@
+.git
+.github
+.vscode
+.env
+.env.*
+!.env.example
+.venv
+__pycache__
+*.pyc
+storage
+artifacts
+*.sqlite
+*.log
+docs
+eval

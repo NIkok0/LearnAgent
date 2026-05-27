@@ -1,0 +1,23 @@
+name: watermark_diagnosis
+description: Diagnose watermark job and platform issues with docs and safe read APIs.
+triggers:
+  keywords:
+    - watermark
+    - queued
+    - job
+    - 水印
+    - 排查
+  routes:
+    - knowledge
+    - read_api
+instructions: >
+  Use platform documentation first, then safe read-only HTTP checks when policy allows.
+  Do not create watermark jobs unless the user explicitly asks and approval is granted.
+tool_allowlist:
+  - search_docs
+  - http_get
+required_capabilities:
+  - rag
+  - http
+docs_dir: scenarios/watermark/docs
+risk_level: medium

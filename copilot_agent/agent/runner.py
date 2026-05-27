@@ -113,6 +113,10 @@ class ChatRunner:
         return self._memory
 
     @property
+    def context_manager(self) -> ContextManager:
+        return self._context_manager
+
+    @property
     def graph(self):
         return self._graph
 

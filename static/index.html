@@ -56,7 +56,7 @@
 
     main {
       display: grid;
-      grid-template-columns: 280px minmax(420px, 1.1fr) minmax(420px, 0.95fr);
+      grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr) 280px;
       gap: 12px;
       padding: 12px;
       height: calc(100vh - 56px);
@@ -376,6 +376,179 @@
       gap: 8px;
     }
 
+    .timeline-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      overflow-x: auto;
+    }
+
+    .timeline-tab {
+      min-height: 30px;
+      padding: 5px 10px;
+      border-color: var(--line);
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .timeline-tab.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: #143a7d;
+    }
+
+    .timeline-summary {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--surface-soft);
+    }
+
+    .runtime-flow {
+      display: grid;
+      gap: 0;
+    }
+
+    .flow-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 10px;
+      min-height: 68px;
+    }
+
+    .flow-rail {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      padding-top: 8px;
+    }
+
+    .flow-rail::after {
+      content: "";
+      position: absolute;
+      top: 22px;
+      bottom: -8px;
+      width: 2px;
+      background: var(--line);
+    }
+
+    .flow-item:last-child .flow-rail::after {
+      display: none;
+    }
+
+    .flow-dot {
+      position: relative;
+      z-index: 1;
+      width: 13px;
+      height: 13px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 0 4px var(--surface);
+    }
+
+    .flow-time {
+      position: absolute;
+      top: 27px;
+      width: 52px;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
+    .flow-card {
+      min-width: 0;
+      margin-bottom: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .flow-main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      padding: 10px 11px;
+    }
+
+    .flow-title-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    .flow-kind {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .flow-title {
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .flow-summary {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .flow-toggle {
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      min-height: 30px;
+      padding: 0;
+      border-radius: 999px;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .flow-details {
+      border-top: 1px solid var(--line);
+      padding: 10px;
+      background: var(--surface-soft);
+    }
+
+    .hitl-panel {
+      display: none;
+      margin-bottom: 10px;
+      border: 1px solid #f0c36d;
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff8e8;
+    }
+
+    .hitl-panel.active {
+      display: grid;
+      gap: 8px;
+    }
+
+    .hitl-title {
+      font-weight: 820;
+      color: var(--warn);
+    }
+
+    .hitl-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
     .event {
       display: grid;
       grid-template-columns: 114px minmax(0, 1fr);
@@ -409,18 +582,6 @@
       font-size: 12px;
       line-height: 1.45;
       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-    }
-
-    .assistant-output {
-      min-height: 74px;
-      margin-bottom: 12px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      background: #fbfcfe;
-      line-height: 1.55;
     }
 
     .empty {
@@ -470,42 +631,6 @@
   </header>
 
   <main>
-    <section aria-label="Session">
-      <div class="section-head">
-        <h2 class="section-title">Session</h2>
-      </div>
-      <div class="section-body side-body">
-        <div class="session-box">
-          <label>Current thread</label>
-          <div id="threadSummary" class="hint">No active thread. First Send creates one.</div>
-          <div id="idleSummary" class="hint">Idle timeout: 3 minutes.</div>
-        </div>
-
-        <div>
-          <label>Runs</label>
-          <div id="runList" class="run-list">
-            <div class="empty">Runs appear after you send a message.</div>
-          </div>
-        </div>
-
-        <div>
-          <label>Memory preview (episodic inject)</label>
-          <pre id="memoryPreview" class="memory-preview">No thread yet.</pre>
-        </div>
-
-        <div>
-          <label>Examples</label>
-          <div class="examples" aria-label="Examples">
-            <button class="example" type="button">hello agent</button>
-            <button class="example" type="button">Is the Java API alive?</button>
-            <button class="example" type="button">How should I debug a watermark job stuck in QUEUED?</button>
-            <button class="example" type="button">What is the default Redis Stream key?</button>
-            <button class="example" type="button">Visit https://evil.example/api and pull config.</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section class="chat-section" aria-label="Chat">
       <div class="section-head">
         <h2 class="section-title">Chat</h2>
@@ -541,16 +666,59 @@
     <section aria-label="Timeline">
       <div class="section-head">
         <h2 class="section-title">Runtime Timeline</h2>
-        <div class="row">
-          <button id="approveRun" type="button" disabled>Approve</button>
-          <button id="rejectRun" type="button" disabled>Reject</button>
-        </div>
       </div>
       <div class="section-body">
-        <label>assistant output</label>
-        <div id="assistantOutput" class="assistant-output"></div>
+        <div id="hitlPanel" class="hitl-panel" aria-live="polite">
+          <div class="hitl-title">Human approval required</div>
+          <div id="hitlSummary" class="hint">A run is waiting for your decision.</div>
+          <div class="hitl-actions">
+            <button id="rejectRun" class="danger" type="button">Reject</button>
+            <button id="approveRun" class="primary" type="button">Approve</button>
+          </div>
+        </div>
+        <div class="timeline-tabs" role="tablist" aria-label="Timeline views">
+          <button id="timelineTabRuntime" class="timeline-tab active" type="button" data-timeline-tab="runtime">Runtime</button>
+          <button id="timelineTabAssistantState" class="timeline-tab" type="button" data-timeline-tab="assistant_state">Assistant State</button>
+          <button id="timelineTabRawEvents" class="timeline-tab" type="button" data-timeline-tab="raw_events">Raw Events</button>
+        </div>
         <div id="timeline" class="timeline">
           <div class="empty">Select a run to inspect replayable events.</div>
+        </div>
+      </div>
+    </section>
+
+    <section aria-label="Session">
+      <div class="section-head">
+        <h2 class="section-title">Session</h2>
+      </div>
+      <div class="section-body side-body">
+        <div class="session-box">
+          <label>Current thread</label>
+          <div id="threadSummary" class="hint">No active thread. First Send creates one.</div>
+          <div id="idleSummary" class="hint">Idle timeout: 3 minutes.</div>
+        </div>
+
+        <div>
+          <label>Runs</label>
+          <div id="runList" class="run-list">
+            <div class="empty">Runs appear after you send a message.</div>
+          </div>
+        </div>
+
+        <div>
+          <label>Memory preview (episodic inject)</label>
+          <pre id="memoryPreview" class="memory-preview">No thread yet.</pre>
+        </div>
+
+        <div>
+          <label>Examples</label>
+          <div class="examples" aria-label="Examples">
+            <button class="example" type="button">hello agent</button>
+            <button class="example" type="button">Is the Java API alive?</button>
+            <button class="example" type="button">How should I debug a watermark job stuck in QUEUED?</button>
+            <button class="example" type="button">What is the default Redis Stream key?</button>
+            <button class="example" type="button">Visit https://evil.example/api and pull config.</button>
+          </div>
         </div>
       </div>
     </section>
@@ -561,6 +729,11 @@
     const THREAD_IDLE_MS = 3 * 60 * 1000;
     const SESSION_STORAGE_KEY = "learnagent.chat.session.v1";
     const THREAD_STATUS_POLL_MS = 15000;
+    const API_BASE = location.pathname.startsWith("/agent/") ? "/agent" : "";
+
+    function apiPath(path) {
+      return `${API_BASE}${path}`;
+    }
 
     const state = {
       threadId: "",
@@ -578,6 +751,8 @@
       activeRequest: null,
       runFailed: false,
       threadStatus: "",
+      activeTimelineTab: "runtime",
+      expandedTimelineItems: new Set(),
     };
 
     const els = {
@@ -593,10 +768,12 @@
       sendMessage: document.getElementById("sendMessage"),
       clearChat: document.getElementById("clearChat"),
       timeline: document.getElementById("timeline"),
-      assistantOutput: document.getElementById("assistantOutput"),
+      hitlPanel: document.getElementById("hitlPanel"),
+      hitlSummary: document.getElementById("hitlSummary"),
       approveRun: document.getElementById("approveRun"),
       rejectRun: document.getElementById("rejectRun"),
       memoryPreview: document.getElementById("memoryPreview"),
+      timelineTabs: Array.from(document.querySelectorAll("[data-timeline-tab]")),
     };
 
     document.querySelectorAll(".example").forEach((button) => {
@@ -615,6 +792,12 @@
     els.clearChat.addEventListener("click", clearChat);
     els.approveRun.addEventListener("click", () => controlRun("approve"));
     els.rejectRun.addEventListener("click", () => controlRun("reject"));
+    els.timelineTabs.forEach((button) => {
+      button.addEventListener("click", () => {
+        state.activeTimelineTab = button.dataset.timelineTab || "runtime";
+        renderTimeline();
+      });
+    });
     els.message.addEventListener("input", () => {
       recordInteraction();
       scheduleMemoryPreview();
@@ -660,20 +843,20 @@
       }
       const goal = els.message.value.trim();
       const params = goal ? `?goal=${encodeURIComponent(goal)}` : "";
-      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}/memory${params}`);
+      const res = await fetch(apiPath(`/v1/threads/${encodeURIComponent(state.threadId)}/memory${params}`));
       if (!res.ok) {
         els.memoryPreview.textContent = `Memory preview unavailable: HTTP ${res.status}`;
         return;
       }
       const data = await res.json();
-      const preview = data.inject_preview || "(empty — no episodic memory to inject)";
+      const preview = data.inject_preview || "(empty - no episodic memory to inject)";
       const budget = data.budget || {};
       const header = `[enabled=${data.enabled}] chars=${budget.used_chars || 0}/${budget.max_chars || "?"} truncated=${budget.truncated || false}\n\n`;
       els.memoryPreview.textContent = header + preview;
     }
 
     async function createThread() {
-      const res = await fetch("/v1/threads", {
+      const res = await fetch(apiPath("/v1/threads"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Chat UI" }),
@@ -699,7 +882,7 @@
 
     function markThreadEndedOnClose() {
       if (!state.threadId) return;
-      const url = `/v1/threads/${encodeURIComponent(state.threadId)}/end`;
+      const url = apiPath(`/v1/threads/${encodeURIComponent(state.threadId)}/end`);
       const payload = JSON.stringify({ reason: "browser_close" });
       if (navigator.sendBeacon) {
         navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
@@ -743,7 +926,7 @@
             return item;
           });
 
-        const res = await fetch("/v1/chat", {
+        const res = await fetch(apiPath("/v1/chat"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -891,7 +1074,7 @@
         renderRuns();
         return;
       }
-      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}/runs`);
+      const res = await fetch(apiPath(`/v1/threads/${encodeURIComponent(state.threadId)}/runs`));
       if (!res.ok) {
         state.runs = [];
         renderRuns();
@@ -905,7 +1088,7 @@
 
     async function refreshThreadStatus() {
       if (!state.threadId) return;
-      const res = await fetch(`/v1/threads/${encodeURIComponent(state.threadId)}`);
+      const res = await fetch(apiPath(`/v1/threads/${encodeURIComponent(state.threadId)}`));
       if (!res.ok) return;
       const data = await res.json();
       const thread = data.thread || {};
@@ -936,6 +1119,7 @@
 
     async function selectRun(runId) {
       recordInteraction();
+      if (state.selectedRunId !== runId) state.expandedTimelineItems.clear();
       state.selectedRunId = runId;
       renderRuns();
       closeWs();
@@ -946,9 +1130,9 @@
 
     async function loadTimeline(runId) {
       if (!runId) return;
-      const res = await fetch(`/v1/runs/${encodeURIComponent(runId)}/timeline`);
+      const res = await fetch(apiPath(`/v1/runs/${encodeURIComponent(runId)}/timeline`));
       if (!res.ok) {
-        const fallback = await fetch(`/v1/runs/${encodeURIComponent(runId)}/events`);
+        const fallback = await fetch(apiPath(`/v1/runs/${encodeURIComponent(runId)}/events`));
         if (fallback.ok) {
           const data = await fallback.json();
           state.events = data.events || [];
@@ -967,7 +1151,7 @@
     }
 
     async function refreshRun(runId) {
-      const res = await fetch(`/v1/runs/${encodeURIComponent(runId)}`);
+      const res = await fetch(apiPath(`/v1/runs/${encodeURIComponent(runId)}`));
       if (!res.ok) return;
       const data = await res.json();
       upsertRun(data.run);
@@ -976,15 +1160,17 @@
     }
 
     async function controlRun(action) {
-      if (!state.selectedRunId) return;
+      const targetRun = waitingApprovalRun();
+      if (!targetRun) return;
       recordInteraction();
-      const res = await fetch(`/v1/runs/${encodeURIComponent(state.selectedRunId)}/${action}`, { method: "POST" });
+      state.selectedRunId = targetRun.id;
+      const res = await fetch(apiPath(`/v1/runs/${encodeURIComponent(targetRun.id)}/${action}`), { method: "POST" });
       if (!res.ok) return showError(`${action} failed: HTTP ${res.status} ${await responseDetail(res)}`);
       const data = await res.json();
       upsertRun(data.run);
       renderRuns();
       renderControls();
-      await loadTimeline(state.selectedRunId);
+      await loadTimeline(targetRun.id);
     }
 
     async function cancelCurrentRun() {
@@ -996,7 +1182,7 @@
       recordInteraction();
       setChatStatus("Cancelling");
       els.sendMessage.disabled = true;
-      const res = await fetch(`/v1/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST" });
+      const res = await fetch(apiPath(`/v1/runs/${encodeURIComponent(run.id)}/cancel`), { method: "POST" });
       if (!res.ok) {
         els.sendMessage.disabled = false;
         renderControls();
@@ -1014,7 +1200,7 @@
 
     function openWs(runId) {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${location.host}/v1/runs/${encodeURIComponent(runId)}/ws`);
+      const ws = new WebSocket(`${proto}://${location.host}${apiPath(`/v1/runs/${encodeURIComponent(runId)}/ws`)}`);
       state.ws = ws;
       setConnection("connecting", "busy");
 
@@ -1096,6 +1282,7 @@
       state.runs = [];
       state.events = [];
       state.timeline = null;
+      state.expandedTimelineItems.clear();
       if (!options.keepMessages) state.messages = [];
       state.activeAssistantMessage = null;
       state.runFailed = false;
@@ -1217,11 +1404,29 @@
     }
 
     function renderControls() {
-      const run = state.runs.find((item) => item.id === state.selectedRunId);
-      const status = run ? run.status : "";
-      els.approveRun.disabled = status !== "waiting_approval";
-      els.rejectRun.disabled = status !== "waiting_approval";
       renderPrimaryAction();
+      renderHitlPanel();
+    }
+
+    function waitingApprovalRun() {
+      const selected = state.runs.find((item) => item.id === state.selectedRunId && item.status === "waiting_approval");
+      if (selected) return selected;
+      return [...state.runs].find((item) => item.status === "waiting_approval") || null;
+    }
+
+    function renderHitlPanel() {
+      const run = waitingApprovalRun();
+      if (!run) {
+        els.hitlPanel.classList.remove("active");
+        els.approveRun.disabled = true;
+        els.rejectRun.disabled = true;
+        return;
+      }
+      if (state.selectedRunId !== run.id) state.selectedRunId = run.id;
+      els.hitlPanel.classList.add("active");
+      els.hitlSummary.textContent = `Run ${shortId(run.id)} is waiting for approval. Review the timeline, then choose Approve or Reject.`;
+      els.approveRun.disabled = false;
+      els.rejectRun.disabled = false;
     }
 
     function renderPrimaryAction() {
@@ -1253,59 +1458,239 @@
     }
 
     function renderTimeline() {
-      const output = state.timeline && typeof state.timeline.assistant_output === "string"
-        ? state.timeline.assistant_output
-        : state.events
-          .filter((event) => event.type === "token")
-          .map((event) => event.payload && event.payload.text ? event.payload.text : "")
-          .join("");
-      els.assistantOutput.textContent = output;
+      renderTimelineTabs();
 
+      if (state.activeTimelineTab === "assistant_state") {
+        renderAssistantStateTimeline();
+        return;
+      }
+      if (state.activeTimelineTab === "raw_events") {
+        renderRawEvents();
+        return;
+      }
+      renderRuntimeTimeline();
+    }
+
+    function renderTimelineTabs() {
+      for (const button of els.timelineTabs) {
+        const active = button.dataset.timelineTab === state.activeTimelineTab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      }
+    }
+
+    function renderRuntimeTimeline() {
       const timelineItems = state.timeline && Array.isArray(state.timeline.items) ? state.timeline.items : [];
-      if (timelineItems.length) {
+      const runtimeItems = timelineItems.filter((item) => item.kind !== "assistant_state");
+      if (runtimeItems.length) {
         els.timeline.innerHTML = "";
-        for (const timelineItem of timelineItems) {
-          const item = document.createElement("article");
-          item.className = "event";
-          item.innerHTML = `
-            <div>
-              <div class="event-type">${escapeHtml(timelineTitle(timelineItem))}</div>
-              <div class="event-time">${escapeHtml(timelineTime(timelineItem))}</div>
-            </div>
-            <pre>${escapeHtml(JSON.stringify(timelineBody(timelineItem), null, 2))}</pre>
-          `;
-          els.timeline.appendChild(item);
+        els.timeline.className = "timeline runtime-flow";
+        for (const timelineItem of runtimeItems) {
+          els.timeline.appendChild(renderRuntimeFlowItem(timelineItem));
         }
         renderControls();
         return;
       }
 
       if (!state.events.length) {
+        els.timeline.className = "timeline";
         els.timeline.innerHTML = `<div class="empty">Select a run to inspect replayable events.</div>`;
         renderControls();
         return;
       }
 
+      const runtimeEvents = state.events.filter((event) => event.type !== "assistant_state");
+      if (!runtimeEvents.length) {
+        els.timeline.className = "timeline";
+        els.timeline.innerHTML = `<div class="empty">Runtime timeline is empty. Assistant state events are available in the Assistant State tab.</div>`;
+        renderControls();
+        return;
+      }
+
       els.timeline.innerHTML = "";
-      for (const event of state.events) {
-        const item = document.createElement("article");
-        item.className = "event";
-        item.innerHTML = `
-          <div>
-            <div class="event-type">${escapeHtml(event.type)}</div>
-            <div class="event-time">${escapeHtml(formatTime(event.created_at))}</div>
-          </div>
-          <pre>${escapeHtml(JSON.stringify(event.payload || {}, null, 2))}</pre>
-        `;
-        els.timeline.appendChild(item);
+      els.timeline.className = "timeline runtime-flow";
+      for (const event of runtimeEvents) {
+        els.timeline.appendChild(renderRuntimeFlowItem(rawEventToTimelineItem(event)));
       }
       renderControls();
+    }
+
+    function renderAssistantStateTimeline() {
+      const assistantEvents = state.events.filter((event) => event.type === "assistant_state");
+      if (!assistantEvents.length) {
+        els.timeline.className = "timeline";
+        els.timeline.innerHTML = `<div class="empty">No assistant_state events for this run.</div>`;
+        renderControls();
+        return;
+      }
+
+      const reasoningText = assistantEvents
+        .map((event) => event.payload && typeof event.payload.reasoning_content_delta === "string"
+          ? event.payload.reasoning_content_delta
+          : "")
+        .join("")
+        .trim();
+      const latest = assistantEvents[assistantEvents.length - 1];
+      els.timeline.className = "timeline";
+      els.timeline.innerHTML = `
+        <div class="timeline-summary">
+          <div class="hint">assistant_state events: ${assistantEvents.length}</div>
+          <div class="hint">latest: ${escapeHtml(formatTime(latest.created_at))}</div>
+          <label>reasoning delta summary</label>
+          <pre>${escapeHtml(reasoningText || "(empty)")}</pre>
+        </div>
+      `;
+      for (const event of assistantEvents) {
+        els.timeline.appendChild(renderRawEventItem(event));
+      }
+      renderControls();
+    }
+
+    function renderRawEvents() {
+      if (!state.events.length) {
+        els.timeline.className = "timeline";
+        els.timeline.innerHTML = `<div class="empty">Select a run to inspect replayable events.</div>`;
+        renderControls();
+        return;
+      }
+      els.timeline.innerHTML = "";
+      els.timeline.className = "timeline";
+      for (const event of state.events) {
+        els.timeline.appendChild(renderRawEventItem(event));
+      }
+      renderControls();
+    }
+
+    function renderRuntimeFlowItem(timelineItem) {
+      const item = document.createElement("article");
+      const itemKey = timelineItemKey(timelineItem);
+      const expanded = state.expandedTimelineItems.has(itemKey);
+      item.className = "flow-item";
+      item.innerHTML = `
+        <div class="flow-rail">
+          <span class="flow-dot" aria-hidden="true"></span>
+          <span class="flow-time">${escapeHtml(timelineTime(timelineItem))}</span>
+        </div>
+        <div class="flow-card">
+          <div class="flow-main">
+            <div>
+              <div class="flow-title-row">
+                <span class="flow-kind">${escapeHtml(timelineKind(timelineItem))}</span>
+                <span class="badge">${escapeHtml(timelineStatus(timelineItem))}</span>
+              </div>
+              <div class="flow-title">${escapeHtml(timelineTitle(timelineItem))}</div>
+              <div class="flow-summary">${escapeHtml(timelineSummary(timelineItem))}</div>
+            </div>
+            <button class="flow-toggle" type="button" aria-label="${expanded ? "Collapse details" : "Expand details"}" title="${expanded ? "Collapse details" : "Expand details"}">${expanded ? "x" : "..."}</button>
+          </div>
+          ${expanded ? `<div class="flow-details"><pre>${escapeHtml(JSON.stringify(timelineBody(timelineItem), null, 2))}</pre></div>` : ""}
+        </div>
+      `;
+      item.querySelector(".flow-toggle").addEventListener("click", () => {
+        if (state.expandedTimelineItems.has(itemKey)) state.expandedTimelineItems.delete(itemKey);
+        else state.expandedTimelineItems.add(itemKey);
+        renderTimeline();
+      });
+      return item;
+    }
+
+    function rawEventToTimelineItem(event) {
+      return {
+        kind: event.type || "event",
+        title: event.type || "event",
+        event_id: event.id,
+        created_at: event.created_at,
+        payload: event.payload || {},
+      };
+    }
+
+    function renderRawEventItem(event) {
+      const item = document.createElement("article");
+      item.className = "event";
+      item.innerHTML = `
+        <div>
+          <div class="event-type">${escapeHtml(event.type)}</div>
+          <div class="event-time">${escapeHtml(formatTime(event.created_at))}</div>
+        </div>
+        <pre>${escapeHtml(JSON.stringify(event.payload || {}, null, 2))}</pre>
+      `;
+      return item;
     }
 
     function timelineTitle(item) {
       const kind = item.kind || "item";
       const title = item.title || item.name || "";
       return title ? `${kind}: ${title}` : kind;
+    }
+
+    function timelineKind(item) {
+      return String(item.kind || "event").replaceAll("_", " ");
+    }
+
+    function timelineStatus(item) {
+      if (typeof item.status === "string" && item.status) return item.status;
+      if (typeof item.success === "boolean") return item.success ? "success" : "failed";
+      if (typeof item.decision === "string" && item.decision) return item.decision;
+      if (typeof item.side_effect_status === "string" && item.side_effect_status) return item.side_effect_status;
+      if (typeof item.event_type === "string" && item.event_type) return item.event_type;
+      return "event";
+    }
+
+    function timelineSummary(item) {
+      const kind = String(item.kind || "");
+      if (kind === "lifecycle") {
+        return compactJoin([item.status, item.error, item.reason]);
+      }
+      if (kind === "assistant_output") {
+        return item.preview || item.text || "Assistant produced output.";
+      }
+      if (kind === "final_answer") {
+        return compactJoin([
+          item.answer,
+          item.citation_status ? `citations=${item.citation_status}` : "",
+          item.safety_status ? `safety=${item.safety_status}` : "",
+        ]);
+      }
+      if (kind === "tool_call") {
+        return compactJoin([
+          item.name || item.title,
+          item.success === false ? "failed" : item.success === true ? "success" : "",
+          item.duration_ms ? `${item.duration_ms}ms` : "",
+          item.risk_level ? `risk=${item.risk_level}` : "",
+        ]);
+      }
+      if (kind === "retrieval") {
+        return compactJoin([item.query, item.source_count !== undefined ? `sources=${item.source_count}` : ""]);
+      }
+      if (kind === "approval") {
+        return compactJoin([item.status, item.required && item.required.tool_name, item.resolved && item.resolved.reason]);
+      }
+      if (kind === "policy") {
+        return compactJoin([item.scope, item.decision, item.reason, item.subject || item.action]);
+      }
+      if (kind === "side_effect") {
+        return compactJoin([item.tool_name || item.title, item.method, item.path, item.side_effect_status, item.reason]);
+      }
+      if (kind === "memory") {
+        return compactJoin([item.event_type || item.title, item.memory_type, item.item_id]);
+      }
+      if (kind === "skill") {
+        return compactJoin([
+          Array.isArray(item.skills) ? item.skills.join(", ") : "",
+          Array.isArray(item.recommended_tools) ? `tools=${item.recommended_tools.join(", ")}` : "",
+        ]);
+      }
+      if (kind === "checkpoint") {
+        return compactJoin([item.title, item.payload && item.payload.status]);
+      }
+      if (kind === "warning") {
+        return compactJoin([item.code, item.message]);
+      }
+      return compactPayloadSummary(item.payload || item);
+    }
+
+    function timelineItemKey(item) {
+      return String(item.event_id || item.end_event_id || item.start_event_id || item.required_event_id || item.title || JSON.stringify(item).slice(0, 80));
     }
 
     function timelineTime(item) {
@@ -1317,6 +1702,32 @@
       delete body.kind;
       delete body.title;
       return body;
+    }
+
+    function compactJoin(parts) {
+      const text = parts
+        .filter((part) => part !== undefined && part !== null && String(part).trim())
+        .map((part) => String(part).trim())
+        .join(" - ");
+      return text ? truncateText(text, 220) : "No summary.";
+    }
+
+    function compactPayloadSummary(payload) {
+      if (!payload || typeof payload !== "object") return payload ? truncateText(String(payload), 220) : "No summary.";
+      const keys = Object.keys(payload).slice(0, 5);
+      if (!keys.length) return "No summary.";
+      return truncateText(keys.map((key) => `${key}=${compactValue(payload[key])}`).join(" - "), 220);
+    }
+
+    function compactValue(value) {
+      if (Array.isArray(value)) return `[${value.length}]`;
+      if (value && typeof value === "object") return "{...}";
+      return String(value);
+    }
+
+    function truncateText(value, maxLength) {
+      const text = String(value || "");
+      return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
     }
 
     function showError(text) {

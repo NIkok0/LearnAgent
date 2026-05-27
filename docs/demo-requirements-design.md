@@ -15,7 +15,7 @@
 | §2.2 Tool Registry + HTTP 白名单 | ✅ 已实现 | Scenario `HttpPathPolicy` + `verify_scenario_loader.py` |
 | §2.3 Safety Gate + Approval + **required_scopes** | ✅ 已实现 | `verify_phase3_safety_gate.py`，`verify_policy_credentials.py` |
 | §2.4 Tool-grounded 编排（规则路由） | ✅ 已实现 | [tool-design.md §3](./tool-design.md)（编排 §0 见同文档） |
-| §2.5 Timeline 审计 + 脱敏 | ✅ 已实现 | `verify_runtime_timeline.py`（含 `retrieval_call_id_linked`） |
+| §2.5 Timeline 审计 + 脱敏 | ✅ 已实现 | `verify_runtime_domain.py --case timeline`（含 `retrieval_call_id_linked`） |
 | §2.6 Agent 行为评估（≥15 case） | ✅ 已实现 | L5 proxy **28 case**；Demo golden **6 case** |
 | §3.1–3.4 RAG 知识库 + 检索 + 引用 | ✅ 已实现 | [rag-design.md](./rag-design.md) §0；`scenarios/watermark/docs/` |
 | §3.2 API 契约结构化 ingest | ✅ 已实现 | `verify_rag_domain.py --case api_ingest` |

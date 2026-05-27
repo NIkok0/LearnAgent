@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Verify high-risk write tool side-effect ledger events."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -306,12 +306,6 @@ def main(argv: list[str] | None = None) -> int:
         default=str(ROOT / "artifacts/runtime/tool-side-effect-ledger-v1-summary.json"),
     )
     args = parser.parse_args(argv)
-    if argv is None:
-        print(
-            "deprecated_wrapper=verify_tool_side_effect_ledger_v1.py; "
-            "use=scripts/verify_tool_governance_domain.py --case ledger"
-        )
-
     event_store_path = Path(args.event_store_path).resolve()
     event_store_path.parent.mkdir(parents=True, exist_ok=True)
     summary = verify(event_store_path, args.thread_id)

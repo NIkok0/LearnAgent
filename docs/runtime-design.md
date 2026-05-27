@@ -11,18 +11,18 @@
 
 | 项 | 状态 | 验收脚本 |
 |---|---|---|
-| EventStore append / 分页（`after_id` + `limit`） | ✅ | `verify_runtime_event_store.py` |
-| Timeline 投影 + SSE / WebSocket 同源 | ✅ | `verify_runtime_timeline.py`、`verify_session_mvp.py` |
+| EventStore append / 分页（`after_id` + `limit`） | ✅ | `verify_runtime_domain.py --case event_store` |
+| Timeline 投影 + SSE / WebSocket 同源 | ✅ | `verify_runtime_domain.py --case timeline`、`verify_session_mvp.py` |
 | Checkpoint ↔ Run 关联 | ✅ | `verify_runtime_checkpoint_link.py` |
-| ExecutionEngine cancel / approve / 并发槽 / 超时 | ✅ | `verify_runtime_execution_engine.py` |
-| Run 创建幂等（`idempotency_key` + payload hash） | ✅ | `verify_runtime_execution_engine.py` |
-| 进程重启 orphan 恢复（`queued`/`running`→failed，`cancelling`→cancelled，`waiting_approval` rehydrate） | ✅ | `verify_runtime_durability_v1.py` |
+| ExecutionEngine cancel / approve / 并发槽 / 超时 | ✅ | `verify_runtime_domain.py --case execution_engine` |
+| Run 创建幂等（`idempotency_key` + payload hash） | ✅ | `verify_runtime_domain.py --case execution_engine` |
+| 进程重启 orphan 恢复（`queued`/`running`→failed，`cancelling`→cancelled，`waiting_approval` rehydrate） | ✅ | `verify_runtime_domain.py --case durability` |
 | Checkpoint consistency v2（`checkpoint_consistency_checked` + `run_consistency_checked` 摘要） | ✅ | `verify_checkpoint_consistency_v2.py` |
-| Side-effects 读模型（`GET /v1/runs/{id}/side-effects`） | ✅ | `verify_tool_side_effect_read_model_v1.py` |
+| Side-effects 读模型（`GET /v1/runs/{id}/side-effects`） | ✅ | `verify_tool_governance_domain.py --case read_model` |
 | Thread 生命周期清理（idle end → archive → checkpoint purge） | ✅ | `verify_thread_lifecycle_cleaner.py`、`verify_thread_archive_api.py` |
 | Session MVP（REST + SSE 冒烟） | ✅ | `verify_session_mvp.py` |
 | Golden Run 事件契约 | ✅ | `verify_golden_scenarios.py` |
-| 失败一致性 v1（sequence / tool_end 幂等 / failure meta） | ✅ | `verify_runtime_execution_engine.py`、`verify_memory_checkpoint_consistency.py` |
+| 失败一致性 v1（sequence / tool_end 幂等 / failure meta） | ✅ | `verify_runtime_domain.py --case execution_engine`、`verify_memory_checkpoint_consistency.py` |
 | `running`/`queued` durable resume | ❌ | — |
 
 套件见 [ci-design.md](./ci-design.md)。
@@ -301,10 +301,10 @@ Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 | 波次 | 层 | 任务 | 验收 |
 |------|-----|------|------|
-| **3** | L8 | EventStore/checkpoint 失败一致性 v1：`sequence`、`tool_call_id` 幂等、`last_successful_event_id` | ✅ `verify_runtime_execution_engine.py`、`verify_memory_checkpoint_consistency.py` |
+| **3** | L8 | EventStore/checkpoint 失败一致性 v1：`sequence`、`tool_call_id` 幂等、`last_successful_event_id` | ✅ `verify_runtime_domain.py --case execution_engine`、`verify_memory_checkpoint_consistency.py` |
 | **3** | L8 Storage | `running`/`queued` durable resume 或外部队列 PoC | ❌ 待做 |
 | **3** | L8 | Run 级幂等键（`idempotency_key` + payload hash） | ✅ `CreateRunRequest` / `ChatRequest` |
-| **3** | L8 | orphan run 启动恢复 + `recovered_at` 审计 | ✅ `_cleanup_orphan_runs` + `verify_runtime_durability_v1.py` |
+| **3** | L8 | orphan run 启动恢复 + `recovered_at` 审计 | ✅ `_cleanup_orphan_runs` + `verify_runtime_domain.py --case durability` |
 | **3** | L8 | Timeline 读模型缓存 / UI 默认 cursor 分页 | ❌ 事件 API 已分页；timeline 仍全量 |
 
 ### 8.2 仍待做

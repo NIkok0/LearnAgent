@@ -1,0 +1,20 @@
+name: rag_governance
+description: Inspect RAG document lifecycle, deletion audit, and deletion proof.
+triggers:
+  keywords:
+    - rag
+    - document
+    - deletion proof
+    - 删除证明
+    - 文档治理
+  routes:
+    - knowledge
+instructions: >
+  Prefer governance metadata over raw document text. When discussing deletion,
+  mention that historical EventStore runs are not rewritten.
+tool_allowlist:
+  - search_docs
+required_capabilities:
+  - rag
+docs_dir: scenarios/watermark/docs
+risk_level: low

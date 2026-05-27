@@ -48,14 +48,9 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_tool_execution_reliability.py",
     ),
     SuiteSpec(
-        suite_name="tool_side_effect_ledger_v1",
-        script="scripts/verify_tool_side_effect_ledger_v1.py",
-        args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="tool_side_effect_governance_v1",
-        script="scripts/verify_tool_side_effect_governance_v1.py",
-        args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
+        suite_name="tool_governance_domain",
+        script="scripts/verify_tool_governance_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="policy_decision_audit_v1",
@@ -73,6 +68,10 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="scenario_loader",
         script="scripts/verify_scenario_loader.py",
+    ),
+    SuiteSpec(
+        suite_name="skills_v1",
+        script="scripts/verify_skills_v1.py",
     ),
     SuiteSpec(
         suite_name="mcp_capability",
@@ -144,6 +143,10 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_scenario_loader.py",
     ),
     SuiteSpec(
+        suite_name="skills_v1",
+        script="scripts/verify_skills_v1.py",
+    ),
+    SuiteSpec(
         suite_name="context_manager",
         script="scripts/verify_context_manager.py",
     ),
@@ -160,24 +163,9 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_events_validated.py",
     ),
     SuiteSpec(
-        suite_name="runtime_event_store",
-        script="scripts/verify_runtime_event_store.py",
-        args=("--event-store-path", "storage/verify-runtime-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="runtime_timeline",
-        script="scripts/verify_runtime_timeline.py",
-        args=("--event-store-path", "storage/verify-runtime-timeline-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="runtime_execution_engine",
-        script="scripts/verify_runtime_execution_engine.py",
-        args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="runtime_durability_v1",
-        script="scripts/verify_runtime_durability_v1.py",
-        args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
+        suite_name="runtime_domain",
+        script="scripts/verify_runtime_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="checkpoint_consistency_v2",
@@ -190,12 +178,9 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         ),
     ),
     SuiteSpec(
-        suite_name="observability_provider",
-        script="scripts/verify_observability_provider.py",
-    ),
-    SuiteSpec(
-        suite_name="observability_cost_v1",
-        script="scripts/verify_observability_cost_v1.py",
+        suite_name="observability_domain",
+        script="scripts/verify_observability_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="final_answer_l7",
@@ -228,14 +213,9 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         args=("--dataset", "eval/golden/runtime-golden-scenarios.json"),
     ),
     SuiteSpec(
-        suite_name="runtime_event_store",
-        script="scripts/verify_runtime_event_store.py",
-        args=("--event-store-path", "storage/verify-runtime-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="runtime_timeline",
-        script="scripts/verify_runtime_timeline.py",
-        args=("--event-store-path", "storage/verify-runtime-timeline-events.sqlite"),
+        suite_name="runtime_domain",
+        script="scripts/verify_runtime_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="runtime_checkpoint_link",
@@ -248,16 +228,6 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         ),
     ),
     SuiteSpec(
-        suite_name="runtime_execution_engine",
-        script="scripts/verify_runtime_execution_engine.py",
-        args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="runtime_durability_v1",
-        script="scripts/verify_runtime_durability_v1.py",
-        args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
-    ),
-    SuiteSpec(
         suite_name="checkpoint_consistency_v2",
         script="scripts/verify_checkpoint_consistency_v2.py",
         args=(
@@ -268,16 +238,9 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         ),
     ),
     SuiteSpec(
-        suite_name="observability_correlation",
-        script="scripts/verify_observability_correlation.py",
-    ),
-    SuiteSpec(
-        suite_name="observability_provider",
-        script="scripts/verify_observability_provider.py",
-    ),
-    SuiteSpec(
-        suite_name="observability_cost_v1",
-        script="scripts/verify_observability_cost_v1.py",
+        suite_name="observability_domain",
+        script="scripts/verify_observability_domain.py",
+        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="plan_module",
@@ -332,12 +295,9 @@ CORE_SUITES: tuple[SuiteSpec, ...] = CONTRACT_SUITES + (
         script="scripts/verify_memory_schema.py",
     ),
     SuiteSpec(
-        suite_name="memory_quality",
-        script="scripts/verify_memory_quality.py",
-    ),
-    SuiteSpec(
-        suite_name="memory_governance_v1",
-        script="scripts/verify_memory_governance_v1.py",
+        suite_name="memory_domain",
+        script="scripts/verify_memory_domain.py",
+        args=("--case", "all"),
     ),
 ) + LEGACY_SUITES
 
@@ -478,41 +438,23 @@ def _profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
         "core": CORE_SUITES,
         "infra": (
             SuiteSpec(
-                suite_name="runtime_durability_v1",
-                script="scripts/verify_runtime_durability_v1.py",
-                args=("--event-store-path", "storage/verify-runtime-durability-events.sqlite"),
+                suite_name="runtime_domain",
+                script="scripts/verify_runtime_domain.py",
+                args=("--case", "all"),
             ),
             SuiteSpec(
-                suite_name="runtime_execution_engine",
-                script="scripts/verify_runtime_execution_engine.py",
-                args=("--event-store-path", "storage/verify-execution-engine-events.sqlite"),
-            ),
-            SuiteSpec(
-                suite_name="observability_provider",
-                script="scripts/verify_observability_provider.py",
-            ),
-            SuiteSpec(
-                suite_name="observability_cost_v1",
-                script="scripts/verify_observability_cost_v1.py",
+                suite_name="observability_domain",
+                script="scripts/verify_observability_domain.py",
+                args=("--case", "all"),
             ),
             SuiteSpec(
                 suite_name="tool_execution_reliability",
                 script="scripts/verify_tool_execution_reliability.py",
             ),
             SuiteSpec(
-                suite_name="tool_side_effect_ledger_v1",
-                script="scripts/verify_tool_side_effect_ledger_v1.py",
-                args=("--event-store-path", "storage/verify-tool-side-effect-ledger-events.sqlite"),
-            ),
-            SuiteSpec(
-                suite_name="tool_side_effect_read_model_v1",
-                script="scripts/verify_tool_side_effect_read_model_v1.py",
-                args=("--event-store-path", "storage/verify-tool-side-effect-read-model-events.sqlite"),
-            ),
-            SuiteSpec(
-                suite_name="tool_side_effect_governance_v1",
-                script="scripts/verify_tool_side_effect_governance_v1.py",
-                args=("--event-store-path", "storage/verify-tool-side-effect-governance-events.sqlite"),
+                suite_name="tool_governance_domain",
+                script="scripts/verify_tool_governance_domain.py",
+                args=("--case", "all"),
             ),
             SuiteSpec(
                 suite_name="policy_aware_rag_v1",

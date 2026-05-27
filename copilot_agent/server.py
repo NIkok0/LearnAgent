@@ -249,6 +249,29 @@ def get_scenario() -> dict[str, object]:
     return {"scenario": scenario_status(loaded_scenario)}
 
 
+@app.get("/v1/skills")
+def get_skills() -> dict[str, object]:
+    if loaded_scenario is None:
+        raise HTTPException(status_code=503, detail="Scenario not initialized")
+    registry = loaded_scenario.skill_registry
+    return {
+        "scenario": loaded_scenario.name,
+        "enabled": list(loaded_scenario.config.skills),
+        "skills": registry.public_specs(loaded_scenario.config.skills) if registry else [],
+        "warnings": list(registry.warnings) if registry else [],
+    }
+
+
+@app.get("/v1/threads/{thread_id}/skills")
+def preview_thread_skills(thread_id: str, goal: str = "") -> dict[str, object]:
+    if event_store.get_thread(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    selected = runner.context_manager.preview_skills_public(goal)
+    return {"thread_id": thread_id, "goal_chars": len(goal), "skills": selected}
+
+
 @app.get("/v1/rag/status")
 def rag_status() -> dict[str, object]:
     manager = _require_rag_manager()
