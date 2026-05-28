@@ -113,6 +113,8 @@ async def _run_checks() -> dict[str, bool]:
         "context_built_payload_valid": False,
         "preretrieval_in_bundle": False,
         "preretrieval_cache_in_bundle": False,
+        "retrieval_decision_in_bundle": False,
+        "retrieval_decision_in_event": False,
         "preretrieval_dedupe_skips_duplicate": False,
         "checkpoint_pack_compacts_history": False,
         "checkpoint_pack_preview_no_persist": False,
@@ -184,6 +186,10 @@ async def _run_checks() -> dict[str, bool]:
         bundle.truncation_report.get("preretrieval_enabled")
     )
     checks["preretrieval_cache_in_bundle"] = isinstance(bundle.truncation_report.get("preretrieval_cache"), dict)
+    checks["retrieval_decision_in_bundle"] = (
+        isinstance(bundle.truncation_report.get("retrieval_decision"), dict)
+        and (bundle.truncation_report.get("retrieval_decision") or {}).get("action") == "retrieve"
+    )
     checks["memory_injection_explainability"] = any(
         item.get("kind") == "episodic" and "dropped_conflicts" in item
         for item in bundle.memory_injections
@@ -214,6 +220,10 @@ async def _run_checks() -> dict[str, bool]:
         try:
             validate_payload_for_kind("context_built", payload)
             checks["context_built_payload_valid"] = True
+            checks["retrieval_decision_in_event"] = (
+                isinstance(payload.get("retrieval_decision"), dict)
+                and payload["retrieval_decision"].get("action") == "retrieve"
+            )
         except Exception:
             checks["context_built_payload_valid"] = False
 

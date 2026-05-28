@@ -7,3 +7,7 @@ artifacts/eval/
 artifacts/runtime/
 artifacts/phase3/
 artifacts/phase4/
+.codegraph/
+.codex-plugin-inspect-codegraph/
+.npm-cache/
+.tools/

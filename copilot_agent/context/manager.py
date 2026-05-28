@@ -9,6 +9,7 @@ from copilot_agent.context.assemble import build_graph_turn_messages
 from copilot_agent.context.checkpoint_pack import pack_checkpoint_for_budget, total_message_chars
 from copilot_agent.context.events import build_context_built_payload
 from copilot_agent.context.preretrieval_dedupe import build_preretrieval_cache
+from copilot_agent.context.retrieval_gate import build_policy_context_hash, decide_retrieval
 from copilot_agent.context.memory_inject import memory_context_messages
 from copilot_agent.context.packing import pack_graph_messages
 from copilot_agent.context.preretrieval import preretrieve_docs
@@ -26,7 +27,7 @@ from copilot_agent.runtime.policy_audit import build_rag_policy_decision_payload
 from copilot_agent.scenario.loader import LoadedScenario
 from copilot_agent.scenario.router import RouterEngine
 from copilot_agent.scenario.router.types import ToolRoute, build_route_system_message
-from copilot_agent.rag.request_context import retrieval_defaults_from_scenario
+from copilot_agent.rag.request_context import build_retrieval_request, retrieval_defaults_from_scenario
 from copilot_agent.settings import settings
 from copilot_agent.skills.selection import public_selected_skill, select_skills, skill_system_message
 from copilot_agent.tools.registry import ToolRegistry
@@ -156,6 +157,9 @@ class ContextManager:
             memory_inject_chars=int(bundle.truncation_report.get("memory_inject_chars") or 0),
             checkpoint_compacted=bool((bundle.truncation_report.get("checkpoint_pack") or {}).get("compacted")),
             checkpoint_chars=int((bundle.truncation_report.get("checkpoint_pack") or {}).get("checkpoint_chars") or 0),
+            retrieval_decision=bundle.truncation_report.get("retrieval_decision")
+            if isinstance(bundle.truncation_report.get("retrieval_decision"), dict)
+            else None,
         )
         self._memory.append_event(thread_id, run_id, EVENT_CONTEXT_BUILT, payload)
 
@@ -207,19 +211,44 @@ class ContextManager:
         policy = self._memory.policy
         memory_inject_chars = self._memory_inject_chars(memory_dict)
 
-        hits, rag_message, retrieved_context, pr_meta = preretrieve_docs(
-            self._memory,
+        user_id = self._memory.resolve_user_id(thread_id) if thread_id else "local_user"
+        retrieval_defaults = retrieval_defaults_from_scenario(
+            self._scenario,
+            credential_manager=self._credential_manager,
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+        retrieval_request = build_retrieval_request(
+            query=goal,
+            ctx=retrieval_defaults,
+            user_id=user_id,
+            purpose="preretrieval_context",
+        )
+        previous_cache = self._latest_preretrieval_cache(thread_id=thread_id)
+        retrieval_decision = decide_retrieval(
             query=goal,
             route=route,
-            budget_chars=budget_max,
-            thread_id=thread_id,
-            retrieval_defaults=retrieval_defaults_from_scenario(
-                self._scenario,
-                credential_manager=self._credential_manager,
-                thread_id=thread_id,
-                user_id=self._memory.resolve_user_id(thread_id) if thread_id else "",
-            ),
+            memory_dict=memory_dict,
+            request=retrieval_request,
+            previous_cache=previous_cache,
         )
+        if retrieval_decision.action == "retrieve":
+            hits, rag_message, retrieved_context, pr_meta = preretrieve_docs(
+                self._memory,
+                query=goal,
+                route=route,
+                budget_chars=budget_max,
+                thread_id=thread_id,
+                retrieval_defaults=retrieval_defaults,
+                request=retrieval_request,
+            )
+        else:
+            hits, rag_message, retrieved_context = [], None, []
+            pr_meta = {
+                "enabled": False,
+                "decision_action": retrieval_decision.action,
+                "decision_reason": retrieval_decision.reason,
+            }
         if emit_events and hits and run_id and settings.context_emit_built_event:
             retrieval_payload = RagSearchAdapter.to_retrieval_completed_payload(
                 goal,
@@ -229,6 +258,7 @@ class ContextManager:
                 retrieval_route={"kind": route.kind, "phase": "context_assemble"},
                 policy_result=pr_meta.get("policy_result"),
                 context_guard=pr_meta.get("context_guard") if isinstance(pr_meta.get("context_guard"), dict) else None,
+                policy_context_hash=build_policy_context_hash(retrieval_request),
             )
             event_store = self._memory.event_store
             if event_store is not None:
@@ -277,7 +307,18 @@ class ContextManager:
             enabled=settings.context_packing_enabled,
         )
         truncation_steps = list(checkpoint_pack.get("truncation_steps") or []) + list(packed.steps)
-        preretrieval_cache = build_preretrieval_cache(query=goal, hits=hits) if hits else None
+        preretrieval_cache = (
+            build_preretrieval_cache(
+                query=goal,
+                hits=hits,
+                request=retrieval_request,
+                policy_context_hash=build_policy_context_hash(retrieval_request),
+                policy_trace_id=str(getattr(pr_meta.get("policy_result"), "policy_trace_id", "") or ""),
+                retrieval_mode=str(pr_meta.get("retrieval_mode") or "preretrieval"),
+            )
+            if hits
+            else previous_cache if retrieval_decision.action == "reuse_cache" else None
+        )
 
         episodic = memory_dict.get("episodic") if isinstance(memory_dict.get("episodic"), dict) else {}
         recalled_runs = list(episodic.get("recalled_runs") or [])
@@ -340,6 +381,7 @@ class ContextManager:
                 "preretrieval_enabled": bool(pr_meta.get("enabled")),
                 "preretrieval_excerpt_chars": int(pr_meta.get("excerpt_chars") or 0),
                 "preretrieval_cache": preretrieval_cache,
+                "retrieval_decision": retrieval_decision.as_dict(),
                 "memory_inject_chars": memory_inject_chars,
                 "skill_injected": bool(selected_skills),
                 "skill_count": len(selected_skills),
@@ -424,6 +466,41 @@ class ContextManager:
         if self._scenario.skill_registry is None:
             return []
         return self._scenario.skill_registry.public_specs(self._scenario.config.skills)
+
+    def _latest_preretrieval_cache(self, *, thread_id: str) -> dict[str, object] | None:
+        event_store = self._memory.event_store
+        if event_store is None or not thread_id:
+            return None
+        events = event_store.list_events(thread_id, limit=100)
+        for event in reversed(events):
+            if event.get("type") != EVENT_RETRIEVAL_COMPLETED:
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            if str(payload.get("retrieval_mode") or "") != "preretrieval":
+                continue
+            allowed = payload.get("allowed_chunk_ids")
+            if not isinstance(allowed, list) or not allowed:
+                continue
+            cache: dict[str, object] = {
+                "query": str(payload.get("query") or ""),
+                "query_hash": str(payload.get("query_hash") or ""),
+                "allowed_chunk_ids": [str(item) for item in allowed],
+                "sources": [
+                    str(item.get("source_file") or "")
+                    for item in payload.get("sources") or []
+                    if isinstance(item, dict) and item.get("source_file")
+                ],
+                "tenant_id": str(payload.get("tenant_id") or ""),
+                "user_id": str(payload.get("user_id") or ""),
+                "max_classification": str(payload.get("max_classification") or ""),
+                "allowed_scopes": [str(item) for item in payload.get("allowed_scopes") or []],
+                "allow_high_pii": bool(payload.get("allow_high_pii")),
+                "policy_context_hash": str(payload.get("policy_context_hash") or ""),
+                "policy_trace_id": str(payload.get("policy_trace_id") or ""),
+                "retrieval_mode": "preretrieval",
+            }
+            return cache
+        return None
 
     def _emit_skill_selected(
         self,

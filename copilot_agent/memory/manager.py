@@ -77,9 +77,17 @@ class MemoryManager:
         return self._events
 
     def search_docs(self, query: str, top_k: int = 8):
+        """Compatibility wrapper for unchecked debug/test retrieval; production code must use policy-aware search."""
+        return self.search_docs_unchecked(query, top_k=top_k)
+
+    def search_docs_unchecked(self, query: str, top_k: int = 8):
         return self._rag.search(query, top_k=top_k)
 
     def search_docs_detailed(self, query: str, top_k: int = 8):
+        """Compatibility wrapper for unchecked debug/test retrieval; production code must use policy-aware search."""
+        return self.search_docs_detailed_unchecked(query, top_k=top_k)
+
+    def search_docs_detailed_unchecked(self, query: str, top_k: int = 8):
         return self._rag.search_detailed(query, top_k=top_k)
 
     def policy_aware_search_docs(self, request: RetrievalRequest, top_k: int = 8):

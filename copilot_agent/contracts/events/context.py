@@ -18,6 +18,7 @@ def build_context_built_payload(
     memory_inject_chars: int = 0,
     checkpoint_compacted: bool = False,
     checkpoint_chars: int = 0,
+    retrieval_decision: dict[str, object] | None = None,
 ) -> dict[str, object]:
     payload = ContextBuiltPayload(
         user_message_chars=len(user_message or ""),
@@ -33,5 +34,6 @@ def build_context_built_payload(
         memory_inject_chars=memory_inject_chars,
         checkpoint_compacted=checkpoint_compacted,
         checkpoint_chars=checkpoint_chars,
+        retrieval_decision=retrieval_decision,
     )
     return payload.model_dump(exclude_none=True)

@@ -82,6 +82,10 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_context_manager.py",
     ),
     SuiteSpec(
+        suite_name="retrieval_gate_v1",
+        script="scripts/verify_retrieval_gate_v1.py",
+    ),
+    SuiteSpec(
         suite_name="policy_credentials",
         script="scripts/verify_policy_credentials.py",
     ),
@@ -149,6 +153,10 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="context_manager",
         script="scripts/verify_context_manager.py",
+    ),
+    SuiteSpec(
+        suite_name="retrieval_gate_v1",
+        script="scripts/verify_retrieval_gate_v1.py",
     ),
     SuiteSpec(
         suite_name="policy_credentials",

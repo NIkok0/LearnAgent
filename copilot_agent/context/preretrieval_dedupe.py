@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from copilot_agent.contracts.retrieval import RetrievalRequest, query_hash
 from copilot_agent.rag.schema import DocChunk
 from copilot_agent.settings import settings
 
@@ -34,12 +35,39 @@ def chunk_keys(hits: list[DocChunk]) -> set[tuple[str, int]]:
     return {chunk.key for chunk in hits}
 
 
-def build_preretrieval_cache(*, query: str, hits: list[DocChunk]) -> dict[str, object]:
-    return {
+def build_preretrieval_cache(
+    *,
+    query: str,
+    hits: list[DocChunk],
+    request: RetrievalRequest | None = None,
+    policy_context_hash: str = "",
+    policy_trace_id: str = "",
+    retrieval_mode: str = "",
+) -> dict[str, object]:
+    cache: dict[str, object] = {
         "query": query,
+        "query_hash": query_hash(query),
         "chunk_keys": [f"{source}:{start_line}" for source, start_line in chunk_keys(hits)],
+        "allowed_chunk_ids": [chunk.chunk_id for chunk in hits],
         "sources": sorted({chunk.source for chunk in hits}),
     }
+    if request is not None:
+        cache.update(
+            {
+                "tenant_id": request.tenant_id,
+                "user_id": request.user_id,
+                "max_classification": request.max_classification,
+                "allowed_scopes": sorted(str(item) for item in request.allowed_scopes),
+                "allow_high_pii": bool(request.allow_high_pii),
+            }
+        )
+    if policy_context_hash:
+        cache["policy_context_hash"] = policy_context_hash
+    if policy_trace_id:
+        cache["policy_trace_id"] = policy_trace_id
+    if retrieval_mode:
+        cache["retrieval_mode"] = retrieval_mode
+    return cache
 
 
 def filter_new_chunks(existing_keys: set[tuple[str, int]], hits: list[DocChunk]) -> list[DocChunk]:

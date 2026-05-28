@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     context_packing_enabled: bool = True
     context_checkpoint_pack_enabled: bool = True
     context_preretrieval_dedupe_enabled: bool = True
+    context_retrieval_gate_semantic_enabled: bool = False
     context_emit_built_event: bool = True
 
     agent_tool_route_enabled: bool = True

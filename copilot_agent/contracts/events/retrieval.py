@@ -25,6 +25,7 @@ def build_retrieval_completed_payload(
     retrieval_route: dict[str, object] | None = None,
     policy_result: RetrievalResult | None = None,
     context_guard: dict[str, object] | None = None,
+    policy_context_hash: str | None = None,
 ) -> dict[str, object]:
     """Payload for ``retrieval_completed`` EventStore / Timeline rows."""
     sources = []
@@ -67,5 +68,8 @@ def build_retrieval_completed_payload(
         retrieval_route=retrieval_route,
         **policy_payload,
         context_guard=dict(context_guard or {}),
+        allowed_scopes=list(policy_result.request.allowed_scopes) if policy_result is not None else [],
+        allow_high_pii=bool(policy_result.request.allow_high_pii) if policy_result is not None else None,
+        policy_context_hash=policy_context_hash,
     )
     return payload.model_dump(exclude_none=True)

@@ -30,6 +30,7 @@ class RagSearchAdapter:
         retrieval_route: dict[str, object] | None = None,
         policy_result: RetrievalResult | None = None,
         context_guard: dict[str, object] | None = None,
+        policy_context_hash: str | None = None,
     ) -> dict[str, Any]:
         return build_retrieval_completed_payload(
             query,
@@ -40,4 +41,5 @@ class RagSearchAdapter:
             retrieval_route=retrieval_route,
             policy_result=policy_result,
             context_guard=context_guard,
+            policy_context_hash=policy_context_hash,
         )

@@ -128,6 +128,9 @@ class RetrievalCompletedPayload(BaseModel):
     policy_trace_id: str | None = None
     policy_decisions: list[dict[str, Any]] = Field(default_factory=list)
     context_guard: dict[str, Any] = Field(default_factory=dict)
+    allowed_scopes: list[str] = Field(default_factory=list)
+    allow_high_pii: bool | None = None
+    policy_context_hash: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -146,6 +149,7 @@ class ContextBuiltPayload(BaseModel):
     memory_inject_chars: int = 0
     checkpoint_compacted: bool = False
     checkpoint_chars: int = 0
+    retrieval_decision: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="forbid")
 

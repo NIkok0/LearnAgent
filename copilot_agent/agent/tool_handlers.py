@@ -45,6 +45,7 @@ from copilot_agent.rag.schema import dynamic_search_top_k
 
 from copilot_agent.context.retrieval import enrich_retrieval_payload
 from copilot_agent.context.preretrieval_dedupe import apply_preretrieval_dedupe
+from copilot_agent.context.retrieval_gate import build_policy_context_hash
 
 from copilot_agent.runtime.event_schema import (
     EVENT_CREDENTIAL_BINDING_AUDIT,
@@ -246,6 +247,7 @@ class ToolHandlers:
                         retrieval_route=result.route.as_dict(),
                         policy_result=policy_result,
                         context_guard=guarded.audit_payload(),
+                        policy_context_hash=build_policy_context_hash(request),
 
                     ),
 
