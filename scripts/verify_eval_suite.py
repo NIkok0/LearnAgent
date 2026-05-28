@@ -795,6 +795,7 @@ def main() -> int:
             contract_schema_ok = False
     rag_metrics: dict[str, Any] = {}
     nightly_metrics_path = ROOT / "artifacts/eval/rag_metrics/nightly-latest.json"
+    has_nightly_suite = any(item["suite_name"] == "phase4_ragas_nightly" for item in results)
     if nightly_metrics_path.is_file():
         try:
             nightly_payload = json.loads(nightly_metrics_path.read_text(encoding="utf-8"))
@@ -825,6 +826,15 @@ def main() -> int:
                 rag_metrics = proxy_metrics if isinstance(proxy_metrics, dict) else rag_metrics
 
     rag_regression: dict[str, Any] = {}
+    rag_regression_warnings: list[str] = []
+    if args.profile == "full" and has_nightly_suite and not nightly_metrics_path.is_file():
+        rag_regression = {
+            "regression": False,
+            "reason": "nightly_metrics_missing",
+            "required_path": str(nightly_metrics_path),
+        }
+        rag_regression_warnings.append("rag_regression:nightly_metrics_missing")
+        overall_pass = False
     if rag_metrics:
         from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression  # noqa: WPS433
 
@@ -835,6 +845,12 @@ def main() -> int:
         )
         if rag_regression.get("regression"):
             overall_pass = False
+        reason = str(rag_regression.get("reason") or "")
+        if reason in {"no_history", "insufficient_history"}:
+            rag_regression_warnings.append(f"rag_regression:{reason}")
+        if args.profile == "full" and has_nightly_suite and reason == "metric_missing":
+            overall_pass = False
+            rag_regression_warnings.append("rag_regression:metric_missing")
 
     out = {
         "profile": args.profile,
@@ -856,7 +872,7 @@ def main() -> int:
             "profile_budget_ms": profile_budget_ms,
             "budget_status": budget_status,
             "slow_suite_warning_ms": SLOW_SUITE_WARNING_MS,
-            "warnings": budget_warnings,
+            "warnings": [*budget_warnings, *rag_regression_warnings],
         },
         "slow_suites": slow_suites,
         "results": results,

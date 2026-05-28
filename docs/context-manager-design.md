@@ -5,6 +5,10 @@
 
 **K/C/S 位置**：Kernel **M15**；读 Scenario prompt/router、Memory 召回、RAG 检索结果，产出 `ContextBundle` 与 `graph_messages`；**不**建索引、**不**存 Memory、**不**做 Policy 最终裁决。架构索引见 [guide §2.4](./agent-learning-guide.md)。
 
+**本文负责**：每轮 LLM 输入装配、budget packing、preretrieval/memory/tool route 注入、`context_built` 审计。  
+**本文不负责**：Memory 持久化、RAG 建库、Tool 执行、PolicyGate 最终裁决、Run FSM。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；各输入来源内部策略见对应专项文档。
+
 ---
 
 ## 0. 实现状态

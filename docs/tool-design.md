@@ -6,6 +6,10 @@
 
 **K/C/S 位置**：**M11** Capability（ToolSpec + Handler + packs）；**M06** Tool-grounded 编排（RouterEngine + route enforce）。Policy 裁决见 [guardrail-policy-design.md](./guardrail-policy-design.md)；RAG 检索链见 [rag-design.md](./rag-design.md)。架构索引见 [guide §2.4](./agent-learning-guide.md)。
 
+**本文负责**：Capability pack、ToolSpec/ToolRegistry、handler 入口、route-first Tool-grounded 编排与工具轨迹评测。  
+**本文不负责**：RAG 检索算法、PolicyGate 最终 allow/deny、HTTP 白名单细节、Run FSM。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；审批与 scope 裁决见 [guardrail-policy-design.md](./guardrail-policy-design.md)。
+
 ---
 
 ## 0. 实现状态总览（学习入口）

@@ -5,6 +5,10 @@
 
 **K/C/S 位置**：Kernel **M12** PolicyGate（统一裁决）；Scenario 提供 `policy` / HTTP 白名单 / credential 声明；Capability 声明 `ToolSpec.required_scopes`。详见 [guide §2.4.3·§2.7](./agent-learning-guide.md)。
 
+**本文负责**：PolicyGate、HITL、HTTP path policy、credential scope 裁决、安全审计与脱敏。  
+**本文不负责**：Tool handler 实现、RAG 检索算法、Run FSM 细节、契约字段总表。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；Tool 注册见 [tool-design.md](./tool-design.md)。
+
 ---
 
 ## 0. 实现状态

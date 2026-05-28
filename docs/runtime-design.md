@@ -5,6 +5,10 @@
 
 **K/C/S 位置**：Kernel **M02–M04**（产品层 Run/Event 事实源）；与 LangGraph checkpoint 分界见 [memory-checkpoint-design.md](./memory-checkpoint-design.md)。详见 [guide §2.1·§3](./agent-learning-guide.md)。
 
+**本文负责**：Thread/Run FSM、EventStore 写模型、ExecutionEngine 调度、Timeline 读模型、Run 级 side-effect read model。  
+**本文不负责**：事件 payload 字段契约、Memory/checkpoint 压缩策略、Tool/Policy 裁决细节。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；契约字段见 [data-flow-design.md](./data-flow-design.md)。
+
 ---
 
 ## 0. 实现状态
@@ -249,15 +253,11 @@ Engine 启动时 `_cleanup_orphan_runs()` 扫描 EventStore 中非终态 Run：
 
 ## 7. EventStore 与 Checkpoint 一致性
 
-产品事实源（EventStore）与 working memory（LangGraph checkpoint）职责不同；同一次 Run 会交替写入。**完整策略表见 [agent-learning-guide.md](./agent-learning-guide.md) §2.6**；本节列 Runtime 侧已落地行为与剩余差距。
+产品事实源（EventStore）与 working memory（LangGraph checkpoint）职责不同；同一次 Run 会交替写入。**权威原则与完整策略表见 [agent-learning-guide.md](./agent-learning-guide.md) §2.6**；本节只保留 Runtime 侧已落地行为与剩余差距。
 
 ### 7.1 基本原则
 
-```text
-EventStore 记录产品事实：run_*、tool_*、approval_*、credential_binding_audit（无 secret）、memory_*。
-Checkpoint 记录模型续推所需的 messages。
-Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
-```
+摘要：EventStore 记录产品事实；checkpoint 记录模型续推所需的 messages；Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 ### 7.2 建议写入顺序
 
@@ -341,11 +341,7 @@ Timeline 只读 EventStore，不从 checkpoint 反推 Run 状态。
 
 ## Appendix: Checkpoint Consistency v2
 
-Checkpoint consistency v2 保持 EventStore 与 LangGraph checkpoint 的职责分离：
-
-- **EventStore**：Thread / Run / Event / Timeline / approval / cancel / tool audit / final answer 等产品事实。
-- **LangGraph checkpoint**：图 state 与 message history（working memory）。
-- 两者 **不做** 同一原子事务。
+Checkpoint consistency v2 仍遵循 [agent-learning-guide §2.6](./agent-learning-guide.md) 的双存储边界：EventStore 是产品事实源，LangGraph checkpoint 是 working memory 真相源；两者不做同一原子事务。
 
 Run 进入终态并完成 finalize 时，`ExecutionEngine` 读取最新 checkpoint 快照并写入 `checkpoint_consistency_checked`，对比 `run_completed_meta.message_count` 与 checkpoint，记录：
 

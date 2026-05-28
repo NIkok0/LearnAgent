@@ -3,6 +3,10 @@
 > 自动化评测的分层职责、Profile 协议、数据集与 CI 策略。  
 > **套件权威列表**：`scripts/verify_eval_suite.py`；CI 行为见 [ci-design.md](./ci-design.md)。
 
+**本文负责**：评测分层、profile 语义、子套件输出协议、数据集用途。  
+**本文不负责**：GitHub Actions 具体步骤、模块业务实现、单个 verifier 的内部断言。  
+**权威来源**：套件枚举以 `scripts/verify_eval_suite.py` 为准；CI 复现与失败排查见 [ci-design.md](./ci-design.md)。
+
 ---
 
 ## 0. 实现状态

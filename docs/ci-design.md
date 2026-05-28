@@ -3,6 +3,10 @@
 > GitHub Actions 工作流、本地复现命令与失败排查。**套件清单以** `scripts/verify_eval_suite.py` **为准**。  
 > Eval 分层见 [eval-design.md](./eval-design.md)；模块地图见 [agent-learning-guide.md](./agent-learning-guide.md)。
 
+**本文负责**：CI workflow、profile 到 job 的映射、本地复现命令、脚本治理规则。  
+**本文不负责**：评测指标语义、模块业务设计、单个 verifier 断言细节。  
+**权威来源**：套件枚举以 `scripts/verify_eval_suite.py` 为准；评测分层见 [eval-design.md](./eval-design.md)。
+
 ---
 
 ## 0. 实现状态
@@ -52,8 +56,11 @@ Nightly `eval_full_nightly` 额外步骤：
 
 ```text
 pip install -r requirements-vector.txt
+restore artifacts/eval/rag_metrics/history cache
+preload HuggingFace embedding + rerank models
 env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
-  → verify_eval_suite.py --profile full [--enable-ragas on schedule]
+  → schedule: verify_eval_suite.py --profile full
+  → workflow_dispatch + enable_ragas=true: verify_eval_suite.py --profile full --enable-ragas
   → phase4_ragas_nightly 写入 artifacts/eval/rag_metrics/nightly-latest.json
 ```
 
@@ -167,7 +174,7 @@ python scripts/verify_rag_domain.py --case retrieval_quality
 产物：
 - `artifacts/eval/rag_metrics/nightly-latest.json`（proxy + L2）
 - `artifacts/eval/rag_metrics/e2e-latest.json`（RAGAS + citation）
-- `artifacts/eval/rag_metrics/history/`（timestamped 快照；gold recall 回归 >0.05 告警）
+- `artifacts/eval/rag_metrics/history/`（通过 Actions cache 跨夜跑恢复；gold recall 回归 >0.05 阻断）
 
 ---
 
@@ -217,6 +224,8 @@ conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --
 | `phase4_tool_trajectory` FAIL | `PolicyRegistry` 需挂 `CredentialManager`；见 `verify_phase4_tool_trajectory.py` |
 | `session_mvp` FAIL / 超时 | ChatRunner 段需 `copilot_capabilities=rag,http`；`agent_tool_route_enforce=False`；engine task 清理 |
 | `phase4_ragas` FAIL | Scenario docs 路径、`ingest`、proxy 阈值 |
+| `rag_regression.reason=no_history/insufficient_history` | 新启用或 cache 未恢复；summary 会 warning，下一次夜跑应有历史 |
+| `rag_regression.reason=nightly_metrics_missing` | `phase4_ragas_nightly` 没产出 `nightly-latest.json`；通常是向量模型/后端未就绪，应修复而非 fallback |
 | core / rag 聚合 FAIL | 对应 `eval-suite-summary.json` / `eval-rag-summary.json` 的 `failed_suites` |
 | 套件超时 | `--suite-timeout-seconds`（默认 180）；聚合层会保留 stdout/stderr tail；RAGAS auto 另有软超时并回退 proxy |
 

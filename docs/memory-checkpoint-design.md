@@ -5,6 +5,10 @@
 
 **K/C/S 位置**：Kernel **M09 Memory** + LangGraph checkpoint；Context 装配（M15）→ [context-manager-design.md](./context-manager-design.md)。
 
+**本文负责**：working/episodic/long-term memory 分层、checkpoint 压缩、短期转长期、长期记忆召回与淘汰策略。  
+**本文不负责**：每轮上下文最终拼装、RAG ingest/检索、Run FSM、Tool/Policy 裁决。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；Context 装配见 [context-manager-design.md](./context-manager-design.md)。
+
 ---
 
 ## 0. 实现状态总览（学习入口）
@@ -44,10 +48,7 @@
 | checkpoint 无限增长 | 长线程 token 成本上升，且无统一压缩策略 |
 | episodic 与 working 边界模糊 | 摘要注入与原始消息混在一起，难以断言预算 |
 
-本设计确立两条原则：
-
-1. **Working Memory 的事实来源是 LangGraph checkpoint 中的 `messages`**
-2. **EventStore 是审计与 episodic 召回的事实来源，不反向重建 working 全量历史**
+本设计遵循 [agent-learning-guide §2.6](./agent-learning-guide.md) 的双存储边界：LangGraph checkpoint 中的 `messages` 是 working memory 真相源；EventStore 是审计与 episodic 召回的事实来源，不反向重建 working 全量历史。
 
 客户端 `messages[]` 在兼容期内仍可携带历史，但服务端只把**当前轮 user** 当作图输入增量；历史以 checkpoint 为准。
 
@@ -373,11 +374,7 @@ Wave1–2 已完成项见 **§0**。路线图索引：[agent-learning-guide §7]
 
 ## Appendix: Consistency v2 / Debug Bundle
 
-Memory/checkpoint consistency v2 明确双存储边界（详见 [runtime-design.md Appendix](./runtime-design.md)）：
-
-- **EventStore**：产品事实与可回放 Timeline。
-- **LangGraph checkpoint**：working memory（messages + interrupt state）。
-- 两者 **不做** 原子事务；LearnAgent 仅用派生事件对账，**不**从 EventStore 重建 checkpoint。
+Memory/checkpoint consistency v2 沿用双存储边界（权威原则见 [agent-learning-guide §2.6](./agent-learning-guide.md)，Runtime 落地见 [runtime-design.md Appendix](./runtime-design.md)）：LearnAgent 仅用派生事件对账，**不**从 EventStore 重建 checkpoint。
 
 Run 完成 finalize 时，`ExecutionEngine` 在 `run_completed_meta` 之后写入 `checkpoint_consistency_checked`，对比 message 计数并记录 read/missing/interrupt/match/warnings。不一致 **不会** 将 `completed` 改回 `failed`。
 

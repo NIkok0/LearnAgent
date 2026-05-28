@@ -144,6 +144,31 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-vector.txt
 
+      - name: Restore RAG metrics history
+        uses: actions/cache@v4
+        with:
+          path: artifacts/eval/rag_metrics/history
+          key: rag-metrics-history-${{ github.run_id }}
+          restore-keys: |
+            rag-metrics-history-
+
+      - name: Restore HuggingFace model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-rag-models-${{ runner.os }}-bge-small-zh-v1.5-bge-reranker-base
+          restore-keys: |
+            hf-rag-models-${{ runner.os }}-
+
+      - name: Preload nightly RAG models
+        run: |
+          python - <<'PY'
+          from sentence_transformers import CrossEncoder, SentenceTransformer
+
+          SentenceTransformer("BAAI/bge-small-zh-v1.5")
+          CrossEncoder("BAAI/bge-reranker-base")
+          PY
+
       - name: Run eval full profile
         env:
           RAG_USE_VECTOR: "true"
@@ -171,6 +196,7 @@ jobs:
           payload = json.loads(p.read_text(encoding="utf-8"))
           failed = payload.get("failed_suites", [])
           rag_metrics = payload.get("rag_metrics", {})
+          rag_regression = payload.get("rag_regression", {})
           nightly_metrics_path = Path("artifacts/eval/rag_metrics/nightly-latest.json")
           nightly_payload = {}
           if nightly_metrics_path.is_file():
@@ -186,6 +212,7 @@ jobs:
               f"- runtime_contract_breaks: {', '.join(payload.get('runtime_contract_breaks', [])) or '(none)'}",
               f"- contract_schema_ok: {payload.get('contract_schema_ok')}",
               f"- rag_metrics: {json.dumps(rag_metrics, ensure_ascii=False)}",
+              f"- rag_regression: {json.dumps(rag_regression, ensure_ascii=False)}",
               f"- nightly_embedding_model: {nightly_payload.get('embedding_model', 'n/a')}",
               f"- nightly_vector_enabled: {nightly_payload.get('vector_enabled')}",
               f"- nightly_rerank_enabled: {nightly_payload.get('rerank_enabled')}",

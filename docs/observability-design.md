@@ -4,6 +4,10 @@
 
 Related docs: [agent-learning-guide.md](./agent-learning-guide.md), [runtime-design.md](./runtime-design.md), [data-flow-design.md](./data-flow-design.md), [tech-selection-design.md](./tech-selection-design.md).
 
+**This doc owns**: EventStore product-track observability, optional external trace providers, trace/cost summary boundaries.  
+**This doc does not own**: Run FSM, full event payload schema, verifier profile definitions, or business policy decisions.  
+**Source of truth**: module boundaries and global gaps live in [agent-learning-guide.md](./agent-learning-guide.md); Runtime facts live in [runtime-design.md](./runtime-design.md).
+
 ## 0. Current Status
 
 | Item | Status | Verification |

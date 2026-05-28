@@ -3,6 +3,10 @@
 > 最终 Demo 功能需求：可信水印任务 Agent 与司法材料确权 RAG。  
 > 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[rag-design.md](./rag-design.md)（实现对照）、[tool-design.md](./tool-design.md)、[runtime-design.md](./runtime-design.md)、[data-flow-design.md](./data-flow-design.md)、[eval-design.md](./eval-design.md)。
 
+**本文负责**：描述水印 Demo 的产品目标、用户场景、验收故事与 demo case。  
+**本文不负责**：展开 Runtime FSM、Tool contract、PolicyGate、RAG ingest/检索或 Eval profile 的实现细节。  
+**权威来源**：模块职责与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；专项实现见各 `*-design.md`。
+
 ---
 
 ## 0. 实现状态总览（2026-05）
@@ -11,7 +15,7 @@
 
 | 需求域 | 状态 | 验收入口 |
 |--------|------|----------|
-| §2.1 Agent Runtime（Run FSM / SSE / Timeline） | ✅ 已实现 | `verify_runtime_*`，`--profile core` |
+| §2.1 Agent Runtime（Run FSM / SSE / Timeline） | ✅ 已实现 | `verify_runtime_domain.py --case all`，`--profile core` |
 | §2.2 Tool Registry + HTTP 白名单 | ✅ 已实现 | Scenario `HttpPathPolicy` + `verify_scenario_loader.py` |
 | §2.3 Safety Gate + Approval + **required_scopes** | ✅ 已实现 | `verify_phase3_safety_gate.py`，`verify_policy_credentials.py` |
 | §2.4 Tool-grounded 编排（规则路由） | ✅ 已实现 | [tool-design.md §3](./tool-design.md)（编排 §0 见同文档） |
@@ -49,118 +53,21 @@
 
 ### 2.1 Agent Runtime（✅ 已实现）
 
-Agent Runtime 负责管理一次用户请求从输入到执行完成的完整生命周期。
+需求：用户的一次请求必须以 `Run` 为单位后台执行，可查询状态、取消、审批续跑，并在结束后形成可回放 Timeline。Runtime 的状态机、事件写入和 SSE/WS 语义以 [runtime-design.md](./runtime-design.md) 为准。
 
-功能需求：
-
-- 支持创建 `Thread`，表示一条长期会话。
-- 支持创建 `Run`，表示一次用户请求的执行过程。
-- 支持 Run 状态机：
-  - `queued`
-  - `running`
-  - `waiting_approval`
-  - `completed`
-  - `failed`
-  - `cancelled`
-- 支持后台 Run 执行，用户无需阻塞等待。
-- 支持 SSE 流式输出：
-  - token 输出
-  - tool_start
-  - tool_end
-  - approval_required
-  - approval_resolved
-  - done
-  - error
-- 支持取消正在执行的 Run。
-- 支持查询 Run 当前状态和历史事件。
-- 支持 Run 结束后生成可回放 Timeline。
-
-验收标准：
-
-- 用户创建 Run 后，可以通过 API 查询状态变化。
-- Run 执行过程中的关键事件会写入 EventStore。
-- Timeline 能展示用户请求、工具调用、审批、错误和最终回答。
+验收标准：创建 Run 后可观察状态变化；关键执行事实写入 EventStore；Timeline 能复盘用户请求、工具调用、审批、错误和最终回答。
 
 ### 2.2 Tool Registry 与受控 HTTP 工具（✅ 已实现）
 
-Agent 不能自由访问任意 URL，只能调用登记过的水印平台 API。
+需求：Agent 只能调用已登记、已授权、可审计的水印平台工具；水印平台 API 白名单和工具元数据由 Scenario / Capability 声明，不能让模型自由访问任意 URL。Tool 注册与 handler 设计见 [tool-design.md](./tool-design.md)，HTTP 白名单与审批裁决见 [guardrail-policy-design.md](./guardrail-policy-design.md)。
 
-功能需求：
-
-- 设计 `ToolRegistry`，统一管理工具元数据：
-  - `name`
-  - `description`
-  - `category`
-  - `risk_level`
-  - `requires_approval`
-  - `timeout_seconds`
-  - `schema`
-  - `version`
-- 封装基础 HTTP 工具：
-  - `http_get`
-  - `http_post`
-- 配置水印平台 API 白名单：
-  - `GET /actuator/health`
-  - `POST /api/v1/auth/login`
-  - `GET /api/v1/stats/dashboard`
-  - `GET /api/v1/files`
-  - `GET /api/v1/files/{id}`
-  - `GET /api/v1/jobs/{id}`
-  - `GET /api/v1/admin/stats`
-  - `GET /api/v1/admin/users`
-  - `GET /api/v1/admin/groups`
-  - `POST /api/v1/jobs/watermark`
-- 禁止调用：
-  - 外部 URL
-  - 未登记路径
-  - 未登记 HTTP 方法
-  - 高风险但未审批的 POST 操作
-- 工具返回统一结果结构：
-  - `success`
-  - `data`
-  - `error`
-  - `duration_ms`
-  - `sanitized_args`
-  - `sanitized_result`
-
-验收标准：
-
-- 白名单内 GET 请求可正常执行。
-- 外部 URL 必须被拒绝。
-- 未登记 API 路径必须被拒绝。
-- 工具调用事件必须包含工具名、风险等级、调用参数、执行结果和耗时。
+验收标准：白名单内读工具可执行；外部 URL、未登记路径和未授权写操作必须被拒绝；工具调用事件包含可审计的工具名、风险、参数摘要、结果摘要和耗时。
 
 ### 2.3 Safety Gate 与 Approval 工作流（✅ 已实现）
 
-高风险业务操作必须经过用户确认，不能由 Agent 直接执行。
+需求：高风险写操作必须进入 HITL 审批，未审批不得执行；approve 后续跑工具，reject 后阻断并给出说明。风险分级、scope 裁决、policy decision 与 side-effect ledger 归属 [guardrail-policy-design.md](./guardrail-policy-design.md)。
 
-功能需求：
-
-- 将工具风险分为：
-  - `low`
-  - `medium`
-  - `high`
-- 将 `POST /api/v1/jobs/watermark` 定义为高风险工具。
-- 高风险工具触发时，Run 状态进入 `waiting_approval`。
-- 返回 approval 请求信息：
-  - 工具名
-  - 请求路径
-  - 参数摘要
-  - 风险原因
-  - 是否可批准
-- 支持用户执行：
-  - approve
-  - reject
-- approve 后继续执行工具。
-- reject 后不执行工具，并生成拒绝说明。
-- 所有审批行为写入 EventStore。
-
-验收标准：
-
-- 未确认时，Agent 不能创建水印任务。
-- approve 后，工具调用继续执行。
-- reject 后，工具不执行，Run 正常完成并说明原因。
-- Timeline 能展示审批前后的完整链路。
+验收标准：创建水印任务等高风险动作必须等待审批；approve/reject 都可回放到 EventStore / Timeline；reject 或 policy block 不执行真实写工具。
 
 ### 2.4 水印任务助手业务闭环（✅ 已实现）
 
@@ -197,83 +104,15 @@ Agent 不能自由访问任意 URL，只能调用登记过的水印平台 API。
 
 ### 2.5 Run Timeline 与工具审计（✅ 已实现）
 
-司法确权场景强调可追溯，因此 Agent 的每一步都需要留痕。
+需求：司法确权场景强调可追溯，Run 必须记录生命周期、检索依据、工具调用、审批、安全拒绝、错误和最终回答；可见审计结果必须脱敏。EventStore / Timeline 边界见 [runtime-design.md](./runtime-design.md)，payload contract 与脱敏见 [data-flow-design.md](./data-flow-design.md)。
 
-功能需求：
-
-- EventStore 记录以下事件：
-  - `run_created`
-  - `run_started`
-  - `token`
-  - `tool_start`
-  - `tool_end`
-  - `approval_required`
-  - `approval_resolved`
-  - `run_completed`
-  - `run_failed`
-  - `cancel_requested`
-  - `run_cancelled`
-- Timeline 聚合展示：
-  - 用户原始问题
-  - Agent 计划或判断
-  - 检索依据
-  - 工具调用
-  - 工具结果
-  - 审批状态
-  - 错误信息
-  - 最终回答
-- 对敏感字段脱敏：
-  - cookie
-  - token
-  - secret
-  - password
-  - authorization
-- 支持导出单个 Run 的审计摘要。
-
-验收标准：
-
-- 每次工具调用都有 start/end 事件。
-- 失败工具调用也必须有审计记录。
-- Timeline 能用于复盘一次完整任务。
-- 敏感信息不会出现在可见审计结果中。
+验收标准：成功和失败工具调用都有审计记录；Timeline 可复盘完整任务；cookie、token、secret、password、authorization 等敏感字段不出现在可见审计结果中。
 
 ### 2.6 Agent 行为评估（✅ 已实现，proxy）
 
-为了避免项目看起来只是“接了大模型”，需要用评估集验证 Agent 行为。
+需求：用 deterministic proxy case 验证工具选择、安全拒绝、审批链路、RAG 引用和 demo 行为，避免只验证“模型能聊天”。评测分层、profile 与 suite 协议以 [eval-design.md](./eval-design.md) / [ci-design.md](./ci-design.md) 为准。
 
-功能需求：
-
-- 建立 Tool Calling 评估集，至少覆盖 15 条 case。
-- case 类型包括：
-  - 健康检查
-  - 文件查询
-  - 任务状态查询
-  - 未审批危险动作拦截
-  - 审批后危险动作执行
-  - 非法 URL 拒绝
-  - 未登记 API 拒绝
-  - 任务失败排查
-  - RAG 引用回答
-- 每个 case 定义：
-  - `id`
-  - `question`
-  - `expected_tools`
-  - `forbidden_tools`
-  - `expect_blocked`
-  - `required_sources`
-  - `expected_status`
-- 自动化脚本输出：
-  - 工具选择正确率
-  - 危险动作拦截率
-  - 非法 URL 拒绝率
-  - 审批流程通过率
-  - RAG 引用命中率
-
-验收标准：
-
-- 一条命令可以运行核心评估集。
-- 输出 PASS / FAIL。
-- 失败时能定位到具体 case。
+验收标准：一条命令可运行核心评估集；输出 PASS / FAIL；失败时能定位到具体 case。
 
 ## 3. RAG 功能需求
 
@@ -311,60 +150,15 @@ RAG 系统面向水印平台使用、部署、运维和算法说明。
 
 ### 3.2 文档解析与 Chunk 策略（✅ 已实现）
 
-功能需求：
+需求：RAG 能加载 Scenario 文档、按标题切分 chunk、保留来源/章节/API 契约元数据，并支持重建或热更新索引。字段与 ingest 实现见 [rag-design.md](./rag-design.md) §4。
 
-- 支持 Markdown 文档加载。
-- 按标题层级切分 chunk。
-- 保留元数据：
-  - `source_file`
-  - `section_title`
-  - `heading_path`
-  - `chunk_index`
-  - `doc_type`
-  - `updated_at`
-- 针对表格、列表、代码块做结构保留。
-- 针对 API 文档保留方法和路径：
-  - HTTP method
-  - path
-  - request fields
-  - response fields
-  - error model
-- 支持重新构建索引。
-
-验收标准：
-
-- 检索结果能返回来源文件和标题。
-- API 类问题能命中对应接口文档。
-- 部署类问题能命中部署文档或 Runbook。
+验收标准：检索结果能返回来源文件和标题；API 类问题命中接口文档；部署类问题命中部署文档或 Runbook。
 
 ### 3.3 混合检索（✅ 已实现）
 
-功能需求：
+需求：支持关键词、BM25、可选向量、RRF/rerank、query rewrite、doc_type/authority boost，使高频部署、排障、API 契约问题稳定命中文档。检索算法与配置见 [rag-design.md](./rag-design.md) §5。
 
-- 支持关键词检索。
-- 支持向量检索。
-- 支持混合排序：
-  - keyword score
-  - vector score
-  - source priority
-  - doc_type boost
-- 支持 top-k 配置。
-- 支持查询改写：
-  - 用户口语问题转换为检索关键词。
-  - 例如“任务卡住了”扩展为 `QUEUED`、`PROCESSING`、`Redis Stream`、`Worker`。
-- 支持高频问题专门优化：
-  - 任务一直 QUEUED 怎么排查？
-  - 任务一直 PROCESSING 怎么排查？
-  - Redis Stream 默认 key 是什么？
-  - Worker 怎么配置？
-  - Java API 怎么部署？
-  - 水印算法支持哪些文件类型？
-
-验收标准：
-
-- 高频问题应稳定命中目标文档。
-- 检索结果中应包含足够上下文用于回答。
-- 检索不到时应明确说明缺少依据，而不是编造。
+验收标准：高频问题稳定命中目标文档；检索结果包含足够上下文；检索不到时明确说明缺少依据。
 
 ### 3.4 引用溯源回答（✅ 已实现）
 
@@ -386,60 +180,15 @@ RAG 系统面向水印平台使用、部署、运维和算法说明。
 
 ### 3.5 Tool-grounded RAG（✅ 已实现）
 
-Tool-grounded RAG 是本项目的关键差异化，不是单纯知识库问答。
+需求：系统要区分纯知识、实时状态、排障和高风险执行问题；RAG 负责提供依据，Tool-grounded 编排负责决定是否、何时调用 API。编排规则与 path 注入见 [tool-design.md](./tool-design.md) §3.7。
 
-功能需求：
-
-- Agent 收到问题后先判断问题类型：
-  - 纯知识问题
-  - 实时状态问题
-  - 排障问题
-  - 高风险执行问题
-- 纯知识问题：
-  - 只走 RAG。
-- 实时状态问题：
-  - 先调用 API 工具，再结合结果回答。
-- 排障问题：
-  - 先检索 Runbook / 部署文档，再调用任务或平台状态工具。
-- 高风险执行问题：
-  - 先检索相关说明，再进入 Approval。
-- RAG 检索结果应参与工具选择：
-  - 例如文档说明任务状态查询接口为 `/api/v1/jobs/{id}`，Agent 再调用该工具。
-
-验收标准：
-
-- 用户问“任务一直 QUEUED 怎么办？”时，系统应检索排障文档并查询任务状态。
-- 用户问“创建水印任务”时，系统应识别为高风险动作并要求审批。
-- 用户问“部署 Java API 步骤”时，不应调用业务 API，只需要 RAG 回答。
+验收标准：排障问题先检索再结合状态工具；创建水印任务进入审批；部署类知识问题不调用业务 API。
 
 ### 3.6 RAG 评估（✅ 已实现，proxy；RAGAS PR 门禁未实现）
 
-功能需求：
+需求：RAG 评估覆盖 API 契约、部署、排障、安全策略、Tool-grounded 问题；PR 走 deterministic proxy，RAGAS 作为可选/nightly 增强。指标定义与 profile 见 [eval-design.md](./eval-design.md) / [ci-design.md](./ci-design.md)。
 
-- 建立 RAG 评估集，至少 20 条 case。
-- 覆盖：
-  - API 契约问答
-  - 部署问答
-  - Worker 排障
-  - Redis Stream 排障
-  - 算法选择说明
-  - 安全策略说明
-  - Tool-grounded 问题
-- 指标：
-  - retrieval hit rate
-  - required source coverage
-  - citation coverage
-  - answer faithfulness
-  - tool decision accuracy
-  - dangerous action rejection rate
-- 支持离线 deterministic proxy 评估。
-- 可选支持 RAGAS 实评分。
-
-验收标准：
-
-- 一条命令运行 RAG 评估。
-- 评估结果输出 JSON summary。
-- 失败 case 能看到缺失来源或错误工具选择。
+验收标准：一条命令运行 RAG 评估；输出 JSON summary；失败 case 能看到缺失来源或错误工具选择。
 
 ## 4. 最终 Demo 脚本
 
@@ -550,7 +299,7 @@ approve
 
 | 优先级 | 对应需求 | 当前状态 | 验收入口 |
 |---|---|---|---|
-| P0 | §2.1、§2.2、§2.3、§2.5、Demo 1/2/4/5/6 | ✅ 已实现 | `verify_runtime_*`、`verify_phase3_safety_gate.py`、`verify_demo_golden_e2e.py` |
+| P0 | §2.1、§2.2、§2.3、§2.5、Demo 1/2/4/5/6 | ✅ 已实现 | `verify_runtime_domain.py`、`verify_phase3_safety_gate.py`、`verify_demo_golden_e2e.py` |
 | P1 | §2.4 任务排障 | ✅ 已实现 | `agent/diagnosis.py`、`verify_diagnosis_template.py` |
 | P2 | §3.1–§3.4 RAG 知识库、检索、引用 | ✅ 已实现 | `verify_rag_domain.py`、`verify_phase4_ragas.py`、`verify_citation_l4.py` |
 | P3 | §3.5 Tool-grounded RAG | ✅ 已实现 | `verify_phase4_tool_trajectory.py`、`verify_demo_golden_e2e.py` |

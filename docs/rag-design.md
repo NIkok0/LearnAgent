@@ -2,9 +2,13 @@
 
 > 说明水印平台文档的加载、分块、混合检索，以及 `search_docs` 与 EventStore / Eval 的衔接；不重复 Run FSM 与 Tool 审计通用契约。  
 > 关联文档：[agent-learning-guide.md](./agent-learning-guide.md)、[demo-requirements-design.md](./demo-requirements-design.md) §3、[tool-design.md](./tool-design.md)、[data-flow-design.md](./data-flow-design.md) §2.4、[eval-design.md](./eval-design.md)、[ci-design.md](./ci-design.md)  
-> **文档定位**：本项目 M10 的**实现设计**（代码锚点 + 边界 + 评测）。通用 RAG 全链路概念（BM25、rerank、GraphRAG 等）在 §1.2、§2.1、§5.5、§9.4 以「现状 vs 目标」对照呈现，便于与面试/知识体系对齐。
+> **文档定位**：本项目 M10 的**实现设计**（代码锚点 + 边界 + 评测）。通用 RAG 全链路概念（BM25、rerank、GraphRAG 等）在 §1.2、§2.1、§5.5、§9.2 以「现状 vs 目标」对照呈现，便于与面试/知识体系对齐。
 
 **K/C/S 位置**：Capability **M10 RAG**（ingest + 检索）；编排层 Tool-grounded → [tool-design.md](./tool-design.md)。详见 [guide §2.4](./agent-learning-guide.md)。
+
+**本文负责**：文档 ingest、chunk metadata、检索/融合/rerank、RAG context guard、`retrieval_completed` 与 RAG 质量评测。  
+**本文不负责**：Run FSM、HTTP 白名单/审批、是否调用 API、最终回答是否完全 grounded。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；Tool-grounded 编排见 [tool-design.md](./tool-design.md)。
 
 ---
 
@@ -92,7 +96,7 @@
 | **Fine-tuning** | 固定输出风格、分类判别 | 平台规则/API/Redis key **频繁变更**；难追溯来源；更新成本远高于 reload 知识库 |
 | **RAG（当前）** | 可更新私有文档、需引用溯源 | 水印 Demo 核心路径：`search_docs` 找证据 + LLM 组织答案 + Timeline 审计 |
 
-**RAG 在本项目的「证据驱动」含义**：检索层负责 **找到** 相关 chunk；生成层（M08 LLM + M06 编排）负责 **整合与表达**；M10 **不**保证最终回答一定 grounded——That 依赖 Prompt、模型行为与后续 citation 评测（§9.4）。
+**RAG 在本项目的「证据驱动」含义**：检索层负责 **找到** 相关 chunk；生成层（M08 LLM + M06 编排）负责 **整合与表达**；M10 **不**保证最终回答一定 grounded——That 依赖 Prompt、模型行为与后续 citation 评测（§9.2）。
 
 **与 Tool Agent 的组合**：静态文档走 RAG；**实时状态**（任务 ID、健康检查）走 `http_get`（§6.2），对应「结构化事实 + 文档解释」的多源模式，而非单一向量库包办。
 
@@ -621,40 +625,22 @@ CI 行为见 [ci-design.md](./ci-design.md)；RAG 代理指标见 `phase4_ragas`
 
 ## 9. 评测与 CI
 
-### 9.1 数据集
+M10 只负责检索质量与引用输入质量；profile、suite 数量、Nightly/RAGAS 语义见 [eval-design.md](./eval-design.md) 与 [ci-design.md](./ci-design.md)。Tool 是否选对、是否先 RAG 后 API 属于 M06/L5，见 [tool-design.md](./tool-design.md) §3.9。
 
-`eval/phase4-eval-cases.json` 中 `category: "docs"` 的 case 当前 **20** 条（P4-001～P4-005、P4-012、P4-015～P4-028），覆盖 9 份文档，字段：
+### 9.1 数据集与 proxy 指标
 
-- `question`
-- `required_sources`（期望出现在检索结果 `source` 集合中）
-- `expected_tools: ["search_docs"]`（供 Agent 编排评测，非 `phase4_ragas` 本脚本使用）
-
-同文件另有 `api` / `safety` case，由其他 verify 脚本消费。
-
-### 9.2 Proxy 指标（`verify_phase4_ragas.py`）
-
-对每条 docs case 调用 `build_rag_store().search(question, top_k=6)`：
+`eval/phase4-eval-cases.json` 中 `category: "docs"` 的 case 用于验证检索是否命中预期来源；`api` / `safety` case 由 Tool/Eval 层消费。`verify_phase4_ragas.py --mode proxy` 对 docs case 调用 `build_rag_store().search(...)`，主要指标：
 
 | 指标 | 含义 |
 |------|------|
+| `retrieval_hit_rate` | 是否至少返回 1 个 chunk |
 | `required_source_coverage` | `required_sources` 命中比例 |
 | `required_source_full_match` | 是否全部 required 命中 |
-| `retrieval_hit_rate` | 是否至少返回 1 个 chunk |
+| `gold_chunk_recall_at_k` / `mrr` | chunk 级命中质量 |
 
-**CI 通过阈值**（proxy）：`docs_cases >= 3` 且 `retrieval_hit_rate >= 0.9` 且 `required_source_full_match_rate >= 0.6`。
+proxy 测的是“检索是否命中文档/片段”，不测最终回答质量或工具选择。
 
-**当前本地基线**（`scenarios/watermark/docs` + `--disable-vector`）：20 case 通常可达 `full_match_rate = 1.0`；结果写入 `artifacts/phase4/phase4-ragas-summary.json`。
-
-文档缺失时：`--allow-missing-docs` → `phase4_ragas=SKIP`；`rag_hot_reload` 在无 Scenario docs 时也可 SKIP。
-
-### 9.3 RAGAS 轨道
-
-`--mode auto|ragas` 在具备 `OPENAI_API_KEY` 且 ragas 可 import 时尝试 `faithfulness` / `answer_relevancy`；否则仅 proxy。  
-聚合 profile 见 [ci-design §5](./ci-design.md)；分层语义见 [eval-design §4](./eval-design.md)。
-
-**proxy 测的是检索是否命中预期文档**，不测 LLM 最终回答质量或 Agent 是否选对 tool。
-
-### 9.4 分层评测模型（现状 vs 目标）
+### 9.2 分层评测模型（现状 vs 目标）
 
 | 层级 | 指标 | 现状 | 目标 |
 |------|------|------|------|
@@ -668,7 +654,7 @@ CI 行为见 [ci-design.md](./ci-design.md)；RAG 代理指标见 `phase4_ragas`
 
 L5 工具轨迹、Demo golden 脚本分工见 [tool-design §3.9](./tool-design.md) 与 [eval-design §4.4](./eval-design.md)。聚合命令见 [README §6](../README.md)。
 
-### 9.5 数据集规范（扩展方向）
+### 9.3 数据集规范（扩展方向）
 
 当前 `phase4-eval-cases.json` docs case 字段（v1.3.0）：
 
@@ -692,7 +678,7 @@ L5 工具轨迹、Demo golden 脚本分工见 [tool-design §3.9](./tool-design.
 
 问题类型分布目标：事实查表 ~40%、流程 ~30%、排障 ~20%、API 契约 ~10%，与 Demo 文档类型对齐。
 
-### 9.6 优化诊断工作流
+### 9.4 优化诊断工作流
 
 检索或回答质量回归时，建议按序排查（对应 §5.5）：
 
@@ -762,7 +748,7 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 ### 11.4 评测与可观测
 
-与 §9.4 分层模型对齐；L5/L4 脚本分工见 [eval-design §4.4](./eval-design.md)。全局缺口见 [guide §2.8](./agent-learning-guide.md)。
+与 §9.2 分层模型对齐；L5/L4 脚本分工见 [eval-design §4.4](./eval-design.md)。全局缺口见 [guide §2.8](./agent-learning-guide.md)。
 
 ---
 
@@ -827,7 +813,7 @@ python scripts/verify_policy_aware_rag_v1.py
 7. **`rag/context_guard.py` + `context/preretrieval.py` + §6.2** → 上下文护栏与预检索  
 8. **`agent/tool_handlers.py` + §6.1** → tool、事件、citations  
 9. **[tool-design.md](./tool-design.md)** → 编排层 Tool-grounded  
-10. **`eval/phase4-eval-cases.json` + §9.4～§9.6** → proxy 与分层评测
+10. **`eval/phase4-eval-cases.json` + §9.2～§9.4** → proxy 与分层评测
 
 ### 14.3 可选：启用向量
 

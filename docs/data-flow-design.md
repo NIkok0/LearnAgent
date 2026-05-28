@@ -5,6 +5,10 @@
 
 **K/C/S 位置**：Kernel **M05 Contracts**（跨边界 Envelope + Adapter）；Policy/Credential 相关 payload 形状与 [guardrail §8](./guardrail-policy-design.md) 对齐。详见 [guide §2.4](./agent-learning-guide.md)。
 
+**本文负责**：`RuntimeEvent`、`ToolResultModel`、payload 子模型、adapter、SSE/EventStore 边界格式。  
+**本文不负责**：业务策略、工具执行、Memory 写入策略、RAG 检索算法、Run 调度。  
+**权威来源**：模块边界与全局缺口见 [agent-learning-guide.md](./agent-learning-guide.md)；各 payload 的业务语义见对应专项文档。
+
 ---
 
 ## 0. 实现状态

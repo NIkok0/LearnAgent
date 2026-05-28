@@ -2,6 +2,10 @@
 
 > 调研状态：阶段性调研，日期为 2026-05-19。本文用于指导 LearnAgent 下一阶段架构演进，不等价于完整 benchmark、源码级审计或长期维护成本评估。
 
+**本文负责**：外部框架/组件的取舍理由、可集成边界、后续 PoC 候选。  
+**本文不负责**：当前 Runtime/RAG/Memory/Policy 的实现流程、API 文档、CI 套件清单。  
+**权威来源**：当前模块职责见 [agent-learning-guide.md](./agent-learning-guide.md)；具体实现见对应 `*-design.md`。
+
 ## 1. 选型结论摘要
 
 开源 Agent 生态已经覆盖了 LLM 接入、工具调用、图编排、checkpoint、人类审批、memory、guardrail、trace 和任务队列的大量底层能力。LearnAgent 当前缺少的不是这些底层能力本身，而是把它们组合成一致产品语义的 runtime contract。

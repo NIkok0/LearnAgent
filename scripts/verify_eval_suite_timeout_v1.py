@@ -18,6 +18,7 @@ from scripts.verify_eval_suite import (  # noqa: E402
     _load_checks_from_summary,
     _parse_key_values,
     _profiles,
+    _proxy_summary_passed,
     _suite_status,
     _timeout_suite_status,
 )
@@ -79,6 +80,15 @@ def main() -> int:
         ),
         suite_timeout_seconds=7,
     )
+    proxy_pass_summary = {
+        "phase4_ragas": "PASS",
+        "proxy_metrics": {"docs_cases": 3, "gold_chunk_recall_at_k_avg": 0.9},
+    }
+    proxy_fail_summary = {
+        "phase4_ragas": "PASS",
+        "proxy_metrics": {"docs_cases": 0, "gold_chunk_recall_at_k_avg": 0.9},
+    }
+    rag_history_checks = _verify_rag_regression_detection()
     checks = {
         "bytes_decoded": _coerce_output_text(b"phase4_ragas=PASS\n") == "phase4_ragas=PASS\n",
         "str_preserved": _coerce_output_text("ok") == "ok",
@@ -92,6 +102,9 @@ def main() -> int:
         "silent_timeout_fails": timeout_silent["status"] == "FAIL"
         and timeout_silent["errors"] == ["timeout_after_seconds=7"],
         "timeout_tail_decoded": timeout_pass["stderr_tail"] == ["warning=late close"],
+        "phase4_proxy_summary_passed": _proxy_summary_passed(proxy_pass_summary),
+        "phase4_proxy_summary_requires_cases": not _proxy_summary_passed(proxy_fail_summary),
+        **rag_history_checks,
     }
     passed = all(checks.values())
     summary = {
@@ -111,6 +124,44 @@ def main() -> int:
     print(f"summary_json={summary_path}")
     print(f"eval_suite_timeout_v1={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
+
+
+def _verify_rag_regression_detection() -> dict[str, bool]:
+    from tempfile import TemporaryDirectory
+
+    from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        no_history = detect_gold_recall_regression(
+            current={"gold_chunk_recall_at_k_avg": 0.9},
+            history_dir=root / "missing",
+        )
+        history_dir = root / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        insufficient = detect_gold_recall_regression(
+            current={"gold_chunk_recall_at_k_avg": 0.9},
+            history_dir=history_dir,
+        )
+        (history_dir / "nightly-20260101T000000Z.json").write_text(
+            json.dumps({"proxy_metrics": {"gold_chunk_recall_at_k_avg": 0.95}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (history_dir / "nightly-20260102T000000Z.json").write_text(
+            json.dumps({"proxy_metrics": {"gold_chunk_recall_at_k_avg": 0.96}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        regression = detect_gold_recall_regression(
+            current={"gold_chunk_recall_at_k_avg": 0.88},
+            history_dir=history_dir,
+        )
+    return {
+        "rag_regression_no_history_warns": no_history.get("reason") == "no_history",
+        "rag_regression_insufficient_history_warns": insufficient.get("reason") == "insufficient_history",
+        "rag_regression_detects_drop": regression.get("regression") is True
+        and regression.get("previous") == 0.95
+        and regression.get("delta") == -0.07,
+    }
 
 
 if __name__ == "__main__":
