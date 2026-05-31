@@ -1,0 +1,203 @@
+% !TeX program = xelatex
+% 中文工程简历 LaTeX 版本：Jake's Resume 风格改写
+% 编译方式：xelatex miao_li_resume_agent_aligned.tex
+\documentclass[9pt,a4paper]{ctexart}
+
+\usepackage[left=0.58cm,right=0.58cm,top=0.42cm,bottom=0.28cm]{geometry}
+\usepackage{fontspec}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{ragged2e}
+\usepackage{ifthen}
+\usepackage{comment}
+
+\IfFontExistsTF{Microsoft YaHei}{%
+  \setmainfont{Microsoft YaHei}%
+  \setsansfont{Microsoft YaHei}%
+  \setCJKmainfont{Microsoft YaHei}%
+  \setCJKsansfont{Microsoft YaHei}%
+}{%
+  \setmainfont{Noto Sans CJK SC}%
+  \setsansfont{Noto Sans CJK SC}%
+  \setCJKmainfont{Noto Sans CJK SC}%
+  \setCJKsansfont{Noto Sans CJK SC}%
+}
+\setmonofont{DejaVu Sans Mono}
+
+\definecolor{textgray}{HTML}{1A1A1A}
+\definecolor{metagray}{HTML}{4D4D4D}
+\definecolor{rulegray}{HTML}{202020}
+\definecolor{labelgray}{HTML}{333333}
+
+\hypersetup{colorlinks=true,urlcolor=textgray,linkcolor=textgray}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\tabcolsep}{0pt}
+\renewcommand{\arraystretch}{0.96}
+\sloppy
+\setlength{\emergencystretch}{3em}
+
+\newcommand{\ResumeBodySize}{\fontsize{8.35pt}{9.20pt}\selectfont}
+\newcommand{\ResumeSmallSize}{\fontsize{7.95pt}{8.75pt}\selectfont}
+\newcommand{\ResumeHeaderSize}{\fontsize{17.2pt}{18.4pt}\selectfont}
+\newcommand{\ResumeSectionSize}{\fontsize{9.2pt}{9.95pt}\selectfont}
+\newcommand{\ResumeEntrySize}{\fontsize{8.65pt}{9.35pt}\selectfont}
+\newcommand{\PhotoWidth}{1.88cm}
+\newcommand{\LeftDateWidth}{3.30cm}
+\newcommand{\RightMetaWidth}{4.05cm}
+\newcommand{\ResearchMetaWidth}{6.80cm}
+\newcommand{\SkillLabelWidth}{2.65cm}
+
+\newcommand{\resumeSection}[1]{%
+  \vspace{0.04em}%
+  {\ResumeSectionSize\bfseries #1}\par%
+  \vspace{-1em}%
+  {\color{rulegray}\rule{\linewidth}{0.45pt}}\par%
+  \vspace{0.045em}%
+}
+
+\newcommand{\resumeSubheading}[4]{%
+  \vspace{-0.01em}%
+  \begingroup
+  \renewcommand{\tabularxcolumn}[1]{m{##1}}%
+  \begin{tabularx}{\linewidth}{@{}>{\ResumeSmallSize\bfseries\color{metagray}\arraybackslash}m{\LeftDateWidth}>{\ResumeEntrySize\bfseries\raggedright\arraybackslash}X>{\ResumeSmallSize\bfseries\color{metagray}\raggedleft\arraybackslash}m{\RightMetaWidth}@{}}
+    #1 & #2 & #3 \\
+  \end{tabularx}%
+  \endgroup
+  \ifthenelse{\equal{#4}{}}{}{%
+    \vspace{-0.14em}%
+    {\ResumeSmallSize\color{metagray}\hspace{\LeftDateWidth}#4\par}%
+  }%
+  \vspace{-0.05em}%
+}
+
+\newenvironment{resumeItemList}{%
+  \begin{itemize}[leftmargin=1.05em,itemsep=-0.06em,topsep=-0.02em,parsep=0pt,partopsep=0pt]
+  \ResumeBodySize
+}{%
+  \end{itemize}\vspace{-0.10em}
+}
+
+\newcommand{\resumeItem}[1]{\item #1}
+\newcommand{\resumeSkill}[2]{%
+  \begingroup
+  \renewcommand{\tabularxcolumn}[1]{m{##1}}%
+  \begin{tabularx}{\linewidth}{@{}>{\ResumeBodySize\bfseries\color{labelgray}\arraybackslash}m{\SkillLabelWidth}@{\hspace{0.22cm}}>{\ResumeBodySize\raggedright\arraybackslash}X@{}}
+    #1 & #2 \\
+  \end{tabularx}%
+  \endgroup
+}
+\newcommand{\resumePlainLine}[1]{{\ResumeBodySize #1\par}}
+
+\begin{document}
+\ResumeBodySize
+\color{textgray}
+\raggedright
+
+\begin{minipage}[t]{0.80\linewidth}
+  {\ResumeHeaderSize 缪力}\quad {\ResumeSmallSize\color{metagray} 男 \;|\; 26 \;|\; 18783845993 \;|\; \href{mailto:18783845993@163.com}{18783845993@163.com}}\par
+  \vspace{0.02em}
+  {\ResumeSmallSize \href{https://github.com/NIkok0}{github.com/NIkok0} \;|\; 个人论文实验和横向工程}\par
+
+  \resumeSection{教育背景}
+  \begingroup
+  \renewcommand{\tabularxcolumn}[1]{m{#1}}%
+  \begin{tabularx}{\linewidth}{@{}>{\ResumeSmallSize\bfseries\color{metagray}\arraybackslash}m{3.30cm}@{\hspace{0.20cm}}>{\ResumeEntrySize\arraybackslash}m{3.0cm}@{\hspace{0.22cm}}>{\ResumeBodySize\raggedright\arraybackslash}X@{}}
+2024.09--2027.06 & 电子科技大学(硕士) & 联邦学习、隐私计算 \quad {\ResumeSmallSize\color{metagray}[GPA前20\%]} \\
+2017.06--2021.06 & 电子科技大学(本科) & 软件工程 \quad {\ResumeSmallSize\color{metagray}[GPA前30\%]} \\
+  \end{tabularx}%
+  \endgroup
+\end{minipage}\hfill
+\begin{minipage}[t]{0.1\linewidth}
+  \raggedleft\vspace{0.12em}
+  \IfFileExists{resume_photo.png}{\includegraphics[width=\PhotoWidth]{resume_photo.png}}{\fbox{\parbox[c][2.25cm][c]{\PhotoWidth}{\centering 证件照}}}
+\end{minipage}
+
+\resumeSection{专业技能}
+\resumeSkill{Agent Runtime}{LangGraph、LangChain Tool Calling、Run FSM、SSE 流式输出、Checkpoint、SQLite EventStore、Timeline}
+\resumeSkill{RAG 工程}{BM25、RRF、Query Rewrite、Query Routing、Chroma、LlamaIndex、Cross-Encoder Rerank、RAGAS 评估}
+\resumeSkill{安全治理}{PolicyGate、ACL / tenant / classification 权限裁剪、credential scope、audit ledger、output guard}
+\resumeSkill{后端与验证}{Python、FastAPI、Pydantic、SQLite、Redis Stream、Spring Boot 3、verify suite / CI、Git}
+\resumeSkill{隐私与科研}{联邦学习、差分隐私、保序加密、零知识证明、PyTorch}
+
+\resumeSection{项目经验}
+
+\resumeSubheading
+{}
+{TrustAgent：可信 Agent 与 Tool Execution 系统}
+{Agent Runtime / 应用开发}
+{2026.01--2026.03}
+
+\resumePlainLine{\textbf{项目简介：}面向司法材料确权与水印任务场景，参考 Claude Code 等 Agent Runtime 设计思路，自研本地单用户可信 Agent Runtime。系统基于 LangGraph 构建 Agent 执行循环，以 SQLite EventStore 作为 Thread / Run / Event 的产品事实源，支撑后台 Run、SSE 流式输出、人工审批、取消中断、Checkpoint 恢复与 Timeline 回放}
+
+\resumePlainLine{\textbf{技术栈：}Python、FastAPI、LangGraph、LangChain、Pydantic、SQLite、SSE、RAG、Tool Calling、EventStore、MCP}
+
+\resumePlainLine{\textbf{技术难点：}}
+\begin{resumeItemList}
+\resumeItem{\textbf{Agent Runtime 分层架构：}将系统拆分为 Kernel / Capability / Scenario 三层：Kernel 承载 Thread / Run / EventStore / Timeline / Checkpoint / Context Manager / PolicyGate 等运行时语义，Capability 封装 RAG、HTTP、MCP 等工具能力，Scenario 承载业务文档、工具白名单、Prompt、路由策略与评估配置，降低 Agent 编排与业务场景耦合}
+
+\resumeItem{\textbf{可信 Tool Execution Governance：}设计 ToolRegistry、ToolSpec、Capability Pack 与 ExecutionEngine，将 search\_docs、http\_get、http\_post、MCP tool 统一注册为带参数 Schema、风险等级、权限校验、超时控制、重试策略与审计字段的受控工具；对高风险写操作引入 PolicyGate、人工审批、side effect ledger、幂等键与 policy trace，支持 Run 级回放“为什么允许、为什么审批、为什么阻断”}
+
+\resumeItem{\textbf{Context / Memory 治理：}设计 Context Manager 统一装配 thread summary、checkpoint working memory、RAG 检索结果、工具轨迹与上下文预算；构建短期记忆结构化摘要与长期记忆转换门控，基于 confidence / importance / reusable / outcome 控制写入，并支持长期记忆软删除、删除证明和召回解释，降低历史事件与敏感信息污染上下文的风险}
+
+\resumeItem{\textbf{可观测与回归验证体系：}围绕 EventStore 建设 Timeline projection、policy\_decision\_recorded、tool\_side\_effect\_recorded、retrieval\_completed、memory\_run\_summary、context\_built 等审计事件，形成 Run 级可回放调试链路；构建 verify suite、domain verifier、golden scenarios 与 core-fast 性能预算，降低 Agent 编排变更带来的黑盒回归风险}
+\end{resumeItemList}
+\vspace{0.08em}
+
+\resumeSubheading
+{}
+{Policy-aware Private RAG：面向司法材料确权的安全知识库问答系统}
+{RAG 应用开发}
+{2026.01--2026.03}
+
+\resumePlainLine{\textbf{项目简介：}面向司法材料确权、水印平台运维和任务排查场景，构建 Policy-aware Private RAG 知识库问答系统。系统将 API 契约、部署手册、安全基线、Runbook 和测试用例等文档资产纳入检索增强链路，并在传统 RAG 基础上加入权限元数据、上下文保护和输出保护，重点解决越权检索、敏感信息进入 prompt 与输出泄露问题}
+
+\resumePlainLine{\textbf{技术栈：}BM25、RRF、Query Rewrite、Query Routing、LlamaIndex、Chroma、Cross-Encoder Rerank、RAGAS}
+
+\resumePlainLine{\textbf{技术难点：}}
+\begin{resumeItemList}
+\resumeItem{\textbf{结构化 Ingest 与混合检索：}围绕业务文档构建私有知识库，支持 Markdown 结构化分块、API path / request field / error code 等元数据抽取；通过 BM25 精确召回、可选向量语义召回、RRF 融合、doc\_type / authority boost 与 Cross-Encoder rerank，在验证集上达到 90\%+ 检索 hit rate}
+
+\resumeItem{\textbf{Query Rewrite + Retrieval Gate：}将口语化问题改写为平台术语，并根据 route 推荐、文档 / 接口 / 排障意图、上一轮检索缓存、memory 高置信 answer seed 与 live/current 意图，决定 retrieve / reuse cache / skip RAG / route to API，减少无效检索、裸检索绕过和上下文污染}
+
+\resumeItem{\textbf{Policy-aware Retrieval 权限裁剪：}为文档 chunk 引入 tenant、ACL、classification、pii\_level、authority 等治理元数据；通过 policy pre-filter 与检索后 audit 记录 blocked chunk，保证越权、低可信或高敏内容不进入 prompt，并用 query hash / policy trace 支撑审计回放}
+
+\resumeItem{\textbf{RAG 热更新与增量向量同步：}设计进程内两阶段 reload：文档变更后 BM25 同步刷新、立即可用，稠密索引后台异步重建；通过 manifest 追踪文件 fingerprint 与 chunk 映射，仅对变更文件执行 Chroma 增量 upsert，embedding 模型切换时自动全量重建，平衡知识库更新成本与检索可用性}
+
+\resumeItem{\textbf{RAG 评估工程化：}围绕检索质量、引用可信度、工具轨迹与安全边界建设分层评估体系，通过 RAG domain、citation、phase4\_ragas、nightly metrics regression 等验证入口覆盖 Recall@k、MRR、API path 选择、危险动作拒识和输出保护，持续监控语义质量与安全稳定性}
+\end{resumeItemList}
+
+\resumeSubheading
+{2025.04--2025.08}
+{Watermarking：面向司法材料确权的数字水印平台}
+{主要研发人员}
+{中典司法所合作项目}
+
+\begin{resumeItemList}
+\resumeItem{构建 Spring Boot 3 多模块后端与 Python 水印算法 Worker，覆盖用户认证、角色权限、文件管理、任务管理、结果回传与管理后台，支撑图片、音频、视频、文本等多媒体水印处理流程}
+\resumeItem{设计 Redis Stream 异步任务链路与任务状态模型，Java 侧负责任务创建、幂等入队和状态查询，Python Worker 消费任务后调用算法并更新 MySQL / Redis Hash，适配 MinIO 对象存储输入输出}
+\end{resumeItemList}
+
+\resumeSection{科研成果}
+\begin{resumeItemList}
+  \resumeItem{Dynamic Secure Aggregation for Decentralized Federated Learning and Unlearning via Functional Encryption，学生二作，\textbf{CCF-A 在投}}
+  \resumeItem{ESPFL: Efficient and Scalable Privacy-Protected Federated Learning against Poisoning Attacks，学生一作，\textbf{CCF-C rebuttal 中}}
+  \resumeItem{Blockchain-Assisted Trustworthy Federated Learning with Zero-Knowledge CNN Training Proofs，一作，\textbf{CCF-C 在投}}
+\end{resumeItemList}
+
+\resumeSection{工作经历}
+\resumeSubheading{2021.06--2023.06}{上海英雄互娱网络科技有限公司}{数值策划}{}
+\resumeSubheading{2020.08--2020.12}{成都博彦科技有限公司}{科研项目实习}{}
+\resumeSubheading{2020.03--2020.06}{成都上程数据科技有限公司}{测试工程师实习}{}
+
+\resumeSection{荣誉奖项}
+\resumeSkill{奖学金}{道德风尚奖学金；学习进步标兵奖学金；研究生二等奖学金}
+\resumeSkill{比赛}{香港科技大学交换访问项目优秀夏令营学员；工程伦理校园创新大赛一等奖}
+\resumeSkill{社会活动}{学生会宣传部部长-优秀干部；研究生会学术部副部长（沙河）-优秀干部；蒲公英志愿者组织宣传部部长-优秀志愿者团队}
+
+\end{document}

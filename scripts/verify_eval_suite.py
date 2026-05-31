@@ -636,6 +636,13 @@ def _proxy_summary_passed(summary: dict[str, Any]) -> bool:
     return int(proxy_metrics.get("docs_cases") or 0) >= 3
 
 
+def _nightly_metrics_skip_reason(payload: dict[str, Any]) -> str:
+    if str(payload.get("status") or "") != "SKIP":
+        return ""
+    reason = str(payload.get("skip_reason") or "").strip() or "unknown"
+    return f"nightly_metrics_skipped:{reason}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run aggregated eval suite profiles.")
     parser.add_argument(
@@ -802,17 +809,24 @@ def main() -> int:
         if checks.get("contract_schema_ok") is False:
             contract_schema_ok = False
     rag_metrics: dict[str, Any] = {}
+    nightly_metrics_status = ""
+    nightly_metrics_skip_reason = ""
+    nightly_metrics_skipped = False
     nightly_metrics_path = ROOT / "artifacts/eval/rag_metrics/nightly-latest.json"
     has_nightly_suite = any(item["suite_name"] == "phase4_ragas_nightly" for item in results)
     if nightly_metrics_path.is_file():
         try:
             nightly_payload = json.loads(nightly_metrics_path.read_text(encoding="utf-8"))
+            nightly_metrics_status = str(nightly_payload.get("status") or "")
+            nightly_metrics_skip_reason = _nightly_metrics_skip_reason(nightly_payload)
+            nightly_metrics_skipped = nightly_metrics_status == "SKIP"
             if isinstance(nightly_payload.get("proxy_metrics"), dict):
-                rag_metrics = nightly_payload["proxy_metrics"]
-                rag_metrics["profile"] = nightly_payload.get("profile", "nightly")
+                if not nightly_metrics_skipped:
+                    rag_metrics = nightly_payload["proxy_metrics"]
+                    rag_metrics["profile"] = nightly_payload.get("profile", "nightly")
         except Exception:
             pass
-    if not rag_metrics:
+    if not rag_metrics and not nightly_metrics_skipped:
         for item in results:
             if item["suite_name"] not in {"phase4_ragas", "phase4_ragas_nightly"}:
                 continue
@@ -835,15 +849,25 @@ def main() -> int:
 
     rag_regression: dict[str, Any] = {}
     rag_regression_warnings: list[str] = []
-    if args.profile == "full" and has_nightly_suite and not nightly_metrics_path.is_file():
-        rag_regression = {
-            "regression": False,
-            "reason": "nightly_metrics_missing",
-            "required_path": str(nightly_metrics_path),
-        }
-        rag_regression_warnings.append("rag_regression:nightly_metrics_missing")
-        overall_pass = False
-    if rag_metrics:
+    if args.profile == "full" and has_nightly_suite:
+        if nightly_metrics_path.is_file() and nightly_metrics_skipped:
+            reason = nightly_metrics_skip_reason or "nightly_metrics_skipped:unknown"
+            rag_regression = {
+                "regression": False,
+                "reason": reason,
+                "required_path": str(nightly_metrics_path),
+            }
+            rag_regression_warnings.append(f"rag_regression:{reason}")
+            overall_pass = False
+        elif not nightly_metrics_path.is_file():
+            rag_regression = {
+                "regression": False,
+                "reason": "nightly_metrics_missing",
+                "required_path": str(nightly_metrics_path),
+            }
+            rag_regression_warnings.append("rag_regression:nightly_metrics_missing")
+            overall_pass = False
+    if rag_metrics and not nightly_metrics_skipped:
         from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression  # noqa: WPS433
 
         rag_regression = detect_gold_recall_regression(

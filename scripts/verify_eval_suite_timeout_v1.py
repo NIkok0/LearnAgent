@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,12 +18,14 @@ from scripts.verify_eval_suite import (  # noqa: E402
     _coerce_output_text,
     _extract_summary_json,
     _load_checks_from_summary,
+    _nightly_metrics_skip_reason,
     _parse_key_values,
     _profiles,
     _proxy_summary_passed,
     _suite_status,
     _timeout_suite_status,
 )
+from scripts.verify_phase4_ragas import _skip_summary  # noqa: E402
 
 
 def _simulate_timeout_branch(exc: subprocess.TimeoutExpired, *, suite_timeout_seconds: int) -> dict[str, object]:
@@ -89,6 +93,7 @@ def main() -> int:
         "proxy_metrics": {"docs_cases": 0, "gold_chunk_recall_at_k_avg": 0.9},
     }
     rag_history_checks = _verify_rag_regression_detection()
+    nightly_skip_checks = _verify_nightly_skip_metrics()
     checks = {
         "bytes_decoded": _coerce_output_text(b"phase4_ragas=PASS\n") == "phase4_ragas=PASS\n",
         "str_preserved": _coerce_output_text("ok") == "ok",
@@ -105,6 +110,7 @@ def main() -> int:
         "phase4_proxy_summary_passed": _proxy_summary_passed(proxy_pass_summary),
         "phase4_proxy_summary_requires_cases": not _proxy_summary_passed(proxy_fail_summary),
         **rag_history_checks,
+        **nightly_skip_checks,
     }
     passed = all(checks.values())
     summary = {
@@ -161,6 +167,44 @@ def _verify_rag_regression_detection() -> dict[str, bool]:
         "rag_regression_detects_drop": regression.get("regression") is True
         and regression.get("previous") == 0.95
         and regression.get("delta") == -0.07,
+    }
+
+
+def _verify_nightly_skip_metrics() -> dict[str, bool]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        summary_path = root / "phase4-ragas-nightly-summary.json"
+        metrics_path = root / "rag_metrics/nightly-latest.json"
+        with redirect_stdout(StringIO()):
+            _skip_summary(
+                dataset_path=root / "dataset.json",
+                summary_path=summary_path,
+                precondition={"docs_dir": "mock"},
+                reason="vector_embedding_model_not_cached",
+                errors=["vector_embedding_model_not_cached: mock-model"],
+                write_rag_metrics=metrics_path,
+                metrics_profile="nightly",
+            )
+        metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+        summary_payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        history_files = list((metrics_path.parent / "history").glob("nightly-*.json"))
+    return {
+        "nightly_skip_writes_metrics": metrics_payload.get("status") == "SKIP"
+        and metrics_payload.get("skip_reason") == "vector_embedding_model_not_cached",
+        "nightly_skip_metrics_has_proxy_metrics": isinstance(metrics_payload.get("proxy_metrics"), dict),
+        "nightly_skip_summary_preserved": summary_payload.get("phase4_ragas") == "SKIP"
+        and summary_payload.get("skip_reason") == "vector_embedding_model_not_cached",
+        "nightly_skip_not_written_to_history": history_files == [],
+        "nightly_skip_reason_specific": (
+            _nightly_metrics_skip_reason(metrics_payload)
+            == "nightly_metrics_skipped:vector_embedding_model_not_cached"
+        ),
+        "nightly_skip_reason_unknown": _nightly_metrics_skip_reason({"status": "SKIP"})
+        == "nightly_metrics_skipped:unknown",
+        "nightly_skip_reason_only_for_skip": _nightly_metrics_skip_reason({"status": "PASS"}) == "",
+        "nightly_missing_reason_reserved": not (root / "missing/nightly-latest.json").is_file(),
     }
 
 

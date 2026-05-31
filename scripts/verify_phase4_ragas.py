@@ -352,17 +352,32 @@ def _proxy_pass(proxy_metrics: dict[str, Any], *, docs_cases: int) -> bool:
     return True
 
 
-def _write_rag_metrics(path: Path, *, proxy_metrics: dict[str, Any], profile: str) -> None:
+def _write_rag_metrics(
+    path: Path,
+    *,
+    proxy_metrics: dict[str, Any],
+    profile: str,
+    status: str = "PASS",
+    skip_reason: str = "",
+    preconditions: dict[str, Any] | None = None,
+    errors: list[str] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "timestamp": datetime.now(UTC).isoformat(),
         "profile": profile,
+        "status": status,
+        "skip_reason": skip_reason,
         "embedding_model": proxy_metrics.get("embedding_model", "n/a"),
         "vector_enabled": proxy_metrics.get("vector_enabled", False),
         "rerank_enabled": proxy_metrics.get("rerank_enabled", False),
         "proxy_metrics": proxy_metrics,
+        "preconditions": preconditions or {},
+        "errors": errors or [],
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if status == "SKIP":
+        return
     history_dir = path.parent / "history"
     history_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -396,6 +411,8 @@ def _skip_summary(
     errors: list[str] | None = None,
     proxy_metrics: dict[str, Any] | None = None,
     records: list[dict[str, Any]] | None = None,
+    write_rag_metrics: Path | None = None,
+    metrics_profile: str = "pr",
 ) -> None:
     metrics = proxy_metrics or {
         "docs_cases": 0,
@@ -417,6 +434,16 @@ def _skip_summary(
         "phase4_ragas": "SKIP",
     }
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    if write_rag_metrics is not None:
+        _write_rag_metrics(
+            write_rag_metrics,
+            proxy_metrics=metrics,
+            profile=metrics_profile,
+            status="SKIP",
+            skip_reason=reason,
+            preconditions=precondition,
+            errors=errors or [],
+        )
     print(f"dataset_path={summary['dataset_path']}")
     print(f"eval_mode={summary['eval_mode']}")
     print(f"docs_cases={metrics.get('docs_cases', 0)}")
@@ -424,6 +451,8 @@ def _skip_summary(
     print(f"required_source_full_match_rate={metrics.get('required_source_full_match_rate', 0.0)}")
     print(f"avg_required_source_coverage={metrics.get('avg_required_source_coverage', 0.0)}")
     print(f"summary_json={summary_path}")
+    if write_rag_metrics is not None:
+        print(f"rag_metrics_json={write_rag_metrics.resolve()}")
     print(f"skip_reason={reason}")
     print("phase4_ragas=SKIP")
 
@@ -485,6 +514,7 @@ def main() -> int:
         help="Soft timeout for optional RAGAS scoring in auto/ragas mode.",
     )
     args = parser.parse_args()
+    write_rag_metrics_path = Path(args.write_rag_metrics).resolve() if args.write_rag_metrics.strip() else None
 
     _bootstrap_scenario()
 
@@ -506,6 +536,8 @@ def main() -> int:
             summary_path=summary_path,
             precondition=precondition,
             reason="docs_precondition_failed",
+            write_rag_metrics=write_rag_metrics_path,
+            metrics_profile=args.metrics_profile,
         )
         return 0
     if not docs_ready:
@@ -527,6 +559,8 @@ def main() -> int:
                 precondition=precondition,
                 reason="vector_embedding_model_not_cached",
                 errors=[f"vector_embedding_model_not_cached: {embedding_model}"],
+                write_rag_metrics=write_rag_metrics_path,
+                metrics_profile=args.metrics_profile,
             )
             return 0
     try:
@@ -539,6 +573,8 @@ def main() -> int:
                 precondition=precondition,
                 reason="vector_backend_unavailable",
                 errors=[f"vector_backend_unavailable: {exc}"],
+                write_rag_metrics=write_rag_metrics_path,
+                metrics_profile=args.metrics_profile,
             )
             return 0
         raise
@@ -551,6 +587,8 @@ def main() -> int:
             reason="vector_backend_unavailable",
             proxy_metrics=proxy_metrics,
             records=records,
+            write_rag_metrics=write_rag_metrics_path,
+            metrics_profile=args.metrics_profile,
         )
         return 0
 
@@ -570,9 +608,9 @@ def main() -> int:
 
     proxy_pass = _proxy_pass(proxy_metrics, docs_cases=proxy_metrics.get("docs_cases", 0))
 
-    if args.write_rag_metrics.strip():
+    if write_rag_metrics_path is not None:
         _write_rag_metrics(
-            Path(args.write_rag_metrics).resolve(),
+            write_rag_metrics_path,
             proxy_metrics=proxy_metrics,
             profile=args.metrics_profile,
         )
@@ -603,8 +641,8 @@ def main() -> int:
     if "must_not_violation_rate" in proxy_metrics:
         print(f"must_not_violation_rate={proxy_metrics['must_not_violation_rate']}")
     print(f"summary_json={summary_path}")
-    if args.write_rag_metrics.strip():
-        print(f"rag_metrics_json={Path(args.write_rag_metrics).resolve()}")
+    if write_rag_metrics_path is not None:
+        print(f"rag_metrics_json={write_rag_metrics_path}")
     if errors:
         for item in errors:
             print(f"error={item}")
