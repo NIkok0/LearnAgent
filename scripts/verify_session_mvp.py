@@ -126,6 +126,38 @@ class FakeLLMProvider:
     def __init__(self) -> None:
         self.model = FakeToolBoundModel()
 
+    def get_chat_model(self):
+        class _PlannerModel:
+            async def ainvoke(self, _messages):
+                return AIMessage(
+                    content=json.dumps(
+                        {
+                            "tool_route": {
+                                "kind": "dangerous_execute",
+                                "recommended_tools": ["search_docs", "http_post"],
+                                "forbidden_tools": [],
+                                "suggested_paths": [_watermark_dangerous_path()],
+                                "rationale": "Create a watermark job through the gated POST path.",
+                            },
+                            "plan": {
+                                "goal": "enqueue a watermark job",
+                                "route_kind": "dangerous_execute",
+                                "steps": [
+                                    {
+                                        "id": "step-create-job",
+                                        "goal": "Create the watermark job after approval",
+                                        "tool_hint": "http_post",
+                                        "status": "pending",
+                                    }
+                                ],
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+
+        return _PlannerModel()
+
     def get_tool_bound_model(self, _tools):
         return self.model
 

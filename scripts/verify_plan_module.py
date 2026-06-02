@@ -51,6 +51,11 @@ class _FakePolicy:
     pass
 
 
+class _ToolOnlyProvider:
+    def get_tool_bound_model(self, _tools):
+        return _FakeLlm("{}")
+
+
 async def _verify_llm_planner(route, plan, registry: ToolRegistry) -> dict[str, bool]:
     old_enabled = settings.agent_llm_planner_enabled
     old_key = settings.openai_api_key
@@ -130,6 +135,18 @@ async def _verify_llm_planner(route, plan, registry: ToolRegistry) -> dict[str, 
             )
         except LlmPlannerUnavailable as exc:
             missing_key_failed = "openai_api_key_missing" in str(exc)
+        settings.openai_api_key = "test-key"
+        missing_chat_model_failed = False
+        try:
+            await plan_with_llm(
+                goal="tool only",
+                baseline_route=route,
+                baseline_plan=plan,
+                tool_registry=registry,
+                llm_provider=_ToolOnlyProvider(),  # type: ignore[arg-type]
+            )
+        except LlmPlannerUnavailable as exc:
+            missing_chat_model_failed = "llm_planner_chat_model_unavailable" in str(exc)
         return {
             "llm_planner_accepts_valid_route": result.route.kind == "troubleshooting"
             and result.plan.steps[0].tool_hint == "search_docs",
@@ -137,6 +154,7 @@ async def _verify_llm_planner(route, plan, registry: ToolRegistry) -> dict[str, 
             "llm_planner_rejects_illegal_tool": illegal_tool_failed,
             "llm_planner_rejects_illegal_route_kind": illegal_route_failed,
             "llm_planner_missing_key_falls_back": missing_key_failed,
+            "llm_planner_missing_chat_model_uses_rules": missing_chat_model_failed,
         }
     finally:
         settings.agent_llm_planner_enabled = old_enabled

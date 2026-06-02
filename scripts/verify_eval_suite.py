@@ -637,10 +637,47 @@ def _proxy_summary_passed(summary: dict[str, Any]) -> bool:
 
 
 def _nightly_metrics_skip_reason(payload: dict[str, Any]) -> str:
-    if str(payload.get("status") or "") != "SKIP":
+    if str(payload.get("status") or "").upper() != "SKIP":
         return ""
     reason = str(payload.get("skip_reason") or "").strip() or "unknown"
     return f"nightly_metrics_skipped:{reason}"
+
+
+def _nightly_metrics_timeout_reason(payload: dict[str, Any]) -> str:
+    if str(payload.get("status") or "").upper() != "TIMEOUT":
+        return ""
+    stage = str(payload.get("timeout_stage") or payload.get("stage") or "").strip() or "unknown"
+    return f"nightly_metrics_timeout:{stage}"
+
+
+def _write_nightly_timeout_artifact(path: Path, *, suite_timeout_seconds: int) -> None:
+    existing: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    if str(existing.get("status") or "").upper() not in {"", "RUNNING"}:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload = {
+        "timestamp": now,
+        "started_at": existing.get("started_at", now),
+        "profile": existing.get("profile", "nightly"),
+        "status": "TIMEOUT",
+        "stage": "suite_timeout",
+        "timeout_stage": "suite_timeout",
+        "timeout_seconds": int(suite_timeout_seconds),
+        "skip_reason": "",
+        "embedding_model": existing.get("embedding_model", "n/a"),
+        "vector_enabled": existing.get("vector_enabled", False),
+        "rerank_enabled": existing.get("rerank_enabled", False),
+        "proxy_metrics": existing.get("proxy_metrics") if isinstance(existing.get("proxy_metrics"), dict) else {},
+        "preconditions": existing.get("preconditions") if isinstance(existing.get("preconditions"), dict) else {},
+        "errors": [f"suite_timeout_after_seconds={suite_timeout_seconds}"],
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> int:
@@ -680,6 +717,9 @@ def main() -> int:
         env = dict(os.environ)
         if spec.rag_related:
             env.setdefault("SCENARIO", "watermark")
+            if spec.suite_name != "phase4_ragas_nightly":
+                env["RAG_USE_VECTOR"] = "false"
+                env["RAG_RERANK_ENABLED"] = "false"
         if spec.suite_name == "phase4_ragas_nightly":
             env["RAG_USE_VECTOR"] = "true"
             env["RAG_RERANK_ENABLED"] = "true"
@@ -728,6 +768,11 @@ def main() -> int:
             elapsed = int((time.perf_counter() - start) * 1000)
             stdout = _coerce_output_text(exc.stdout)
             stderr = _coerce_output_text(exc.stderr)
+            if spec.suite_name == "phase4_ragas_nightly":
+                _write_nightly_timeout_artifact(
+                    ROOT / "artifacts/eval/rag_metrics/nightly-latest.json",
+                    suite_timeout_seconds=args.suite_timeout_seconds,
+                )
             kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
             status = _timeout_suite_status(kv)
             summary_json = _extract_summary_json(kv)
@@ -812,6 +857,8 @@ def main() -> int:
     nightly_metrics_status = ""
     nightly_metrics_skip_reason = ""
     nightly_metrics_skipped = False
+    nightly_metrics_timeout_reason = ""
+    nightly_metrics_timed_out = False
     nightly_metrics_path = ROOT / "artifacts/eval/rag_metrics/nightly-latest.json"
     has_nightly_suite = any(item["suite_name"] == "phase4_ragas_nightly" for item in results)
     if nightly_metrics_path.is_file():
@@ -820,13 +867,15 @@ def main() -> int:
             nightly_metrics_status = str(nightly_payload.get("status") or "")
             nightly_metrics_skip_reason = _nightly_metrics_skip_reason(nightly_payload)
             nightly_metrics_skipped = nightly_metrics_status == "SKIP"
+            nightly_metrics_timeout_reason = _nightly_metrics_timeout_reason(nightly_payload)
+            nightly_metrics_timed_out = nightly_metrics_status == "TIMEOUT"
             if isinstance(nightly_payload.get("proxy_metrics"), dict):
-                if not nightly_metrics_skipped:
+                if not nightly_metrics_skipped and not nightly_metrics_timed_out:
                     rag_metrics = nightly_payload["proxy_metrics"]
                     rag_metrics["profile"] = nightly_payload.get("profile", "nightly")
         except Exception:
             pass
-    if not rag_metrics and not nightly_metrics_skipped:
+    if not rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
         for item in results:
             if item["suite_name"] not in {"phase4_ragas", "phase4_ragas_nightly"}:
                 continue
@@ -859,6 +908,15 @@ def main() -> int:
             }
             rag_regression_warnings.append(f"rag_regression:{reason}")
             overall_pass = False
+        elif nightly_metrics_path.is_file() and nightly_metrics_timed_out:
+            reason = nightly_metrics_timeout_reason or "nightly_metrics_timeout:unknown"
+            rag_regression = {
+                "regression": False,
+                "reason": reason,
+                "required_path": str(nightly_metrics_path),
+            }
+            rag_regression_warnings.append(f"rag_regression:{reason}")
+            overall_pass = False
         elif not nightly_metrics_path.is_file():
             rag_regression = {
                 "regression": False,
@@ -867,7 +925,7 @@ def main() -> int:
             }
             rag_regression_warnings.append("rag_regression:nightly_metrics_missing")
             overall_pass = False
-    if rag_metrics and not nightly_metrics_skipped:
+    if rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
         from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression  # noqa: WPS433
 
         rag_regression = detect_gold_recall_regression(

@@ -58,6 +58,10 @@ async def plan_with_llm(
     if not settings.openai_api_key.strip():
         raise LlmPlannerUnavailable("openai_api_key_missing")
 
+    get_chat_model = getattr(llm_provider, "get_chat_model", None)
+    if not callable(get_chat_model):
+        raise LlmPlannerUnavailable("llm_planner_chat_model_unavailable")
+
     available_tools = tool_registry.public_specs()
     payload = {
         "goal": goal,
@@ -65,7 +69,7 @@ async def plan_with_llm(
         "baseline_plan": baseline_plan.as_dict(),
         "available_tools": available_tools,
     }
-    model = llm_provider.get_chat_model()
+    model = get_chat_model()
     try:
         response = await asyncio.wait_for(
             model.ainvoke(

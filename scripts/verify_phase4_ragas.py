@@ -82,6 +82,7 @@ def _build_proxy_records(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if disable_vector:
         os.environ["RAG_USE_VECTOR"] = "false"
+        os.environ["RAG_RERANK_ENABLED"] = "false"
     else:
         os.environ["RAG_USE_VECTOR"] = "true"
 
@@ -212,6 +213,53 @@ def _build_proxy_records(
         )
 
     return records, metrics
+
+
+def _proxy_records_worker(cases: list[dict[str, Any]], top_k: int, disable_vector: bool, conn: Any) -> None:
+    try:
+        conn.send(("ok", _build_proxy_records(cases, top_k=top_k, disable_vector=disable_vector)))
+    except BaseException as exc:  # pragma: no cover - child process defensive boundary
+        try:
+            conn.send(("error", repr(exc)))
+        except BaseException:
+            pass
+    finally:
+        try:
+            conn.close()
+        except BaseException:
+            pass
+
+
+def _build_proxy_records_with_timeout(
+    cases: list[dict[str, Any]],
+    *,
+    top_k: int,
+    disable_vector: bool,
+    timeout_seconds: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    ctx = mp.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(
+        target=_proxy_records_worker,
+        args=(cases, top_k, disable_vector, child_conn),
+        daemon=True,
+    )
+    proc.start()
+    child_conn.close()
+    if not parent_conn.poll(max(1, int(timeout_seconds))):
+        parent_conn.close()
+        _stop_ragas_process(proc)
+        raise TimeoutError(f"proxy_eval_timeout_after_seconds={timeout_seconds}")
+    try:
+        status, payload = parent_conn.recv()
+    finally:
+        parent_conn.close()
+    proc.join(2)
+    if proc.is_alive():
+        _stop_ragas_process(proc)
+    if status == "ok":
+        return payload
+    raise RuntimeError(str(payload))
 
 
 def _maybe_run_ragas(records: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
@@ -358,6 +406,7 @@ def _write_rag_metrics(
     proxy_metrics: dict[str, Any],
     profile: str,
     status: str = "PASS",
+    stage: str = "completed",
     skip_reason: str = "",
     preconditions: dict[str, Any] | None = None,
     errors: list[str] | None = None,
@@ -367,6 +416,7 @@ def _write_rag_metrics(
         "timestamp": datetime.now(UTC).isoformat(),
         "profile": profile,
         "status": status,
+        "stage": stage,
         "skip_reason": skip_reason,
         "embedding_model": proxy_metrics.get("embedding_model", "n/a"),
         "vector_enabled": proxy_metrics.get("vector_enabled", False),
@@ -385,6 +435,126 @@ def _write_rag_metrics(
     history_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _rag_metrics_payload(
+    *,
+    proxy_metrics: dict[str, Any] | None,
+    profile: str,
+    status: str,
+    stage: str,
+    skip_reason: str = "",
+    timeout_stage: str = "",
+    timeout_seconds: int | None = None,
+    preconditions: dict[str, Any] | None = None,
+    errors: list[str] | None = None,
+) -> dict[str, Any]:
+    metrics = proxy_metrics or {}
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "profile": profile,
+        "status": status,
+        "stage": stage,
+        "skip_reason": skip_reason,
+        "embedding_model": metrics.get("embedding_model", "n/a"),
+        "vector_enabled": metrics.get("vector_enabled", False),
+        "rerank_enabled": metrics.get("rerank_enabled", False),
+        "proxy_metrics": metrics,
+        "preconditions": preconditions or {},
+        "errors": errors or [],
+    }
+    if timeout_stage:
+        payload["timeout_stage"] = timeout_stage
+    if timeout_seconds is not None:
+        payload["timeout_seconds"] = int(timeout_seconds)
+    return payload
+
+
+def _write_rag_metrics_payload(path: Path, payload: dict[str, Any], *, write_history: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if not write_history:
+        return
+    if str(payload.get("status") or "").upper() != "PASS":
+        return
+    history_dir = path.parent / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    profile = str(payload.get("profile") or "nightly")
+    history_path = history_dir / f"{profile}-{stamp}.json"
+    history_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _update_rag_metrics_stage(
+    path: Path | None,
+    *,
+    profile: str,
+    stage: str,
+    status: str = "RUNNING",
+    proxy_metrics: dict[str, Any] | None = None,
+    preconditions: dict[str, Any] | None = None,
+    errors: list[str] | None = None,
+) -> None:
+    if path is None:
+        return
+    existing: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    payload = _rag_metrics_payload(
+        proxy_metrics=proxy_metrics if proxy_metrics is not None else existing.get("proxy_metrics"),
+        profile=profile,
+        status=status,
+        stage=stage,
+        preconditions=preconditions
+        if preconditions is not None
+        else existing.get("preconditions")
+        if isinstance(existing.get("preconditions"), dict)
+        else {},
+        errors=errors
+        if errors is not None
+        else existing.get("errors")
+        if isinstance(existing.get("errors"), list)
+        else [],
+    )
+    if "started_at" in existing:
+        payload["started_at"] = existing["started_at"]
+    else:
+        payload["started_at"] = datetime.now(UTC).isoformat()
+    _write_rag_metrics_payload(path, payload)
+
+
+def _write_timeout_metrics(
+    path: Path | None,
+    *,
+    profile: str,
+    stage: str,
+    timeout_seconds: int,
+    preconditions: dict[str, Any] | None = None,
+    errors: list[str] | None = None,
+) -> None:
+    if path is None:
+        return
+    payload = _rag_metrics_payload(
+        proxy_metrics={},
+        profile=profile,
+        status="TIMEOUT",
+        stage=stage,
+        timeout_stage=stage,
+        timeout_seconds=timeout_seconds,
+        preconditions=preconditions,
+        errors=errors or [f"{stage}_timeout_after_seconds={timeout_seconds}"],
+    )
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if "started_at" in existing:
+                payload["started_at"] = existing["started_at"]
+        except Exception:
+            pass
+    _write_rag_metrics_payload(path, payload)
+
+
 def _hf_model_cached(model_name: str) -> bool:
     """Best-effort HuggingFace cache check that never contacts the network."""
     normalized = model_name.strip().replace("/", "--")
@@ -400,6 +570,51 @@ def _hf_model_cached(model_name: str) -> bool:
         candidates.append(Path(hf_home) / "hub")
     candidates.append(Path.home() / ".cache" / "huggingface" / "hub")
     return any((base / f"models--{normalized}").exists() for base in candidates)
+
+
+def _vector_preflight(*, embedding_model: str, rerank_model: str) -> tuple[bool, str, dict[str, Any], list[str]]:
+    errors: list[str] = []
+    checks: dict[str, Any] = {
+        "embedding_model": embedding_model,
+        "rerank_model": rerank_model,
+        "chromadb_import_ok": False,
+        "embedding_model_cached": False,
+        "rerank_model_cached": False,
+        "chroma_path_writable": False,
+    }
+    try:
+        import chromadb  # noqa: F401
+
+        checks["chromadb_import_ok"] = True
+    except Exception as exc:
+        errors.append(f"vector_backend_unavailable: {exc}")
+        return False, "vector_backend_unavailable", checks, errors
+
+    checks["embedding_model_cached"] = _hf_model_cached(embedding_model)
+    if not checks["embedding_model_cached"]:
+        errors.append(f"embedding_model_not_cached: {embedding_model}")
+        return False, "embedding_model_not_cached", checks, errors
+
+    checks["rerank_model_cached"] = _hf_model_cached(rerank_model)
+    if not checks["rerank_model_cached"]:
+        errors.append(f"rerank_model_not_cached: {rerank_model}")
+        return False, "rerank_model_not_cached", checks, errors
+
+    try:
+        from copilot_agent.rag.manifest import chroma_dir  # noqa: WPS433
+
+        path = chroma_dir()
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        checks["chroma_path"] = str(path)
+        checks["chroma_path_writable"] = True
+    except Exception as exc:
+        errors.append(f"vector_backend_unavailable: chroma_path_not_writable: {exc}")
+        return False, "vector_backend_unavailable", checks, errors
+
+    return True, "", checks, errors
 
 
 def _skip_summary(
@@ -440,6 +655,7 @@ def _skip_summary(
             proxy_metrics=metrics,
             profile=metrics_profile,
             status="SKIP",
+            stage="completed",
             skip_reason=reason,
             preconditions=precondition,
             errors=errors or [],
@@ -515,6 +731,13 @@ def main() -> int:
     )
     args = parser.parse_args()
     write_rag_metrics_path = Path(args.write_rag_metrics).resolve() if args.write_rag_metrics.strip() else None
+    if write_rag_metrics_path is not None:
+        _update_rag_metrics_stage(
+            write_rag_metrics_path,
+            profile=args.metrics_profile,
+            stage="bootstrap",
+            status="RUNNING",
+        )
 
     _bootstrap_scenario()
 
@@ -529,6 +752,12 @@ def main() -> int:
         cases = []
         errors.append(f"dataset_read_error: {exc}")
 
+    _update_rag_metrics_stage(
+        write_rag_metrics_path,
+        profile=args.metrics_profile,
+        stage="docs_preflight",
+        status="RUNNING",
+    )
     docs_ready, precondition = _docs_precondition()
     if not docs_ready and args.allow_missing_docs:
         _skip_summary(
@@ -546,25 +775,67 @@ def main() -> int:
         )
 
     disable_vector = bool(args.disable_vector and not args.enable_vector)
+    if disable_vector:
+        os.environ["RAG_USE_VECTOR"] = "false"
+        os.environ["RAG_RERANK_ENABLED"] = "false"
     if args.enable_vector and args.allow_vector_skip:
         embedding_model = os.environ.get("RAG_EMBEDDING_MODEL", "").strip()
         if not embedding_model:
             from copilot_agent.settings import settings  # noqa: WPS433
 
             embedding_model = settings.rag_embedding_model
-        if not _hf_model_cached(embedding_model):
+        from copilot_agent.settings import settings  # noqa: WPS433
+
+        rerank_model = os.environ.get("RAG_RERANK_MODEL", "").strip() or settings.rag_rerank_model
+        _update_rag_metrics_stage(
+            write_rag_metrics_path,
+            profile=args.metrics_profile,
+            stage="model_preflight",
+            status="RUNNING",
+            preconditions=precondition,
+        )
+        ok, reason, model_precondition, model_errors = _vector_preflight(
+            embedding_model=embedding_model,
+            rerank_model=rerank_model,
+        )
+        precondition["model_preflight"] = model_precondition
+        if not ok:
             _skip_summary(
                 dataset_path=dataset_path,
                 summary_path=summary_path,
                 precondition=precondition,
-                reason="vector_embedding_model_not_cached",
-                errors=[f"vector_embedding_model_not_cached: {embedding_model}"],
+                reason=reason,
+                errors=model_errors,
                 write_rag_metrics=write_rag_metrics_path,
                 metrics_profile=args.metrics_profile,
             )
             return 0
     try:
-        records, proxy_metrics = _build_proxy_records(cases, top_k=args.top_k, disable_vector=disable_vector)
+        _update_rag_metrics_stage(
+            write_rag_metrics_path,
+            profile=args.metrics_profile,
+            stage="proxy_eval",
+            status="RUNNING",
+            preconditions=precondition,
+        )
+        records, proxy_metrics = _build_proxy_records_with_timeout(
+            cases,
+            top_k=args.top_k,
+            disable_vector=disable_vector,
+            timeout_seconds=90,
+        )
+    except TimeoutError as exc:
+        _write_timeout_metrics(
+            write_rag_metrics_path,
+            profile=args.metrics_profile,
+            stage="proxy_eval",
+            timeout_seconds=90,
+            preconditions=precondition,
+            errors=[str(exc)],
+        )
+        print(f"error={exc}")
+        print("phase4_ragas=FAIL")
+        return 1
     except Exception as exc:
         if args.enable_vector and args.allow_vector_skip:
             _skip_summary(
@@ -609,10 +880,17 @@ def main() -> int:
     proxy_pass = _proxy_pass(proxy_metrics, docs_cases=proxy_metrics.get("docs_cases", 0))
 
     if write_rag_metrics_path is not None:
-        _write_rag_metrics(
+        _write_rag_metrics_payload(
             write_rag_metrics_path,
-            proxy_metrics=proxy_metrics,
-            profile=args.metrics_profile,
+            _rag_metrics_payload(
+                proxy_metrics=proxy_metrics,
+                profile=args.metrics_profile,
+                status="PASS",
+                stage="completed",
+                preconditions=precondition,
+                errors=errors,
+            ),
+            write_history=True,
         )
 
     summary = {

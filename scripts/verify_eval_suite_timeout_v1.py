@@ -19,13 +19,15 @@ from scripts.verify_eval_suite import (  # noqa: E402
     _extract_summary_json,
     _load_checks_from_summary,
     _nightly_metrics_skip_reason,
+    _nightly_metrics_timeout_reason,
     _parse_key_values,
     _profiles,
     _proxy_summary_passed,
     _suite_status,
     _timeout_suite_status,
+    _write_nightly_timeout_artifact,
 )
-from scripts.verify_phase4_ragas import _skip_summary  # noqa: E402
+from scripts.verify_phase4_ragas import _build_proxy_records, _skip_summary  # noqa: E402
 
 
 def _simulate_timeout_branch(exc: subprocess.TimeoutExpired, *, suite_timeout_seconds: int) -> dict[str, object]:
@@ -52,6 +54,8 @@ def _simulate_timeout_branch(exc: subprocess.TimeoutExpired, *, suite_timeout_se
 def main() -> int:
     rag_specs = {spec.suite_name: spec for spec in _profiles(enable_ragas=True)["rag"]}
     phase4_args = rag_specs["phase4_ragas"].args
+    full_specs = {spec.suite_name: spec for spec in _profiles(enable_ragas=False)["full"]}
+    nightly_args = full_specs["phase4_ragas_nightly"].args
     non_phase4_changed = {
         name: spec.args
         for name, spec in rag_specs.items()
@@ -94,12 +98,16 @@ def main() -> int:
     }
     rag_history_checks = _verify_rag_regression_detection()
     nightly_skip_checks = _verify_nightly_skip_metrics()
+    nightly_timeout_checks = _verify_nightly_timeout_metrics()
+    disable_vector_checks = _verify_disable_vector_disables_rerank()
     checks = {
         "bytes_decoded": _coerce_output_text(b"phase4_ragas=PASS\n") == "phase4_ragas=PASS\n",
         "str_preserved": _coerce_output_text("ok") == "ok",
         "none_empty": _coerce_output_text(None) == "",
         "enable_ragas_only_phase4": phase4_args == ("--mode", "auto", "--disable-vector", "--allow-missing-docs")
         and not non_phase4_changed,
+        "nightly_suite_writes_metrics": "--write-rag-metrics" in nightly_args
+        and "artifacts/eval/rag_metrics/nightly-latest.json" in nightly_args,
         "timeout_pass_no_type_error": timeout_pass["status"] == "PASS"
         and "timeout_after_pass_signal" in timeout_pass["errors"],
         "timeout_fail_no_type_error": timeout_fail["status"] == "FAIL"
@@ -111,6 +119,8 @@ def main() -> int:
         "phase4_proxy_summary_requires_cases": not _proxy_summary_passed(proxy_fail_summary),
         **rag_history_checks,
         **nightly_skip_checks,
+        **nightly_timeout_checks,
+        **disable_vector_checks,
     }
     passed = all(checks.values())
     summary = {
@@ -121,6 +131,7 @@ def main() -> int:
         "timeout_fail": timeout_fail,
         "timeout_silent": timeout_silent,
         "phase4_args": list(phase4_args),
+        "nightly_args": list(nightly_args),
         "non_phase4_changed": non_phase4_changed,
     }
     summary_path = ROOT / "artifacts/runtime/eval-suite-timeout-v1-summary.json"
@@ -206,6 +217,75 @@ def _verify_nightly_skip_metrics() -> dict[str, bool]:
         "nightly_skip_reason_only_for_skip": _nightly_metrics_skip_reason({"status": "PASS"}) == "",
         "nightly_missing_reason_reserved": not (root / "missing/nightly-latest.json").is_file(),
     }
+
+
+def _verify_nightly_timeout_metrics() -> dict[str, bool]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        metrics_path = root / "rag_metrics/nightly-latest.json"
+        _write_nightly_timeout_artifact(metrics_path, suite_timeout_seconds=180)
+        payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+        history_files = list((metrics_path.parent / "history").glob("nightly-*.json"))
+
+        running_path = root / "rag_metrics/running-latest.json"
+        running_path.parent.mkdir(parents=True, exist_ok=True)
+        running_path.write_text(
+            json.dumps({"status": "RUNNING", "stage": "proxy_eval", "started_at": "then"}),
+            encoding="utf-8",
+        )
+        _write_nightly_timeout_artifact(running_path, suite_timeout_seconds=181)
+        running_payload = json.loads(running_path.read_text(encoding="utf-8"))
+
+        pass_path = root / "rag_metrics/pass-latest.json"
+        pass_path.write_text(json.dumps({"status": "PASS", "stage": "completed"}), encoding="utf-8")
+        _write_nightly_timeout_artifact(pass_path, suite_timeout_seconds=182)
+        pass_payload = json.loads(pass_path.read_text(encoding="utf-8"))
+
+    return {
+        "nightly_timeout_writes_metrics": payload.get("status") == "TIMEOUT"
+        and payload.get("timeout_stage") == "suite_timeout"
+        and payload.get("timeout_seconds") == 180,
+        "nightly_timeout_reason_specific": _nightly_metrics_timeout_reason(payload)
+        == "nightly_metrics_timeout:suite_timeout",
+        "nightly_timeout_updates_running": running_payload.get("status") == "TIMEOUT"
+        and running_payload.get("started_at") == "then",
+        "nightly_timeout_preserves_terminal_status": pass_payload.get("status") == "PASS",
+        "nightly_timeout_not_written_to_history": history_files == [],
+    }
+
+
+def _verify_disable_vector_disables_rerank() -> dict[str, bool]:
+    import os
+
+    from copilot_agent.settings import settings
+
+    old_env_vector = os.environ.get("RAG_USE_VECTOR")
+    old_env_rerank = os.environ.get("RAG_RERANK_ENABLED")
+    old_vector = settings.rag_use_vector
+    old_rerank = settings.rag_rerank_enabled
+    try:
+        os.environ["RAG_USE_VECTOR"] = "true"
+        os.environ["RAG_RERANK_ENABLED"] = "true"
+        _build_proxy_records([], top_k=1, disable_vector=True)
+        return {
+            "disable_vector_sets_vector_false": settings.rag_use_vector is False
+            and os.environ.get("RAG_USE_VECTOR") == "false",
+            "disable_vector_sets_rerank_false": settings.rag_rerank_enabled is False
+            and os.environ.get("RAG_RERANK_ENABLED") == "false",
+        }
+    finally:
+        settings.rag_use_vector = old_vector
+        settings.rag_rerank_enabled = old_rerank
+        if old_env_vector is None:
+            os.environ.pop("RAG_USE_VECTOR", None)
+        else:
+            os.environ["RAG_USE_VECTOR"] = old_env_vector
+        if old_env_rerank is None:
+            os.environ.pop("RAG_RERANK_ENABLED", None)
+        else:
+            os.environ["RAG_RERANK_ENABLED"] = old_env_rerank
 
 
 if __name__ == "__main__":
