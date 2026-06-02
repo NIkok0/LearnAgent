@@ -87,8 +87,17 @@ def main() -> int:
         "unsafe_output_detected": unsafe_output.get("safe") is False and int(unsafe_output.get("finding_count") or 0) >= 1,
     }
     passed = all(checks.values())
+    summary = {
+        "checks": checks,
+        "context_guard": guarded.audit_payload(),
+        "private_rag_context_guard_v1": "PASS" if passed else "FAIL",
+    }
+    summary_path = ROOT / "artifacts/runtime/private-rag-context-guard-v1-summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"checks={json.dumps(checks, ensure_ascii=False, sort_keys=True)}")
     print(f"context_guard={json.dumps(guarded.audit_payload(), ensure_ascii=False, sort_keys=True)}")
+    print(f"summary_json={summary_path}")
     print(f"private_rag_context_guard_v1={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
 

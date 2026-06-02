@@ -16,8 +16,11 @@ from copilot_agent.agent.tool_route_merge import merge_api_paths_into_route  # n
 from copilot_agent.scenario.router import route_tools, tool_allowed  # noqa: E402
 from copilot_agent.scenario.router.types import ToolRoute  # noqa: E402
 
+CHECKS: dict[str, bool] = {}
+
 
 def _assert(name: str, ok: bool) -> None:
+    CHECKS[name] = bool(ok)
     if not ok:
         raise SystemExit(f"FAIL: {name}")
     print(f"PASS: {name}")
@@ -127,6 +130,15 @@ def main() -> int:
     _assert("llm fallback upgrades kind", refined.kind == "live_status")
     _assert("llm fallback recommends http_get", "http_get" in refined.recommended_tools)
 
+    summary = {
+        "checks": CHECKS,
+        "case_count": len(cases),
+        "verify_tool_router": "PASS",
+    }
+    summary_path = ROOT / "artifacts/runtime/tool-router-summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"summary_json={summary_path}")
     print("verify_tool_router=PASS")
     return 0
 

@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -23,6 +25,84 @@ from copilot_agent.tools.extensions.mcp import (  # noqa: E402
     mcp_sdk_available,
 )
 from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
+
+
+async def _verify_mcp_api_management(runtime: McpRuntime) -> dict[str, bool]:
+    from copilot_agent import server as app_server  # noqa: WPS433
+
+    previous_runtime = app_server.mcp_runtime
+    app_server.mcp_runtime = runtime
+    payload = {
+        "name": "api_mock",
+        "transport": "mock",
+        "enabled": True,
+        "tools": [
+            {
+                "name": "echo",
+                "description": "Echo through runtime API mock",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+                "risk_level": "low",
+                "requires_approval": False,
+                "timeout_seconds": 10.0,
+            }
+        ],
+        "resources": [
+            {
+                "name": "api-doc",
+                "description": "Mock API resource",
+                "uri": "mock://api-doc",
+                "mimeType": "text/plain",
+            }
+        ],
+        "prompts": [
+            {
+                "name": "api_prompt",
+                "description": "Mock API prompt",
+                "arguments": [{"name": "topic", "required": True}],
+            }
+        ],
+    }
+    try:
+        transport = httpx.ASGITransport(app=app_server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            initial = await client.get("/v1/mcp/servers")
+            added = await client.post("/v1/mcp/servers", json=payload)
+            duplicate = await client.post("/v1/mcp/servers", json=payload)
+            listed = await client.get("/v1/mcp/servers")
+            reconnect = await client.post("/v1/mcp/servers/api_mock/reconnect")
+            invoke_result = await runtime.handlers.invoke(
+                server="api_mock",
+                tool="echo",
+                arguments={"text": "api-managed"},
+            )
+            removed = await client.delete("/v1/mcp/servers/api_mock")
+            remove_missing = await client.delete("/v1/mcp/servers/api_mock")
+        api_server = _server_by_name(listed.json().get("servers") or [], "api_mock")
+        return {
+            "mcp_api_initial_list": initial.status_code == 200,
+            "mcp_api_add_server": added.status_code == 200 and added.json().get("added") == "api_mock",
+            "mcp_api_duplicate_rejected": duplicate.status_code == 409,
+            "mcp_api_list_added_config": api_server.get("transport") == "mock" and api_server.get("tools") == 1,
+            "mcp_api_resource_prompt_counts": api_server.get("resources") == 1 and api_server.get("prompts") == 1,
+            "mcp_api_added_handler_invokes": bool(invoke_result.get("success"))
+            and (invoke_result.get("data") or {}).get("echo") == "api-managed",
+            "mcp_api_mock_reconnect_rejected": reconnect.status_code == 400,
+            "mcp_api_remove_server": removed.status_code == 200 and "api_mock" not in runtime.clients,
+            "mcp_api_remove_missing_404": remove_missing.status_code == 404,
+        }
+    finally:
+        app_server.mcp_runtime = previous_runtime
+
+
+def _server_by_name(servers: list[object], name: str) -> dict[str, object]:
+    for item in servers:
+        if isinstance(item, dict) and item.get("name") == name:
+            return item
+    return {}
 
 
 async def _run_checks() -> dict[str, bool | str]:
@@ -67,6 +147,7 @@ async def _run_checks() -> dict[str, bool | str]:
     checks["demo_policy_allows_echo"] = gate.evaluate_tool_calls(
         [{"name": echo_name, "args": {"text": "ok"}}]
     ).allowed
+    checks.update(await _verify_mcp_api_management(demo_runtime))
 
     watermark = load_scenario("watermark")
     checks["watermark_has_mcp_config"] = watermark.mcp is not None

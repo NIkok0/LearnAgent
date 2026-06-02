@@ -114,7 +114,12 @@ def main() -> int:
     failed_orphan_runs = [
         run
         for run in orphan_runs
-        if orphan_statuses.get(str(run.get("id"))) != RUN_STATUS_WAITING_APPROVAL
+        if orphan_statuses.get(str(run.get("id"))) in {"queued", RUN_STATUS_RUNNING}
+    ]
+    cancelled_orphan_runs = [
+        run
+        for run in orphan_runs
+        if orphan_statuses.get(str(run.get("id"))) == RUN_STATUS_CANCELLING
     ]
     waiting_orphan_runs = [
         run
@@ -142,6 +147,10 @@ def main() -> int:
         "orphan_cleanup_error": all(
             run.get("error") == "server restarted before run completed"
             for run in failed_orphan_runs
+        ),
+        "cancelling_orphan_cancelled": all(
+            run.get("status") == RUN_STATUS_CANCELLED
+            for run in cancelled_orphan_runs
         ),
         "waiting_approval_rehydrated": all(
             run.get("status") == RUN_STATUS_WAITING_APPROVAL and not run.get("error")

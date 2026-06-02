@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -19,12 +20,33 @@ from copilot_agent.rag.reload import RagStoreManager  # noqa: E402
 
 def main() -> int:
     base = repo_docs_dir()
+    summary_path = ROOT / "artifacts/runtime/rag-hot-reload-summary.json"
     if base is None:
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            json.dumps(
+                {"checks": {"docs_dir_available": False}, "skip_reason": "no_docs_dir", "rag_hot_reload": "SKIP"},
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        print(f"summary_json={summary_path}")
         print("rag_hot_reload=SKIP (no docs dir)")
         return 0
 
     target = base / "README.md"
     if not target.is_file():
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(
+            json.dumps(
+                {"checks": {"readme_available": False}, "skip_reason": "readme_missing", "rag_hot_reload": "SKIP"},
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        print(f"summary_json={summary_path}")
         print("rag_hot_reload=SKIP (README.md missing)")
         return 0
 
@@ -56,10 +78,25 @@ def main() -> int:
         target.write_text(original, encoding="utf-8")
         manager.reload(trigger="cli", sync_vector=True)
 
+    checks = {
+        "docs_dir_available": True,
+        "readme_available": True,
+        "fingerprint_reloaded": manager.status()["fingerprint"] == docs_source_fingerprint(),
+        "memory_store_attached": memory.rag_store is manager.store,
+    }
+    summary = {
+        "checks": checks,
+        "docs_dir": str(base),
+        "chunks": chunks0,
+        "rag_hot_reload": "PASS" if all(checks.values()) else "FAIL",
+    }
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"docs_dir={base}")
     print(f"chunks={chunks0}")
-    print("rag_hot_reload=PASS")
-    return 0
+    print(f"summary_json={summary_path}")
+    print(f"rag_hot_reload={summary['rag_hot_reload']}")
+    return 0 if summary["rag_hot_reload"] == "PASS" else 1
 
 
 if __name__ == "__main__":

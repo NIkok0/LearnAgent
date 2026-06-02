@@ -1,0 +1,31 @@
+# Example: MCP server over streamable-http transport
+# Usage: set SCENARIO=mcp_http_example COPILOT_CAPABILITIES=mcp
+servers:
+  - name: remote-api
+    transport: streamable-http
+    enabled: true
+    url: http://localhost:9000/mcp
+    headers:
+      Authorization: Bearer ${MCP_API_TOKEN}
+    discover_tools: true
+    discover_resources: true
+    discover_prompts: true
+    reconnect:
+      enabled: true
+      max_retries: 10
+      backoff_base_s: 1.0
+      backoff_max_s: 60.0
+      health_check_interval_s: 15.0
+    tools: []
+    resources:
+      - name: api-docs
+        description: API reference documentation
+        uri: doc://api-reference
+        mimeType: text/markdown
+    prompts:
+      - name: code-review
+        description: Ask for a thorough code review
+        arguments:
+          - name: language
+            description: Programming language of the code
+            required: true

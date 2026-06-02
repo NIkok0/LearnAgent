@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -86,6 +87,11 @@ def main() -> int:
         default=settings.agent_event_store_path,
         help="SQLite event store path.",
     )
+    parser.add_argument(
+        "--summary-json",
+        default=str(ROOT / "artifacts/runtime/thread-archive-api-summary.json"),
+        help="Path to write summary JSON.",
+    )
     args = parser.parse_args()
     event_store_path = Path(args.event_store_path).resolve()
     event_store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,8 +113,20 @@ def main() -> int:
         and summary["chat_status_code"] == 409
         and summary["chat_detail"] == "thread is not active"
     )
+    summary["checks"] = {
+        "end_thread": summary["end_status_code"] == 200 and summary["end_status"] == "ended",
+        "archive_thread": summary["archive_status_code"] == 200 and summary["archive_status"] == "archived",
+        "archived_readable": summary["read_status_code"] == 200 and summary["read_status"] == "archived",
+        "archived_blocks_run": summary["run_status_code"] == 409 and summary["run_detail"] == "thread is not active",
+        "archived_blocks_chat": summary["chat_status_code"] == 409 and summary["chat_detail"] == "thread is not active",
+    }
+    summary["thread_archive_api"] = "PASS" if passed else "FAIL"
+    summary_path = Path(args.summary_json).resolve()
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     for key, value in summary.items():
         print(f"{key}={value}")
+    print(f"summary_json={summary_path}")
     print(f"thread_archive_api={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
 

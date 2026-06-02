@@ -79,8 +79,17 @@ def main() -> int:
         < [event.kind for event in unsafe_events].index("done"),
     }
     passed = all(checks.values())
+    summary = {
+        "checks": checks,
+        "unsafe_guard": unsafe_guard,
+        "private_rag_output_guard_v1": "PASS" if passed else "FAIL",
+    }
+    summary_path = ROOT / "artifacts/runtime/private-rag-output-guard-v1-summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"checks={json.dumps(checks, ensure_ascii=False, sort_keys=True)}")
     print(f"unsafe_guard={json.dumps(unsafe_guard, ensure_ascii=False, sort_keys=True)}")
+    print(f"summary_json={summary_path}")
     print(f"private_rag_output_guard_v1={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
 

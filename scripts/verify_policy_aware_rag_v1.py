@@ -203,10 +203,21 @@ def main() -> int:
     vector_checks = _verify_policy_vector_coexistence()
     checks.update(vector_checks)
     overall = all(checks.values())
+    summary = {
+        "checks": checks,
+        "blocked_count": policy_result.blocked_count,
+        "prefilter_blocked_count": policy_result.prefilter_blocked_count,
+        "allowed_chunk_ids": policy_result.allowed_chunk_ids,
+        "policy_aware_rag_v1": "PASS" if overall else "FAIL",
+    }
+    summary_path = ROOT / "artifacts/runtime/policy-aware-rag-v1-summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"checks={json.dumps(checks, ensure_ascii=False, sort_keys=True)}")
     print(f"blocked_count={policy_result.blocked_count}")
     print(f"prefilter_blocked_count={policy_result.prefilter_blocked_count}")
     print(f"allowed_chunk_ids={','.join(policy_result.allowed_chunk_ids)}")
+    print(f"summary_json={summary_path}")
     print(f"policy_aware_rag_v1={'PASS' if overall else 'FAIL'}")
     return 0 if overall else 1
 

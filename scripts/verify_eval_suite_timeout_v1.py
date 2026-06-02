@@ -21,12 +21,12 @@ from scripts.verify_eval_suite import (  # noqa: E402
     _nightly_metrics_skip_reason,
     _nightly_metrics_timeout_reason,
     _parse_key_values,
-    _profiles,
     _proxy_summary_passed,
     _suite_status,
     _timeout_suite_status,
     _write_nightly_timeout_artifact,
 )
+from scripts.verify_manifest import profiles  # noqa: E402
 from scripts.verify_phase4_ragas import _build_proxy_records, _skip_summary  # noqa: E402
 
 
@@ -52,9 +52,9 @@ def _simulate_timeout_branch(exc: subprocess.TimeoutExpired, *, suite_timeout_se
 
 
 def main() -> int:
-    rag_specs = {spec.suite_name: spec for spec in _profiles(enable_ragas=True)["rag"]}
+    rag_specs = {spec.suite_name: spec for spec in profiles(enable_ragas=True)["rag"]}
     phase4_args = rag_specs["phase4_ragas"].args
-    full_specs = {spec.suite_name: spec for spec in _profiles(enable_ragas=False)["full"]}
+    full_specs = {spec.suite_name: spec for spec in profiles(enable_ragas=False)["full"]}
     nightly_args = full_specs["phase4_ragas_nightly"].args
     non_phase4_changed = {
         name: spec.args

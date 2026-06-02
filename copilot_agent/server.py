@@ -53,6 +53,7 @@ from copilot_agent.runtime.thread_lifecycle import ThreadLifecycleCleaner
 from copilot_agent.runtime.timeline import TimelineProjector
 from copilot_agent.settings import settings
 from copilot_agent.tools.extensions.mcp import McpRuntime
+from copilot_agent.tools.extensions.mcp.schema import McpServerDefinition, McpResourcesConfig
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -271,6 +272,81 @@ def preview_thread_skills(thread_id: str, goal: str = "") -> dict[str, object]:
     selected = runner.context_manager.preview_skills_public(goal)
     return {"thread_id": thread_id, "goal_chars": len(goal), "skills": selected}
 
+
+# ── MCP server management ────────────────────────────────────────────
+
+def _require_mcp_runtime() -> McpRuntime:
+    if mcp_runtime is None:
+        raise HTTPException(status_code=503, detail="MCP runtime not initialized")
+    return mcp_runtime
+
+
+@app.get("/v1/mcp/servers")
+def list_mcp_servers() -> dict[str, object]:
+    rt = _require_mcp_runtime()
+    servers: list[dict[str, object]] = []
+    for name, client in rt.clients.items():
+        is_connected = getattr(client, "is_connected", False)
+        server_config = None
+        for server in rt.config.enabled_servers():
+            if server.name == name:
+                server_config = server
+                break
+        servers.append({
+            "name": name,
+            "transport": server_config.transport if server_config else "unknown",
+            "status": "connected" if is_connected else "disconnected",
+            "tools": len(server_config.tools) if server_config else 0,
+            "resources": len(rt.resource_store.by_server.get(name, [])),
+            "prompts": len(rt.prompt_store.by_server.get(name, [])),
+        })
+    return {"servers": servers}
+
+
+@app.post("/v1/mcp/servers")
+async def add_mcp_server(server: McpServerDefinition) -> dict[str, object]:
+    rt = _require_mcp_runtime()
+    if server.name in rt.clients:
+        raise HTTPException(status_code=409, detail=f"MCP server '{server.name}' already exists")
+    try:
+        await rt.add_server(server)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to add MCP server: {exc}") from exc
+    return {
+        "added": server.name,
+        "transport": server.transport,
+        "resources": len(rt.resource_store.by_server.get(server.name, [])),
+        "prompts": len(rt.prompt_store.by_server.get(server.name, [])),
+    }
+
+
+@app.delete("/v1/mcp/servers/{server_name}")
+async def remove_mcp_server(server_name: str) -> dict[str, object]:
+    rt = _require_mcp_runtime()
+    removed = await rt.remove_server(server_name)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"MCP server '{server_name}' not found")
+    return {"removed": server_name}
+
+
+@app.post("/v1/mcp/servers/{server_name}/reconnect")
+async def reconnect_mcp_server(server_name: str) -> dict[str, object]:
+    rt = _require_mcp_runtime()
+    client = rt.clients.get(server_name)
+    if client is None:
+        raise HTTPException(status_code=404, detail=f"MCP server '{server_name}' not found")
+    force_fn = getattr(client, "force_reconnect", None)
+    if not callable(force_fn):
+        raise HTTPException(status_code=400, detail=f"MCP server '{server_name}' does not support reconnection")
+    success = await force_fn()
+    return {
+        "server": server_name,
+        "reconnected": success,
+        "status": "connected" if getattr(client, "is_connected", False) else "disconnected",
+    }
+
+
+# ── RAG ──────────────────────────────────────────────────────────────
 
 @app.get("/v1/rag/status")
 def rag_status() -> dict[str, object]:
