@@ -496,12 +496,19 @@ Timeline 投影为 `kind: "retrieval"`；`call_id` 与 `kind: tool` 可关联（
 
 ### 6.2 Turn 前预检索（Preretrieval）
 
-`context/preretrieval.py` 在 planner 路由推荐 `search_docs` 时，**LLM 调用 tool 之前**自动检索：
+`ContextManager` 不再把「planner 路由推荐 `search_docs`」直接等价为每轮自动检索，而是先经过 `context/retrieval_gate.py` 的确定性 Retrieval Gate：
+
+| action | 含义 | 典型触发 |
+|--------|------|----------|
+| `retrieve` | 执行 policy-aware preretrieval，并注入 `[PreRetrievedDocs]` | route 推荐 `search_docs`；query 命中文档、接口、部署、排障、错误码、配置、日志类意图 |
+| `reuse_cache` | 复用上一轮允许的 chunk 摘录，不重新检索 | 当前 query 与上一轮 retrieval query 相似，且 user / tenant / scope / classification / allowed_chunk_ids / policy hash 一致 |
+| `skip_rag` | 本轮不注入 RAG | memory preview 已有高置信 answer seed；闲聊、确认、格式化、改写类问题 |
+| `route_to_tool_api` | RAG 只能提供 runbook/契约背景，实时事实应交给 tool/API | 今天、当前、最新、状态、线上是否生效等 live/current 意图 |
 
 - 开关：`CONTEXT_PRERETRIEVAL_ENABLED=true`（默认开）
 - 预算：`min(CONTEXT_PRERETRIEVAL_BUDGET_CHARS, total_budget/2)`，默认 cap 3500 字符
-- 路径：与 `search_docs` 相同 — `build_retrieval_request` + `policy_aware_search_docs` + `build_guarded_context`
-- 输出：注入 `SystemMessage`，前缀 `[PreRetrievedDocs]`，提示 LLM 优先使用已有摘录、仅在需要时再 `search_docs`
+- 真实检索路径：`build_retrieval_request` + `policy_aware_search_docs` + `build_guarded_context`
+- 可观测：`retrieval_decision` 写入 `context_built.truncation_report`；`retrieval_completed` 只在真实检索发生时写入，`reuse_cache` / `skip_rag` 不伪造检索事件。
 
 同 turn 内再次 `search_docs` 时，`context/preretrieval_dedupe.py` 可跳过与预检索完全重复的 chunk（`CONTEXT_PRERETRIEVAL_DEDUPE_ENABLED`）。
 

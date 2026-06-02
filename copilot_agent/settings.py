@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     agent_tool_route_enabled: bool = True
     agent_tool_route_enforce: bool = True
     agent_tool_route_llm_fallback: bool = False
+    agent_llm_planner_enabled: bool = True
+    agent_llm_planner_timeout_seconds: float = 12.0
     agent_diagnosis_template_enabled: bool = True
     agent_retrieval_path_inject: bool = True
     agent_tool_message_mode: str = "full"

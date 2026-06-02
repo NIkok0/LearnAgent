@@ -19,6 +19,7 @@ from copilot_agent.agent.plan_builder import (
     maybe_replan_troubleshooting,
     update_plan_outcomes,
 )
+from copilot_agent.agent.llm_planner import LlmPlannerError, LlmPlannerUnavailable, plan_with_llm
 from copilot_agent.agent.message_utils import last_user_content
 from copilot_agent.agent.tool_route_merge import (
     extract_suggested_paths_from_messages,
@@ -114,8 +115,32 @@ class AgentNodes:
             )
 
         plan = build_plan_from_route(route, goal=goal)
+        planner_mode = "rules"
+        planner_fallback_reason = ""
+        if settings.agent_llm_planner_enabled:
+            try:
+                llm_plan = await plan_with_llm(
+                    goal=goal,
+                    baseline_route=route,
+                    baseline_plan=plan,
+                    tool_registry=self._tool_registry,
+                    llm_provider=self._llm_provider,
+                )
+                route = llm_plan.route
+                plan = llm_plan.plan
+                planner_mode = "llm"
+            except LlmPlannerUnavailable:
+                planner_mode = "rules"
+            except LlmPlannerError as exc:
+                planner_mode = "fallback"
+                planner_fallback_reason = str(exc)
 
         plan_payload = self._context.plan_created_payload(goal=goal, route=route)
+        if planner_mode == "llm":
+            plan_payload["strategy"] = "llm_planner_react"
+        plan_payload["planner_mode"] = planner_mode
+        if planner_fallback_reason:
+            plan_payload["planner_fallback_reason"] = planner_fallback_reason
         plan_payload["plan"] = plan.as_dict()
 
         self._memory.append_event(

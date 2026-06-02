@@ -359,6 +359,8 @@ Tool routing plan for this user turn (follow before choosing tools):
 |---------------------|------|------|
 | `AGENT_TOOL_ROUTE_ENABLED` | `true` | planner 是否分类并注入 SystemMessage |
 | `AGENT_TOOL_ROUTE_ENFORCE` | `true` | safety_gate 是否强制 `tool_allowed` |
+| `AGENT_LLM_PLANNER_ENABLED` | `true` | planner 是否优先用 LLM 生成 route + plan，失败或无 key 时回退规则 |
+| `AGENT_LLM_PLANNER_TIMEOUT_SECONDS` | `12.0` | LLM planner 单次超时 |
 | `AGENT_RETRIEVAL_PATH_INJECT` | `true` | `search_docs` 返回 `suggested_api_paths` |
 | `AGENT_DIAGNOSIS_TEMPLATE_ENABLED` | `true` | troubleshooting 注入排障 outline SystemMessage |
 | `COPILOT_ALLOW_JOB_POST` | `false` | 是否允许危险 POST 路径（部署级） |
@@ -370,8 +372,11 @@ Tool routing plan for this user turn (follow before choosing tools):
 plan_created
 ├── goal: str
 ├── strategy: "route_first_react"        # route-first planner + ReAct executor
+├── planner_mode: "rules"|"llm"|"fallback"
+├── planner_fallback_reason?: str
 ├── tool_route: ToolRoute.as_dict()      # 与 assemble 内 route 一致
-└── available_tools: ToolSpec.public_dict[]
+├── available_tools: ToolSpec.public_dict[]
+└── plan: PlanModel.as_dict()
 ```
 
 #### 3.5.3 Checkpoint 边界
@@ -575,11 +580,13 @@ python scripts/verify_demo_golden_e2e.py
 | 方案 | 优点 | 缺点 | LearnAgent 选择 |
 |------|------|------|-----------------|
 | **纯 Prompt ReAct** | 实现简单 | 轨迹不稳定、难评测 | 已弃用为主路径 |
-| **规则 ToolRouter（当前）** | 可测、可解释、零额外 token | 口语覆盖有限 | ✅ P0–P3 默认 |
-| **LLM 意图分类** | 泛化好 | 波动、需 judge | §5 目标 |
+| **规则 ToolRouter（兜底）** | 可测、可解释、零额外 token | 口语覆盖有限 | 无 API key、LLM 失败或输出非法时自动回退 |
+| **LLM Planner（默认优先）** | 口语泛化更好，可生成 route + steps | 需要 API key、JSON/schema 校验和 fallback | `AGENT_LLM_PLANNER_ENABLED=true` 默认开启 |
 | **Plan-and-Execute** | 多步任务清晰 | 复杂度高 | 远期（tech-selection §4） |
 
-当前 **planner 节点名** 保留，但实现是 **route-first deterministic planner** 而非 LLM Planner；`plan_created.strategy=route_first_react` 反映「规则路由 + ReAct 执行」，并已有轻量 `plan_updated` / step outcome，但仍不是完整 Plan-and-Execute。
+当前 planner 默认优先让 LLM 生成 `ToolRoute(kind/recommended_tools/forbidden_tools/suggested_paths/rationale)` 与 `PlanModel(goal/route_kind/steps)`，再经过 Pydantic、route kind 与 ToolRegistry 名称白名单校验；规则基线仍是 `ContextManager.resolve_route()` + `build_plan_from_route()`。无 API key 或显式关闭开关时直接使用规则 planner 并记录 `planner_mode=rules`；LLM 超时、JSON 解析失败、schema 不合法或工具名非法时，自动回退规则 planner，并在 `plan_created` 记录 `planner_mode=fallback` 与 `planner_fallback_reason`。
+
+LLM planner 只影响 route/plan 提示，不执行工具、不改变 LangGraph 拓扑，也不能绕过 `tool_route_enforce`、Scenario allowlist、credential scope、HITL、PolicyGate 与 side-effect ledger；高风险工具仍由 `safety_gate` / PolicyGate 作最终裁决。
 
 ---
 
