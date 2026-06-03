@@ -14,7 +14,7 @@ from copilot_agent.context.memory_inject import memory_context_messages
 from copilot_agent.context.packing import pack_graph_messages
 from copilot_agent.context.preretrieval import preretrieve_docs
 from copilot_agent.contracts.adapters.tool_rag import RagSearchAdapter
-from copilot_agent.contracts.context import ContextBundle
+from copilot_agent.contracts.context import ContextBlock, ContextBundle
 from copilot_agent.credentials import CredentialManager
 from copilot_agent.memory import MemoryManager
 from copilot_agent.runtime.event_schema import (
@@ -128,6 +128,112 @@ class ContextManager:
         for message in memory_context_messages(memory_dict):
             total += len(str(message.content or ""))
         return total
+
+    def _build_context_blocks(
+        self,
+        *,
+        route: ToolRoute,
+        memory_injections: list[dict[str, Any]],
+        skill_injections: list[dict[str, Any]],
+        retrieved_context: list[dict[str, Any]],
+        policy_hints: list[dict[str, Any]],
+        budget: dict[str, Any],
+        truncation_report: dict[str, Any],
+    ) -> list[ContextBlock]:
+        """Build v2 provider-style context trace without changing graph input."""
+        blocks: list[ContextBlock] = []
+        if self._system_prompt:
+            blocks.append(
+                ContextBlock(
+                    source="system_prompt",
+                    priority=0,
+                    content=self._system_prompt,
+                    token_estimate=max(1, len(self._system_prompt) // 4),
+                    policy_tags=["scenario"],
+                    trace_id="system_prompt:scenario",
+                    metadata={"scenario": self._scenario.name},
+                )
+            )
+        blocks.append(
+            ContextBlock(
+                source="route",
+                priority=10,
+                token_estimate=0,
+                policy_tags=["planner_hint"],
+                trace_id="route:tool_route",
+                metadata=route.as_dict(),
+            )
+        )
+        for item in memory_injections:
+            kind = str(item.get("kind") or "memory")
+            blocks.append(
+                ContextBlock(
+                    source=f"memory:{kind}",
+                    priority=30,
+                    token_estimate=max(0, int(item.get("preview_chars") or 0) // 4),
+                    policy_tags=["memory"],
+                    trace_id=f"memory:{kind}",
+                    metadata=item,
+                )
+            )
+        for item in skill_injections:
+            name = str(item.get("name") or "skill")
+            blocks.append(
+                ContextBlock(
+                    source="skill",
+                    priority=40,
+                    content=str(item.get("description") or ""),
+                    token_estimate=max(0, len(str(item.get("description") or "")) // 4),
+                    policy_tags=["skill", "injected" if item.get("injected", True) else "not_injected"],
+                    trace_id=f"skill:{name}",
+                    metadata=item,
+                )
+            )
+        if retrieved_context:
+            blocks.append(
+                ContextBlock(
+                    source="retrieval",
+                    priority=50,
+                    token_estimate=sum(len(str(item.get("text") or item.get("excerpt") or "")) for item in retrieved_context) // 4,
+                    policy_tags=["rag", "evidence"],
+                    trace_id="retrieval:preretrieval",
+                    metadata={
+                        "items": len(retrieved_context),
+                        "decision": truncation_report.get("retrieval_decision") or {},
+                    },
+                )
+            )
+        blocks.append(
+            ContextBlock(
+                source="tool_schemas",
+                priority=60,
+                token_estimate=0,
+                policy_tags=["capability"],
+                trace_id="capability:tool_registry",
+                metadata={"tools": len(self._tool_registry.public_specs())},
+            )
+        )
+        blocks.append(
+            ContextBlock(
+                source="policy_hints",
+                priority=70,
+                token_estimate=0,
+                policy_tags=["policy"],
+                trace_id="policy:hints",
+                metadata={"hints": policy_hints},
+            )
+        )
+        blocks.append(
+            ContextBlock(
+                source="budget_packer",
+                priority=90,
+                token_estimate=0,
+                policy_tags=["budget"],
+                trace_id="budget:packing",
+                metadata={"budget": budget, "truncation_report": truncation_report},
+            )
+        )
+        return blocks
 
     def _emit_context_built(
         self,
@@ -327,67 +433,83 @@ class ContextManager:
         dropped_conflicts = list(episodic.get("dropped_conflicts") or [])
         dropped_long_term = list(episodic.get("dropped_long_term") or [])
 
+        memory_injections = [
+            {
+                "kind": "episodic",
+                "preview_chars": len(str(episodic.get("inject_preview") or "")),
+                "recalled_runs": len(recalled_runs),
+                "dropped_conflicts": len(dropped_conflicts),
+                "dropped_long_term": len(dropped_long_term),
+                "sources": list(episodic.get("sources") or []),
+                "budget": episodic.get("budget_applied") or {},
+            },
+            {
+                "kind": "long_term",
+                "items": len(recalled_long_term),
+                "pending_excluded": True,
+                "dropped": len(dropped_long_term),
+                "sources": [
+                    {
+                        "id": item.get("id"),
+                        "scope": item.get("scope"),
+                        "memory_type": item.get("memory_type"),
+                        "score": item.get("score"),
+                        "source_run_id": item.get("source_run_id"),
+                    }
+                    for item in recalled_long_term
+                    if isinstance(item, dict)
+                ],
+            },
+        ]
+        skill_injections = [public_selected_skill(item) for item in selected_skills]
+        policy_hints = [
+            {"tool_allowlist": self._scenario.policy.tool_allowlist},
+            {"tool_route": route.as_dict()},
+            {"skills": [item.get("name") for item in injected_skills]},
+        ]
+        budget = {
+            "max_context_chars": budget_max,
+            "max_graph_rounds": self._scenario.budgets.max_graph_rounds,
+            "max_tool_calls": self._scenario.budgets.max_tool_calls,
+        }
+        truncation_report = {
+            "assembled_message_count": len(packed.messages),
+            "used_chars": packed.used_chars + int(checkpoint_pack.get("checkpoint_chars") or 0),
+            "truncated": bool(truncation_steps),
+            "truncation_steps": truncation_steps,
+            "router_injected": route_message is not None,
+            "preretrieval_enabled": bool(pr_meta.get("enabled")),
+            "preretrieval_excerpt_chars": int(pr_meta.get("excerpt_chars") or 0),
+            "preretrieval_cache": preretrieval_cache,
+            "retrieval_decision": retrieval_decision.as_dict(),
+            "memory_inject_chars": memory_inject_chars,
+            "skill_injected": bool(injected_skills),
+            "skill_count": len(injected_skills),
+            "checkpoint_pack": checkpoint_pack,
+        }
+        context_blocks = self._build_context_blocks(
+            route=route,
+            memory_injections=memory_injections,
+            skill_injections=skill_injections,
+            retrieved_context=retrieved_context,
+            policy_hints=policy_hints,
+            budget=budget,
+            truncation_report=truncation_report,
+        )
+
         bundle = ContextBundle(
             thread_id=thread_id,
             run_id=run_id,
             user_message=goal,
-            memory_injections=[
-                {
-                    "kind": "episodic",
-                    "preview_chars": len(str(episodic.get("inject_preview") or "")),
-                    "recalled_runs": len(recalled_runs),
-                    "dropped_conflicts": len(dropped_conflicts),
-                    "dropped_long_term": len(dropped_long_term),
-                    "sources": list(episodic.get("sources") or []),
-                    "budget": episodic.get("budget_applied") or {},
-                },
-                {
-                    "kind": "long_term",
-                    "items": len(recalled_long_term),
-                    "pending_excluded": True,
-                    "dropped": len(dropped_long_term),
-                    "sources": [
-                        {
-                            "id": item.get("id"),
-                            "scope": item.get("scope"),
-                            "memory_type": item.get("memory_type"),
-                            "score": item.get("score"),
-                            "source_run_id": item.get("source_run_id"),
-                        }
-                        for item in recalled_long_term
-                        if isinstance(item, dict)
-                    ],
-                },
-            ],
-            skill_injections=[public_selected_skill(item) for item in selected_skills],
+            memory_injections=memory_injections,
+            skill_injections=skill_injections,
             retrieved_context=retrieved_context,
             scenario_prompts=[self._system_prompt] if self._system_prompt else [],
             enabled_tool_schemas=self._tool_registry.public_specs(),
-            policy_hints=[
-                {"tool_allowlist": self._scenario.policy.tool_allowlist},
-                {"tool_route": route.as_dict()},
-                {"skills": [item.get("name") for item in injected_skills]},
-            ],
-            budget={
-                "max_context_chars": budget_max,
-                "max_graph_rounds": self._scenario.budgets.max_graph_rounds,
-                "max_tool_calls": self._scenario.budgets.max_tool_calls,
-            },
-            truncation_report={
-                "assembled_message_count": len(packed.messages),
-                "used_chars": packed.used_chars + int(checkpoint_pack.get("checkpoint_chars") or 0),
-                "truncated": bool(truncation_steps),
-                "truncation_steps": truncation_steps,
-                "router_injected": route_message is not None,
-                "preretrieval_enabled": bool(pr_meta.get("enabled")),
-                "preretrieval_excerpt_chars": int(pr_meta.get("excerpt_chars") or 0),
-                "preretrieval_cache": preretrieval_cache,
-                "retrieval_decision": retrieval_decision.as_dict(),
-                "memory_inject_chars": memory_inject_chars,
-                "skill_injected": bool(injected_skills),
-                "skill_count": len(injected_skills),
-                "checkpoint_pack": checkpoint_pack,
-            },
+            policy_hints=policy_hints,
+            context_blocks=context_blocks,
+            budget=budget,
+            truncation_report=truncation_report,
             graph_messages=packed.messages,
         )
         if emit_events:
