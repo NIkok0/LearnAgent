@@ -197,6 +197,7 @@ class ContextManager:
             route_kind=route.kind,
             enabled_capabilities=self._scenario.capabilities,
         )
+        injected_skills = [item for item in selected_skills if item.get("injected", True)]
 
         budget_max = self._budget_max_chars()
         memory_context = self._memory.build_context(
@@ -365,7 +366,7 @@ class ContextManager:
             policy_hints=[
                 {"tool_allowlist": self._scenario.policy.tool_allowlist},
                 {"tool_route": route.as_dict()},
-                {"skills": [item.get("name") for item in selected_skills]},
+                {"skills": [item.get("name") for item in injected_skills]},
             ],
             budget={
                 "max_context_chars": budget_max,
@@ -383,8 +384,8 @@ class ContextManager:
                 "preretrieval_cache": preretrieval_cache,
                 "retrieval_decision": retrieval_decision.as_dict(),
                 "memory_inject_chars": memory_inject_chars,
-                "skill_injected": bool(selected_skills),
-                "skill_count": len(selected_skills),
+                "skill_injected": bool(injected_skills),
+                "skill_count": len(injected_skills),
                 "checkpoint_pack": checkpoint_pack,
             },
             graph_messages=packed.messages,
@@ -515,11 +516,17 @@ class ContextManager:
         recommended: list[str] = []
         missing: list[str] = []
         reasons: dict[str, list[str]] = {}
+        scores: dict[str, float] = {}
+        injected: dict[str, bool] = {}
+        missing_by_skill: dict[str, list[str]] = {}
         for item in selected:
             name = str(item.get("name") or "")
             if not name:
                 continue
             reasons[name] = [str(value) for value in item.get("trigger_reasons") or []]
+            scores[name] = float(item.get("selection_score") or 0.0)
+            injected[name] = bool(item.get("injected", True))
+            missing_by_skill[name] = [str(value) for value in item.get("missing_capabilities") or []]
             recommended.extend(str(value) for value in item.get("tool_allowlist") or [])
             missing.extend(str(value) for value in item.get("missing_capabilities") or [])
         payload = {
@@ -527,6 +534,9 @@ class ContextManager:
             "trigger_reasons": reasons,
             "recommended_tools": sorted(set(recommended)),
             "missing_capabilities": sorted(set(missing)),
+            "missing_capabilities_by_skill": missing_by_skill,
+            "selection_scores": scores,
+            "injected": injected,
             "route_kind": route_kind,
         }
         self._memory.append_event(thread_id, run_id, EVENT_SKILL_SELECTED, payload)

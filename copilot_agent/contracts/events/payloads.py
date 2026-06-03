@@ -159,6 +159,9 @@ class SkillSelectedPayload(BaseModel):
     trigger_reasons: dict[str, list[str]] = Field(default_factory=dict)
     recommended_tools: list[str] = Field(default_factory=list)
     missing_capabilities: list[str] = Field(default_factory=list)
+    missing_capabilities_by_skill: dict[str, list[str]] = Field(default_factory=dict)
+    selection_scores: dict[str, float] = Field(default_factory=dict)
+    injected: dict[str, bool] = Field(default_factory=dict)
     route_kind: str = ""
 
     model_config = ConfigDict(extra="forbid")

@@ -31,6 +31,7 @@ from copilot_agent.runtime.event_store import EventStore, RUN_STATUS_RUNNING  # 
 from copilot_agent.scenario import load_scenario, scenario_status  # noqa: E402
 from copilot_agent.scenario.bootstrap import apply_scenario_environment  # noqa: E402
 from copilot_agent.skills import load_skill_specs, select_skills  # noqa: E402
+from copilot_agent.skills.selection import skill_system_message  # noqa: E402
 from copilot_agent.tools.audit import audit_payload_has_secret  # noqa: E402
 from copilot_agent.tools.registry import ToolRegistry  # noqa: E402
 
@@ -104,6 +105,18 @@ def main() -> int:
         route_kind="knowledge",
         enabled_capabilities=("rag",),
     )
+    chinese_selected = select_skills(
+        watermark.skill_registry.enabled(watermark.config.skills) if watermark.skill_registry else [],
+        goal="水印任务卡住需要排查故障",
+        route_kind="",
+        enabled_capabilities=("rag", "http"),
+    )
+    route_only = select_skills(
+        watermark.skill_registry.enabled(watermark.config.skills) if watermark.skill_registry else [],
+        goal="please help",
+        route_kind="knowledge",
+        enabled_capabilities=("rag", "http"),
+    )
     context = asyncio.run(_context_checks())
 
     with TestClient(server.app) as client:
@@ -133,12 +146,24 @@ def main() -> int:
         and any(item.get("name") == "watermark_diagnosis" for item in scenario_status(watermark)["skills"]["available"]),
         "minimal_has_no_skills": minimal.config.skills == [],
         "selector_matches_goal": any(item.get("name") == "watermark_diagnosis" for item in selected),
+        "selector_scores_goal": all(float(item.get("selection_score") or 0) >= 1.0 for item in selected)
+        and any(float(item.get("selection_score") or 0) >= 2.0 for item in selected),
+        "chinese_trigger_matches": any(item.get("name") == "watermark_diagnosis" for item in chinese_selected),
+        "route_only_low_score_skips": route_only == [],
         "missing_capability_warns": any(item.get("missing_capabilities") == ["http"] for item in missing_capability),
+        "missing_capability_not_injected": any(
+            item.get("missing_capabilities") == ["http"] and item.get("injected") is False
+            for item in missing_capability
+        )
+        and "Instructions:" not in skill_system_message(missing_capability),
         "context_injects_skill": any("watermark_diagnosis" in message for message in context["skill_messages"])
         and any(item.get("name") == "watermark_diagnosis" for item in context["bundle"].get("skill_injections", [])),
         "skill_event_written": context["skill_event_count"] == 1
         and "watermark_diagnosis" in (skill_event_payload.get("skills") or []),
         "skill_event_contract": context["event_contract"].get("skills") == ["watermark_diagnosis"],
+        "skill_event_governance_fields": skill_event_payload.get("selection_scores", {}).get("watermark_diagnosis", 0) >= 2.0
+        and skill_event_payload.get("injected", {}).get("watermark_diagnosis") is True
+        and isinstance(skill_event_payload.get("missing_capabilities_by_skill"), dict),
         "api_lists_skills": skills_resp.status_code == 200
         and any(item.get("name") == "watermark_diagnosis" for item in skills_payload.get("skills", [])),
         "api_preview_matches": preview_resp.status_code == 200

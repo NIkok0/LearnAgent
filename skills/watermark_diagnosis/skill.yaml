@@ -7,6 +7,8 @@ triggers:
     - job
     - 水印
     - 排查
+    - 故障
+    - 任务卡住
   routes:
     - knowledge
     - read_api

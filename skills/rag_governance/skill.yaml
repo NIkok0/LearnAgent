@@ -7,6 +7,8 @@ triggers:
     - deletion proof
     - 删除证明
     - 文档治理
+    - 审计
+    - 知识库
   routes:
     - knowledge
 instructions: >
