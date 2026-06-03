@@ -1,0 +1,29 @@
+name: capability_probe
+description: LearnAgent capability self-check skill for validating skill selection, tool hints, and capability gating.
+triggers:
+  keywords:
+    - capability test
+    - capability probe
+    - skill test
+    - 能力测试
+    - 技能测试
+    - 能力自检
+    - 工具自检
+  routes:
+    - knowledge
+    - troubleshooting
+instructions: |
+  Use this skill only for LearnAgent capability self-check or debugging tasks.
+  Summarize which capability is being tested before suggesting tool usage.
+  Prefer read-only checks first. If documentation is needed, use search_docs.
+  If live service status is requested, recommend a controlled read-only HTTP check through http_get.
+  Do not claim that a capability is available unless the current run context exposes it.
+  Do not request high-risk actions, credential changes, deployment, deletion, or write-side effects.
+tool_allowlist:
+  - search_docs
+  - http_get
+required_capabilities:
+  - rag
+  - http
+docs_dir: docs
+risk_level: low
