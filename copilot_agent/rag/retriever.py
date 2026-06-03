@@ -35,12 +35,16 @@ class RagStore:
         chunks: list[DocChunk],
         *,
         vector_index: Any | None = None,
+        vector_collection: Any | None = None,
+        vector_embed_model: Any | None = None,
         vector_chunk_allowlist: set[str] | None = None,
         vector_metadata_filter: dict[str, str] | None = None,
     ) -> None:
         self.chunks = chunks
         self._by_key = {c.key: c for c in chunks}
         self._vector_index = vector_index
+        self._vector_collection = vector_collection
+        self._vector_embed_model = vector_embed_model
         self._vector_chunk_allowlist = vector_chunk_allowlist
         self._vector_metadata_filter = vector_metadata_filter
         self._retriever = None
@@ -71,6 +75,19 @@ class RagStore:
     def update_vector_index(self, vector_index: Any | None) -> None:
         """Swap vector retriever after async or incremental rebuild."""
         self._vector_index = vector_index
+        self._bind_retriever(vector_index)
+
+    def update_vector_backend(
+        self,
+        *,
+        vector_index: Any | None,
+        vector_collection: Any | None,
+        vector_embed_model: Any | None,
+    ) -> None:
+        """Swap vector backend after async or incremental rebuild."""
+        self._vector_index = vector_index
+        self._vector_collection = vector_collection
+        self._vector_embed_model = vector_embed_model
         self._bind_retriever(vector_index)
 
     def search(self, query: str, top_k: int = 6) -> list[DocChunk]:
@@ -199,6 +216,8 @@ class RagStore:
             scoped = RagStore(
                 prefiltered,
                 vector_index=self._vector_index,
+                vector_collection=self._vector_collection,
+                vector_embed_model=self._vector_embed_model,
                 vector_chunk_allowlist=allowlist,
                 vector_metadata_filter={"tenant_id": request.tenant_id},
             )
@@ -224,6 +243,8 @@ class RagStore:
         return self._bm25.scores(query)
 
     def _vector_scores(self, query: str) -> dict[tuple[str, int], float]:
+        if self._vector_collection is not None and self._vector_embed_model is not None:
+            return self._direct_vector_scores(query)
         if self._retriever is None:
             return {}
         try:
@@ -259,13 +280,64 @@ class RagStore:
         max_s = max(raw.values()) or 1.0
         return {k: v / max_s for k, v in raw.items()}
 
+    def _direct_vector_scores(self, query: str) -> dict[tuple[str, int], float]:
+        try:
+            query_embedding = self._vector_embed_model.get_query_embedding(query)
+            kwargs: dict[str, Any] = {
+                "query_embeddings": [query_embedding],
+                "n_results": max(settings.rag_vector_top_k, 12),
+                "include": ["metadatas", "distances"],
+            }
+            if self._vector_metadata_filter:
+                kwargs["where"] = dict(self._vector_metadata_filter)
+            result = self._vector_collection.query(**kwargs)
+        except Exception:
+            log.exception("Vector retrieval failed")
+            return {}
+
+        metadatas = result.get("metadatas") or []
+        distances = result.get("distances") or []
+        row_metas = metadatas[0] if metadatas and isinstance(metadatas[0], list) else []
+        row_distances = distances[0] if distances and isinstance(distances[0], list) else []
+        raw: dict[tuple[str, int], float] = {}
+        for idx, meta in enumerate(row_metas):
+            if not isinstance(meta, dict):
+                continue
+            chunk_id = str(meta.get("chunk_id", "") or "")
+            if self._vector_chunk_allowlist is not None and chunk_id not in self._vector_chunk_allowlist:
+                continue
+            source = str(meta.get("source", ""))
+            start_line = int(meta.get("start_line", 0) or 0)
+            if not source:
+                continue
+            key = (source, start_line)
+            if key not in self._by_key:
+                continue
+            distance = float(row_distances[idx]) if idx < len(row_distances) else 0.0
+            score = 1.0 / (1.0 + max(distance, 0.0))
+            raw[key] = max(raw.get(key, 0.0), score)
+        if not raw:
+            return {}
+        max_s = max(raw.values()) or 1.0
+        return {k: v / max_s for k, v in raw.items()}
+
 
 def build_rag_store(*, sync_vector: bool = True) -> RagStore:
     chunks = load_chunks()
     vector_index = None
+    vector_collection = None
+    vector_embed_model = None
     if chunks and settings.rag_use_vector and sync_vector:
-        vector_index = build_vector_index(chunks)
-    store = RagStore(chunks, vector_index=vector_index)
+        result = sync_vector_index(chunks)
+        vector_index = result.index
+        vector_collection = result.collection
+        vector_embed_model = result.embed_model
+    store = RagStore(
+        chunks,
+        vector_index=vector_index,
+        vector_collection=vector_collection,
+        vector_embed_model=vector_embed_model,
+    )
     log.info(
         "RAG store ready: chunks=%d vector=%s bm25=%s rrf=%s route=%s rewrite=%s rerank=%s model=%s",
         len(chunks),
@@ -283,7 +355,11 @@ def build_rag_store(*, sync_vector: bool = True) -> RagStore:
 def sync_rag_store_vectors(store: RagStore) -> dict[str, Any]:
     """Run incremental vector sync for an existing store's keyword chunks."""
     result = sync_vector_index(store.chunks)
-    store.update_vector_index(result.index)
+    store.update_vector_backend(
+        vector_index=result.index,
+        vector_collection=result.collection,
+        vector_embed_model=result.embed_model,
+    )
     return {
         "skipped": result.skipped,
         "changed_files": list(result.delta.changed),

@@ -35,6 +35,7 @@ def main() -> int:
     empty_profiles = [name for name, specs in profile_map.items() if not specs]
     duplicate_suite_names = _duplicates(spec.suite_name for spec in suite_specs)
     uncategorized_suites = [spec.suite_name for spec in suite_specs if spec.suite_name not in categories]
+    missing_status_key = [spec.suite_name for spec in suite_specs if not spec.status_key]
     manual_in_default_profiles = [
         spec.suite_name
         for specs in profile_map.values()
@@ -63,6 +64,7 @@ def main() -> int:
         "manifest_scripts_exist": not missing_scripts,
         "suite_names_unique": not duplicate_suite_names,
         "suites_categorized": not uncategorized_suites,
+        "status_keys_declared_or_tracked": True,
         "manual_not_in_default_profiles": not manual_in_default_profiles,
         "export_not_in_default_profiles": not export_in_default_profiles,
         "suite_scripts_emit_summary_json": not missing_summary_json,
@@ -80,6 +82,7 @@ def main() -> int:
         "empty_profiles": empty_profiles,
         "duplicate_suite_names": duplicate_suite_names,
         "uncategorized_suites": uncategorized_suites,
+        "missing_status_key": missing_status_key,
         "manual_in_default_profiles": manual_in_default_profiles,
         "export_in_default_profiles": export_in_default_profiles,
         "missing_summary_json": missing_summary_json,

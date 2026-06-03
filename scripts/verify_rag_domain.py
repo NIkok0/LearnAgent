@@ -186,9 +186,58 @@ def case_retrieval_scopes() -> dict[str, Any]:
             "rag_group_scopes_present": "group:ops" in merged and "group:security" in merged,
             "user_scope_present": "user:alice" in merged,
             "security_baseline_allowed": any(chunk.source == "SECURITY-BASELINE.md" for chunk in detailed.chunks),
-            "embedding_model_from_scenario": settings.rag_embedding_model == "BAAI/bge-small-zh-v1.5",
+            "embedding_model_from_scenario": settings.rag_embedding_model == "BAAI/bge-large-zh-v1.5",
         },
         "allowed_scopes": list(request.allowed_scopes),
+    }
+
+
+def case_vector_chroma_filter() -> dict[str, Any]:
+    chunk = DocChunk(
+        source="vector.md",
+        start_line=7,
+        text="vector query content",
+        chunk_id="vector-chunk",
+        tenant_id="tenant-a",
+    )
+
+    class _Embed:
+        def get_query_embedding(self, query: str) -> list[float]:
+            return [0.1, 0.2, 0.3]
+
+    class _Collection:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def query(self, **kwargs: Any) -> dict[str, Any]:
+            self.calls.append(kwargs)
+            return {
+                "metadatas": [[{"source": chunk.source, "start_line": chunk.start_line, "chunk_id": chunk.chunk_id}]],
+                "distances": [[0.2]],
+            }
+
+    no_filter_collection = _Collection()
+    filtered_collection = _Collection()
+    no_filter_store = RagStore(
+        [chunk],
+        vector_collection=no_filter_collection,
+        vector_embed_model=_Embed(),
+    )
+    filtered_store = RagStore(
+        [chunk],
+        vector_collection=filtered_collection,
+        vector_embed_model=_Embed(),
+        vector_metadata_filter={"tenant_id": "tenant-a"},
+    )
+    no_filter_scores = no_filter_store._vector_scores("vector query")
+    filtered_scores = filtered_store._vector_scores("vector query")
+    return {
+        "checks": {
+            "no_filter_scores": chunk.key in no_filter_scores,
+            "no_filter_omits_empty_where": "where" not in no_filter_collection.calls[0],
+            "metadata_filter_scores": chunk.key in filtered_scores,
+            "metadata_filter_passes_where": filtered_collection.calls[0].get("where") == {"tenant_id": "tenant-a"},
+        }
     }
 
 
@@ -251,6 +300,7 @@ CASES: dict[str, Callable[[], dict[str, Any]]] = {
     "api_ingest": case_api_ingest,
     "doc_security_ingest": case_doc_security_ingest,
     "retrieval_scopes": case_retrieval_scopes,
+    "vector_chroma_filter": case_vector_chroma_filter,
     "retrieval_quality": case_retrieval_quality,
 }
 

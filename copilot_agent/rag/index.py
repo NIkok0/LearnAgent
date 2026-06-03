@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from copilot_agent.rag.docs_manifest import load_docs_manifest
@@ -26,6 +27,8 @@ log = logging.getLogger(__name__)
 class VectorSyncResult:
     index: Any | None
     delta: ManifestDelta
+    collection: Any | None = None
+    embed_model: Any | None = None
     upserted_files: list[str] = field(default_factory=list)
     removed_files: list[str] = field(default_factory=list)
     upserted_chunks: int = 0
@@ -59,12 +62,32 @@ def _chunk_metadata(chunk: DocChunk) -> dict[str, str | int]:
 
 
 def _get_embed_model():
-    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-
     from copilot_agent.settings import apply_hf_home
 
-    apply_hf_home(settings.hf_home)
-    return HuggingFaceEmbedding(model_name=settings.rag_embedding_model)
+    hf_home = apply_hf_home(settings.hf_home)
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+    model_name = _resolve_cached_model_path(settings.rag_embedding_model, hf_home=hf_home)
+    return HuggingFaceEmbedding(model_name=model_name, cache_folder=hf_home)
+
+
+def _resolve_cached_model_path(model_name: str, *, hf_home: str) -> str:
+    if "/" not in model_name:
+        return model_name
+    hub_dir = Path(hf_home) / "hub"
+    model_dir = hub_dir / f"models--{model_name.replace('/', '--')}"
+    refs_main = model_dir / "refs" / "main"
+    snapshots_dir = model_dir / "snapshots"
+    if refs_main.is_file():
+        revision = refs_main.read_text(encoding="utf-8").strip()
+        snapshot = snapshots_dir / revision
+        if (snapshot / "config.json").is_file():
+            return str(snapshot)
+    if snapshots_dir.is_dir():
+        for snapshot in sorted(snapshots_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if snapshot.is_dir() and (snapshot / "config.json").is_file():
+                return str(snapshot)
+    return model_name
 
 
 def _load_index_from_collection(collection: Any, embed_model: Any) -> Any:
@@ -163,6 +186,8 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
         return VectorSyncResult(
             index=_load_index_from_collection(collection, embed_model),
             delta=delta,
+            collection=collection,
+            embed_model=embed_model,
             skipped=True,
         )
 
@@ -205,6 +230,8 @@ def sync_vector_index(chunks: list[DocChunk]) -> VectorSyncResult:
     return VectorSyncResult(
         index=_load_index_from_collection(collection, embed_model),
         delta=delta,
+        collection=collection,
+        embed_model=embed_model,
         upserted_files=upserted_files,
         removed_files=list(delta.removed),
         upserted_chunks=upserted_chunks,

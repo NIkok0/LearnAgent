@@ -15,7 +15,7 @@
 |---|---|---|
 | 单一 CI 工作流 | ✅ | `.github/workflows/eval-ci.yml`（已移除 `agent-ci.yml`） |
 | PR 门禁 | ✅ | `--profile core` + `--profile rag` |
-| Nightly | ✅ | `--profile full` + `requirements-vector.txt` + `bge-small-zh-v1.5` |
+| Nightly | ✅ | `--profile full` + `requirements-vector.txt` + `bge-large-zh-v1.5` |
 | 环境 | ✅ | PR：`requirements.txt`；Nightly 追加 `requirements-vector.txt` |
 
 ---
@@ -58,7 +58,7 @@ Nightly `eval_full_nightly` 额外步骤：
 pip install -r requirements-vector.txt
 restore artifacts/eval/rag_metrics/history cache
 preload HuggingFace embedding + rerank models
-env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
   → schedule: verify_eval_suite.py --profile full
   → workflow_dispatch + enable_ragas=true: verify_eval_suite.py --profile full --enable-ragas
   → phase4_ragas_nightly 写入 artifacts/eval/rag_metrics/nightly-latest.json
@@ -168,7 +168,7 @@ python scripts/verify_rag_domain.py --case retrieval_quality
 
 | 套件 | 脚本 | 备注 |
 |---|---|---|
-| `phase4_ragas_nightly` | `verify_phase4_ragas.py` | `--enable-vector` + `bge-small-zh-v1.5` + rerank；L2 context metrics |
+| `phase4_ragas_nightly` | `verify_phase4_ragas.py` | `--enable-vector` + `bge-large-zh-v1.5` + rerank；L2 context metrics |
 | `rag_e2e_ragas` | `verify_rag_e2e_ragas.py` | retrieve→LLM→RAGAS + L4；无 API key 时 SKIP |
 
 产物：

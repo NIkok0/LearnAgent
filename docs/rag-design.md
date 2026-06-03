@@ -44,7 +44,7 @@
 | 检索 → API path / 字段 hints 注入 tool 结果 | ✅ 已实现 | `rag/api_paths.py`，`suggested_api_paths` / `api_field_hints` |
 | Timeline `kind: retrieval` 投影 | ✅ 已实现 | `runtime/timeline.py` |
 | 离线 proxy 检索评测（20 docs case + gold chunk） | ✅ 已实现 | `eval/phase4-eval-cases.json`，`verify_phase4_ragas.py` |
-| PR / Nightly 检索 profile 分离 | ✅ 已实现 | PR：`--disable-vector`；Nightly：`phase4_ragas_nightly` + `bge-small-zh-v1.5` |
+| PR / Nightly 检索 profile 分离 | ✅ 已实现 | PR：`--disable-vector`；Nightly：`phase4_ragas_nightly` + `bge-large-zh-v1.5` |
 | 测试知识库（虚构 Demo 内容） | ✅ 已实现 | `scenarios/watermark/docs/`（Scenario 语料；非 Kernel 源码） |
 | 热更新（watch + `POST /v1/rag/reload`） | ✅ 已实现 | `rag/reload.py`，两阶段 reload |
 | 向量增量 upsert（按文件 manifest） | ✅ 已实现 | `rag/manifest.py`，`sync_vector_index` |
@@ -56,7 +56,7 @@
 | Policy 预过滤 + 向量路径共存 | ✅ 已实现 | `RagStore._vector_chunk_allowlist`；Chroma metadata `tenant_id` / `authority` |
 | Scenario `default_tenant_id` → runner / preretrieval | ✅ 已实现 | `scenario/schema.py`，`request_context.py`，`runner.py` |
 | Credential + `rag_allowed_scopes` → `allowed_scopes` | ✅ 已实现 | `merge_retrieval_scopes()`；`watermark.yaml` `group:ops/security` |
-| Scenario `rag_embedding_model`（中文向量默认） | ✅ 已实现 | `bootstrap._apply_rag_runtime_settings`；`BAAI/bge-small-zh-v1.5` |
+| Scenario `rag_embedding_model`（中文向量默认） | ✅ 已实现 | `bootstrap._apply_rag_runtime_settings`；`BAAI/bge-large-zh-v1.5` |
 | Authority 冲突裁决（boost + heading dedup） | ✅ 已实现 | `fusion.apply_authority_boost`，`dedup_chunks` 保留最高 authority |
 | RAGAS 作为 PR 硬门禁 | ❌ 未实现 | Nightly E2E RAGAS ✅；PR 仍 proxy-only |
 | L7 结构化 citations（`SearchDocsToolData.citations`） | ✅ 已实现 | `tool_data.CitationItem`，`rag/citations.py`，`tool_handlers` |
@@ -404,7 +404,7 @@ pool_k = max(top_k * MULTIPLIER, RAG_RERANK_CANDIDATES)  # rerank 开时
 | 项 | 实现 |
 |----|------|
 | Embedding | `HuggingFaceEmbedding(model_name=settings.rag_embedding_model)` |
-| 默认模型 | Settings 默认 `BAAI/bge-small-en-v1.5`；**active Scenario** 可覆盖（watermark → `BAAI/bge-small-zh-v1.5`，见 `config/watermark.yaml` + `bootstrap._apply_rag_runtime_settings`） |
+| 默认模型 | Settings 默认 `BAAI/bge-small-en-v1.5`；**active Scenario** 可覆盖（watermark → `BAAI/bge-large-zh-v1.5`，见 `config/watermark.yaml` + `bootstrap._apply_rag_runtime_settings`） |
 | 存储 | `storage/chroma`（或 `RAG_CHROMA_PATH`）集合 `wm_docs` |
 | 增量 sync | `sync_vector_index()` + `rag_manifest.json`：仅 changed/removed 文件 upsert/delete（§7） |
 | 全量重建 | `RAG_REBUILD_INDEX=true`；embedding 模型变更时也会自动清空重建 |
@@ -593,7 +593,7 @@ python scripts/verify_rag_rerank.py
 | `COPILOT_DOCS_PATH` | — | 覆盖文档根目录 |
 | `RAG_USE_VECTOR` / `rag_use_vector` | `false` | 是否构建 Chroma 向量索引 |
 | `RAG_REBUILD_INDEX` / `rag_rebuild_index` | `false` | 强制重建向量集合 |
-| `RAG_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace 嵌入模型；active Scenario 可覆盖（如 watermark → `bge-small-zh-v1.5`） |
+| `RAG_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | HuggingFace 嵌入模型；active Scenario 可覆盖（如 watermark → `bge-large-zh-v1.5`） |
 | `RAG_CHROMA_PATH` | `storage/chroma` | Chroma 持久化目录 |
 | `RAG_KEYWORD_WEIGHT` | `0.5` | RRF/线性融合中 keyword 路权重 |
 | `RAG_VECTOR_WEIGHT` | `0.5` | RRF/线性融合中 vector 路权重 |
@@ -747,7 +747,7 @@ Wave1 已完成项见 **§0**。路线图索引：[agent-learning-guide §7](./a
 
 1. ~~**动态 top-k** — 按 context 预算截断（§5.8）。~~ ✅ Wave1
 2. **LLM 查询改写** — 替代/补充规则表。
-3. ~~**向量 Nightly profile + 中文 embedding**~~ ✅ Wave A（PR 仍 `--disable-vector`；Nightly `BAAI/bge-small-zh-v1.5` + rerank）
+3. ~~**向量 Nightly profile + 中文 embedding**~~ ✅ Wave A（PR 仍 `--disable-vector`；Nightly `BAAI/bge-large-zh-v1.5` + rerank）
 
 ### 11.3 Tool-grounded 编排
 

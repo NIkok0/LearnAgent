@@ -27,7 +27,7 @@ from scripts.verify_eval_suite import (  # noqa: E402
     _write_nightly_timeout_artifact,
 )
 from scripts.verify_manifest import profiles  # noqa: E402
-from scripts.verify_phase4_ragas import _build_proxy_records, _skip_summary  # noqa: E402
+from scripts.verify_phase4_ragas import _apply_vector_mode, _skip_summary  # noqa: E402
 
 
 def _simulate_timeout_branch(exc: subprocess.TimeoutExpired, *, suite_timeout_seconds: int) -> dict[str, object]:
@@ -108,8 +108,8 @@ def main() -> int:
         and not non_phase4_changed,
         "nightly_suite_writes_metrics": "--write-rag-metrics" in nightly_args
         and "artifacts/eval/rag_metrics/nightly-latest.json" in nightly_args,
-        "timeout_pass_no_type_error": timeout_pass["status"] == "PASS"
-        and "timeout_after_pass_signal" in timeout_pass["errors"],
+        "timeout_pass_signal_still_fails": timeout_pass["status"] == "FAIL"
+        and "timeout_after_pass_signal" not in timeout_pass["errors"],
         "timeout_fail_no_type_error": timeout_fail["status"] == "FAIL"
         and timeout_fail["errors"] == ["timeout_after_seconds=5"],
         "silent_timeout_fails": timeout_silent["status"] == "FAIL"
@@ -268,7 +268,7 @@ def _verify_disable_vector_disables_rerank() -> dict[str, bool]:
     try:
         os.environ["RAG_USE_VECTOR"] = "true"
         os.environ["RAG_RERANK_ENABLED"] = "true"
-        _build_proxy_records([], top_k=1, disable_vector=True)
+        _apply_vector_mode(disable_vector=True)
         return {
             "disable_vector_sets_vector_false": settings.rag_use_vector is False
             and os.environ.get("RAG_USE_VECTOR") == "false",

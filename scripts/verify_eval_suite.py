@@ -21,6 +21,7 @@ from scripts.verify_manifest import (
     CONTRACT_SUITES,
     PROFILE_BUDGET_MS,
     SLOW_SUITE_WARNING_MS,
+    SuiteSpec,
     profile_names,
     profiles,
 )
@@ -138,21 +139,70 @@ def _load_summary_payload(summary_json: str | None) -> dict[str, Any]:
 
 
 def _suite_status(return_code: int, kv: dict[str, str]) -> str:
+    status, _source = _suite_status_with_source(return_code, kv, summary_payload={}, spec=None)
+    return status
+
+
+def _suite_status_with_source(
+    return_code: int,
+    kv: dict[str, str],
+    *,
+    summary_payload: dict[str, Any],
+    spec: SuiteSpec | None,
+) -> tuple[str, str]:
     if return_code != 0:
-        return "FAIL"
+        return "FAIL", "exit_code"
+
+    for key in _status_candidate_keys(spec):
+        status = _status_from_value(summary_payload.get(key))
+        if status:
+            return status, f"summary_json:{key}"
+    for key in ("status",):
+        status = _status_from_value(summary_payload.get(key))
+        if status:
+            return status, f"summary_json:{key}"
+
+    for key in _status_candidate_keys(spec):
+        status = _status_from_value(kv.get(key))
+        if status:
+            return status, f"stdout:{key}"
+
     pass_like = _suite_signal_values(kv)
     if not pass_like:
-        return "PASS"
+        return "PASS", "no_status_signal_exit_zero"
     if any(str(item).strip().lower() == "skip" for item in pass_like):
-        return "SKIP"
+        return "SKIP", "fallback_stdout_heuristic"
     states = [_to_bool(item) for item in pass_like]
-    return "PASS" if all(state is not False for state in states) else "FAIL"
+    return ("PASS" if all(state is not False for state in states) else "FAIL"), "fallback_stdout_heuristic"
 
 
 def _timeout_suite_status(kv: dict[str, str]) -> str:
-    if not _suite_signal_values(kv):
+    _ = kv
+    return "FAIL"
+
+
+def _status_candidate_keys(spec: SuiteSpec | None) -> list[str]:
+    if spec is None:
+        return []
+    keys: list[str] = []
+    if spec.status_key:
+        keys.append(spec.status_key)
+    keys.append(spec.suite_name)
+    return list(dict.fromkeys(keys))
+
+
+def _status_from_value(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if text in {"PASS", "FAIL", "SKIP"}:
+        return text
+    bool_value = _to_bool(str(value))
+    if bool_value is True:
+        return "PASS"
+    if bool_value is False:
         return "FAIL"
-    return _suite_status(0, kv)
+    return None
 
 
 def _proxy_summary_passed(summary: dict[str, Any]) -> bool:
@@ -251,7 +301,7 @@ def main() -> int:
         if spec.suite_name == "phase4_ragas_nightly":
             env["RAG_USE_VECTOR"] = "true"
             env["RAG_RERANK_ENABLED"] = "true"
-            env["RAG_EMBEDDING_MODEL"] = "BAAI/bge-small-zh-v1.5"
+            env["RAG_EMBEDDING_MODEL"] = "BAAI/bge-large-zh-v1.5"
         if spec.rag_related:
             env.setdefault("SCENARIO", "watermark")
         try:
@@ -271,7 +321,13 @@ def main() -> int:
             kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
-            status = _suite_status(proc.returncode, kv)
+            summary_payload = _load_summary_payload(summary_json)
+            status, status_source = _suite_status_with_source(
+                proc.returncode,
+                kv,
+                summary_payload=summary_payload,
+                spec=spec,
+            )
             errors: list[str] = []
             if proc.returncode != 0:
                 errors.append(f"exit_code={proc.returncode}")
@@ -283,6 +339,7 @@ def main() -> int:
                     "script": spec.script,
                     "pass": status != "FAIL",
                     "status": status,
+                    "status_source": status_source,
                     "duration_ms": elapsed,
                     "summary_json": summary_json,
                     "checks": checks,
@@ -303,6 +360,7 @@ def main() -> int:
                 )
             kv = _parse_key_values(stdout + ("\n" + stderr if stderr else ""))
             status = _timeout_suite_status(kv)
+            status_source = "timeout"
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
             summary_payload = _load_summary_payload(summary_json)
@@ -310,19 +368,15 @@ def main() -> int:
             err = stderr.splitlines()[-12:]
             timeout_error = f"timeout_after_seconds={args.suite_timeout_seconds}"
             errors = [timeout_error]
-            # Some verify scripts may complete logic and print PASS, but keep process open
-            # due to lingering async resources. In that case, treat suite as pass with warning.
-            if status in {"PASS", "SKIP"}:
-                errors.append(f"timeout_after_{status.lower()}_signal")
-            elif spec.suite_name == "phase4_ragas" and _proxy_summary_passed(summary_payload):
-                status = "PASS"
-                errors.append("timeout_after_proxy_summary_pass")
+            if spec.suite_name == "phase4_ragas" and _proxy_summary_passed(summary_payload):
+                errors.append("timeout_after_proxy_summary_pass_ignored")
             results.append(
                 {
                     "suite_name": spec.suite_name,
                     "script": spec.script,
                     "pass": status != "FAIL",
                     "status": status,
+                    "status_source": status_source,
                     "duration_ms": elapsed,
                     "summary_json": summary_json,
                     "checks": checks,

@@ -80,28 +80,9 @@ def _chunk_mrr(retrieved_keys: list[tuple[str, int]], gold_keys: list[tuple[str,
 def _build_proxy_records(
     cases: list[dict[str, Any]], top_k: int, *, disable_vector: bool
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if disable_vector:
-        os.environ["RAG_USE_VECTOR"] = "false"
-        os.environ["RAG_RERANK_ENABLED"] = "false"
-    else:
-        os.environ["RAG_USE_VECTOR"] = "true"
+    settings = _apply_vector_mode(disable_vector=disable_vector)
 
     from copilot_agent.rag import build_rag_store  # noqa: WPS433
-    from copilot_agent.settings import settings  # noqa: WPS433
-
-    settings.rag_use_vector = os.environ.get("RAG_USE_VECTOR", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    settings.rag_rerank_enabled = os.environ.get("RAG_RERANK_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    embedding_model = os.environ.get("RAG_EMBEDDING_MODEL", "").strip()
-    if embedding_model:
-        settings.rag_embedding_model = embedding_model
 
     store = build_rag_store()
     records: list[dict[str, Any]] = []
@@ -213,6 +194,31 @@ def _build_proxy_records(
         )
 
     return records, metrics
+
+
+def _apply_vector_mode(*, disable_vector: bool) -> Any:
+    if disable_vector:
+        os.environ["RAG_USE_VECTOR"] = "false"
+        os.environ["RAG_RERANK_ENABLED"] = "false"
+    else:
+        os.environ["RAG_USE_VECTOR"] = "true"
+
+    from copilot_agent.settings import settings  # noqa: WPS433
+
+    settings.rag_use_vector = os.environ.get("RAG_USE_VECTOR", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    settings.rag_rerank_enabled = os.environ.get("RAG_RERANK_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    embedding_model = os.environ.get("RAG_EMBEDDING_MODEL", "").strip()
+    if embedding_model:
+        settings.rag_embedding_model = embedding_model
+    return settings
 
 
 def _proxy_records_worker(cases: list[dict[str, Any]], top_k: int, disable_vector: bool, conn: Any) -> None:
@@ -398,41 +404,6 @@ def _proxy_pass(proxy_metrics: dict[str, Any], *, docs_cases: int) -> bool:
         if proxy_metrics["must_not_violation_rate"] > 0.0:
             return False
     return True
-
-
-def _write_rag_metrics(
-    path: Path,
-    *,
-    proxy_metrics: dict[str, Any],
-    profile: str,
-    status: str = "PASS",
-    stage: str = "completed",
-    skip_reason: str = "",
-    preconditions: dict[str, Any] | None = None,
-    errors: list[str] | None = None,
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "profile": profile,
-        "status": status,
-        "stage": stage,
-        "skip_reason": skip_reason,
-        "embedding_model": proxy_metrics.get("embedding_model", "n/a"),
-        "vector_enabled": proxy_metrics.get("vector_enabled", False),
-        "rerank_enabled": proxy_metrics.get("rerank_enabled", False),
-        "proxy_metrics": proxy_metrics,
-        "preconditions": preconditions or {},
-        "errors": errors or [],
-    }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    if status == "SKIP":
-        return
-    history_dir = path.parent / "history"
-    history_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    history_path = history_dir / f"{profile}-{stamp}.json"
-    history_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _rag_metrics_payload(
@@ -650,15 +621,17 @@ def _skip_summary(
     }
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     if write_rag_metrics is not None:
-        _write_rag_metrics(
+        _write_rag_metrics_payload(
             write_rag_metrics,
-            proxy_metrics=metrics,
-            profile=metrics_profile,
-            status="SKIP",
-            stage="completed",
-            skip_reason=reason,
-            preconditions=precondition,
-            errors=errors or [],
+            _rag_metrics_payload(
+                proxy_metrics=metrics,
+                profile=metrics_profile,
+                status="SKIP",
+                stage="completed",
+                skip_reason=reason,
+                preconditions=precondition,
+                errors=errors or [],
+            ),
         )
     print(f"dataset_path={summary['dataset_path']}")
     print(f"eval_mode={summary['eval_mode']}")

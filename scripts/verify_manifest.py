@@ -12,6 +12,7 @@ class SuiteSpec:
     script: str
     args: tuple[str, ...] = ()
     rag_related: bool = False
+    status_key: str | None = None
 
 
 PROFILE_BUDGET_MS = {
@@ -453,10 +454,11 @@ def profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
             script=spec.script,
             args=_rag_suite_args(spec, enable_ragas=enable_ragas),
             rag_related=spec.rag_related,
+            status_key=spec.status_key,
         )
         for spec in RAG_SUITES
     )
-    return {
+    return _with_default_status_keys({
         "core-fast": CORE_FAST_SUITES,
         "core": CORE_SUITES,
         "infra": (
@@ -503,13 +505,88 @@ def profiles(enable_ragas: bool) -> dict[str, tuple[SuiteSpec, ...]]:
         "rag": rag,
         "e2e": E2E_SUITES,
         "full": CORE_SUITES + rag + RAG_NIGHTLY_SUITES + E2E_SUITES,
-    }
+    })
 
 
 def _rag_suite_args(spec: SuiteSpec, *, enable_ragas: bool) -> tuple[str, ...]:
     if not enable_ragas or spec.suite_name != "phase4_ragas":
         return spec.args
     return ("--mode", "auto", "--disable-vector", "--allow-missing-docs")
+
+
+def _with_default_status_keys(profiles_map: dict[str, tuple[SuiteSpec, ...]]) -> dict[str, tuple[SuiteSpec, ...]]:
+    return {
+        name: tuple(_with_status_key(spec) for spec in specs)
+        for name, specs in profiles_map.items()
+    }
+
+
+def _with_status_key(spec: SuiteSpec) -> SuiteSpec:
+    if spec.status_key:
+        return spec
+    return SuiteSpec(
+        suite_name=spec.suite_name,
+        script=spec.script,
+        args=spec.args,
+        rag_related=spec.rag_related,
+        status_key=_default_status_key(spec.suite_name),
+    )
+
+
+def _default_status_key(suite_name: str) -> str | None:
+    if suite_name.endswith("_domain"):
+        return suite_name
+    explicit = {
+        "checkpoint_consistency_v2": "checkpoint_consistency_v2",
+        "citation_l4": "citation_l4",
+        "context_manager": "verify_context_manager",
+        "contract_events": "contract_events",
+        "demo_golden_e2e": "demo_golden_e2e",
+        "diagnosis_template": "diagnosis_template",
+        "eval_cases_contract": "eval_cases_contract",
+        "eval_suite_timeout_v1": "eval_suite_timeout_v1",
+        "events_validated": "events_validated",
+        "extract_validate": "extract_validate",
+        "final_answer_l7": "final_answer_l7",
+        "golden_scenarios": "golden_scenarios",
+        "hitl_checkpoint_resume": "hitl_checkpoint_resume",
+        "memory_checkpoint_consistency": "memory_checkpoint_consistency",
+        "memory_context_preview_api": "memory_context_preview_api",
+        "memory_production_v1": "memory_production_v1",
+        "memory_production_v2": "memory_production_v2",
+        "memory_schema": "memory_schema",
+        "mcp_capability": "mcp_capability",
+        "phase3_checkpoint": "phase3_step4",
+        "phase3_safety_gate": "phase3_safety_gate",
+        "phase4_dataset": "phase4_dataset",
+        "phase4_ragas": "phase4_ragas",
+        "phase4_ragas_nightly": "phase4_ragas",
+        "phase4_tool_trajectory": "phase4_tool_trajectory",
+        "plan_module": "plan_module",
+        "policy_aware_rag_v1": "policy_aware_rag_v1",
+        "policy_credentials": "verify_policy_credentials",
+        "policy_decision_audit_v1": "policy_decision_audit_v1",
+        "policy_docs_contract": "policy_docs_contract",
+        "private_rag_context_guard_v1": "private_rag_context_guard_v1",
+        "private_rag_output_guard_v1": "private_rag_output_guard_v1",
+        "rag_document_lifecycle_v1": "rag_document_lifecycle_v1",
+        "rag_e2e_ragas": "rag_e2e_ragas",
+        "rag_hot_reload": "rag_hot_reload",
+        "rag_rerank": "verify_rag_rerank",
+        "retrieval_gate_v1": "retrieval_gate_v1",
+        "runtime_checkpoint_link": "runtime_checkpoint_link",
+        "scenario_loader": "scenario_loader",
+        "scripts_manifest": "verify_scripts_manifest",
+        "session_mvp": "session_mvp",
+        "skills_v1": "skills_v1",
+        "thread_archive_api": "thread_archive_api",
+        "thread_lifecycle_cleaner": "thread_lifecycle_cleaner",
+        "tool_audit_v1": "tool_audit_v1",
+        "tool_execution_reliability": "tool_execution_reliability",
+        "tool_message_policy": "tool_message_policy",
+        "tool_router": "verify_tool_router",
+    }
+    return explicit.get(suite_name)
 
 
 
