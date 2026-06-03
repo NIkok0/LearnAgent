@@ -148,6 +148,10 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_skills_v1.py",
     ),
     SuiteSpec(
+        suite_name="context_providers_v1",
+        script="scripts/verify_context_providers_v1.py",
+    ),
+    SuiteSpec(
         suite_name="context_manager",
         script="scripts/verify_context_manager.py",
     ),
@@ -540,6 +544,7 @@ def _default_status_key(suite_name: str) -> str | None:
         "checkpoint_consistency_v2": "checkpoint_consistency_v2",
         "citation_l4": "citation_l4",
         "context_manager": "verify_context_manager",
+        "context_providers_v1": "verify_context_providers_v1",
         "contract_events": "contract_events",
         "demo_golden_e2e": "demo_golden_e2e",
         "diagnosis_template": "diagnosis_template",

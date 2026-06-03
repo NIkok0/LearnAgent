@@ -381,12 +381,43 @@ class TimelineProjector:
                     )
                 continue
 
-            if event_type in {"assistant_state", "context_built"}:
-                title = "Context assembled" if event_type == "context_built" else event_type
+            if event_type == "context_built":
+                retrieval_decision = (
+                    payload.get("retrieval_decision")
+                    if isinstance(payload.get("retrieval_decision"), dict)
+                    else {}
+                )
+                block_sources = [
+                    str(source)
+                    for source in (payload.get("context_block_sources") or [])
+                    if str(source or "").strip()
+                ]
+                items.append(
+                    {
+                        "kind": "context",
+                        "title": "Context assembled",
+                        "event_id": event_id,
+                        "created_at": event.get("created_at"),
+                        "assembled_message_count": payload.get("assembled_message_count"),
+                        "used_chars": payload.get("used_chars"),
+                        "budget_max_chars": payload.get("budget_max_chars"),
+                        "truncated": bool(payload.get("truncated")),
+                        "context_block_count": int(payload.get("context_block_count") or 0),
+                        "context_block_sources": block_sources,
+                        "retrieval_action": retrieval_decision.get("action"),
+                        "retrieval_reason": retrieval_decision.get("reason"),
+                        "preretrieval_enabled": bool(payload.get("preretrieval_enabled")),
+                        "memory_inject_chars": payload.get("memory_inject_chars"),
+                        "payload": payload,
+                    }
+                )
+                continue
+
+            if event_type == "assistant_state":
                 items.append(
                     {
                         "kind": event_type,
-                        "title": title,
+                        "title": event_type,
                         "event_id": event_id,
                         "created_at": event.get("created_at"),
                         "payload": payload,

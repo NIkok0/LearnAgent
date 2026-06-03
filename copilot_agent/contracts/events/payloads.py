@@ -150,6 +150,8 @@ class ContextBuiltPayload(BaseModel):
     checkpoint_compacted: bool = False
     checkpoint_chars: int = 0
     retrieval_decision: dict[str, Any] | None = None
+    context_block_count: int = 0
+    context_block_sources: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 

@@ -90,6 +90,35 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             },
         },
     )
+    _append(
+        store,
+        completed_thread,
+        completed_run_id,
+        "context_built",
+        {
+            "assembled_message_count": 4,
+            "budget_max_chars": 4096,
+            "used_chars": 512,
+            "truncated": False,
+            "router_injected": True,
+            "preretrieval_enabled": True,
+            "preretrieval_sources": ["RUNBOOK.md"],
+            "memory_inject_chars": 80,
+            "context_block_count": 6,
+            "context_block_sources": [
+                "system_prompt",
+                "route",
+                "memory:episodic",
+                "skill",
+                "retrieval",
+                "budget_packer",
+            ],
+            "retrieval_decision": {
+                "action": "retrieve",
+                "reason": "docs_or_troubleshooting_intent",
+            },
+        },
+    )
     _append(store, completed_thread, completed_run_id, "token", {"text": "hello "})
     _append(store, completed_thread, completed_run_id, "token", {"text": "world"})
     _append(
@@ -257,6 +286,7 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
     completed_tool = next((item for item in completed_timeline["items"] if item["kind"] == "tool_call"), {})
     completed_retrieval = next((item for item in completed_timeline["items"] if item["kind"] == "retrieval"), {})
     completed_plan = next((item for item in completed_timeline["items"] if item["kind"] == "plan"), {})
+    completed_context = next((item for item in completed_timeline["items"] if item["kind"] == "context"), {})
     completed_final = next((item for item in completed_timeline["items"] if item["kind"] == "final_answer"), {})
     completed_guard = next((item for item in completed_timeline["items"] if item["kind"] == "output_guard"), {})
     approval_item = next((item for item in approval_timeline["items"] if item["kind"] == "approval"), {})
@@ -273,6 +303,10 @@ def verify(event_store_path: Path, thread_prefix: str) -> dict[str, Any]:
             "retrieval_source_count": completed_retrieval.get("source_count"),
             "retrieval_call_id": completed_retrieval.get("call_id"),
             "retrieval_call_id_linked": completed_retrieval.get("call_id") == completed_tool.get("call_id"),
+            "context_present": "context" in completed_kinds,
+            "context_block_count": completed_context.get("context_block_count"),
+            "context_block_sources": completed_context.get("context_block_sources") or [],
+            "context_retrieval_action": completed_context.get("retrieval_action"),
             "tool_merged": completed_tool.get("start_event_id") is not None and completed_tool.get("end_event_id") is not None,
             "tool_success": completed_tool.get("success"),
             "plan_step_count": len(completed_plan.get("steps") or []),
@@ -352,6 +386,11 @@ def main() -> int:
         and summary["completed"]["retrieval_source_count"] == 1
         and summary["completed"]["retrieval_call_id"] == "tool-1"
         and summary["completed"]["retrieval_call_id_linked"] is True
+        and summary["completed"]["context_present"] is True
+        and summary["completed"]["context_block_count"] == 6
+        and "retrieval" in summary["completed"]["context_block_sources"]
+        and "budget_packer" in summary["completed"]["context_block_sources"]
+        and summary["completed"]["context_retrieval_action"] == "retrieve"
         and summary["completed"]["tool_merged"]
         and summary["completed"]["tool_success"] is True
         and summary["completed"]["plan_step_count"] == 1
