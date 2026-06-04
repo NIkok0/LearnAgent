@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,14 +89,26 @@ def verify() -> dict[str, bool | int | list[str]]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify v2 ContextBlock provider trace construction.")
+    parser.add_argument(
+        "--summary-json",
+        default=str(ROOT / "artifacts/runtime/context-providers-v1-summary.json"),
+        help="Path to write structured verification summary JSON.",
+    )
+    args = parser.parse_args()
     checks = verify()
     passed = all(value is True for value in checks.values() if isinstance(value, bool))
     summary = {
         "suite_name": "context_providers_v1",
         "status": "PASS" if passed else "FAIL",
         "checks": checks,
+        "verify_context_providers_v1": "PASS" if passed else "FAIL",
     }
+    summary_path = Path(args.summary_json).resolve()
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(f"summary_json={summary_path}")
     print(f"verify_context_providers_v1={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
 

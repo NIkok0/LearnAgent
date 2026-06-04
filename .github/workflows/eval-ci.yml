@@ -156,16 +156,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-rag-models-${{ runner.os }}-bge-small-zh-v1.5-bge-reranker-base
+          key: hf-rag-models-${{ runner.os }}-bge-large-zh-v1.5-bge-reranker-base
           restore-keys: |
             hf-rag-models-${{ runner.os }}-
 
       - name: Preload nightly RAG models
+        continue-on-error: true
         run: |
           python - <<'PY'
           from sentence_transformers import CrossEncoder, SentenceTransformer
 
-          SentenceTransformer("BAAI/bge-small-zh-v1.5")
+          SentenceTransformer("BAAI/bge-large-zh-v1.5")
           CrossEncoder("BAAI/bge-reranker-base")
           PY
 

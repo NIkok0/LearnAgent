@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copilot_agent.context.events import build_context_built_payload
-from copilot_agent.context.manager import ContextManager
 from copilot_agent.context.packing import pack_graph_messages
 from copilot_agent.context.preretrieval import preretrieve_docs, should_preretrieve
 from copilot_agent.context.retrieval_gate import RetrievalDecision, decide_retrieval
@@ -17,3 +16,11 @@ __all__ = [
     "decide_retrieval",
     "should_preretrieve",
 ]
+
+
+def __getattr__(name: str):
+    if name == "ContextManager":
+        from copilot_agent.context.manager import ContextManager
+
+        return ContextManager
+    raise AttributeError(name)
