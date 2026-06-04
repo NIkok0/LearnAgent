@@ -1,11 +1,11 @@
-﻿# LearnAgent CI 设计
+# LearnAgent CI 设计
 
-> GitHub Actions 工作流、本地复现命令与失败排查。**套件清单以** `scripts/verify_eval_suite.py` **为准**。  
+> GitHub Actions 工作流、本地复现命令与失败排查。套件清单以 `scripts/verify_manifest.py` 和 `scripts/verify_eval_suite.py` 为准。
 > Eval 分层见 [eval-design.md](./eval-design.md)；模块地图见 [agent-learning-guide.md](./agent-learning-guide.md)。
 
-**本文负责**：CI workflow、profile 到 job 的映射、本地复现命令、脚本治理规则。  
-**本文不负责**：评测指标语义、模块业务设计、单个 verifier 断言细节。  
-**权威来源**：套件枚举以 `scripts/verify_eval_suite.py` 为准；评测分层见 [eval-design.md](./eval-design.md)。
+**本文负责**：CI workflow、profile 到 job 的映射、本地复现命令、脚本治理规则。
+**本文不负责**：评测指标语义、模块业务设计、单个 verifier 断言细节。
+**权威来源/相关文档**：套件枚举以 `scripts/verify_manifest.py` 为准；聚合语义以 `scripts/verify_eval_suite.py` 为准。
 
 ---
 
@@ -13,236 +13,136 @@
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 单一 CI 工作流 | ✅ | `.github/workflows/eval-ci.yml`（已移除 `agent-ci.yml`） |
-| PR 门禁 | ✅ | `--profile core` + `--profile rag` |
-| Nightly | ✅ | `--profile full` + `requirements-vector.txt` + `bge-large-zh-v1.5` |
-| 环境 | ✅ | PR：`requirements.txt`；Nightly 追加 `requirements-vector.txt` |
+| 单一 CI 工作流 | ✅ | `.github/workflows/eval-ci.yml` |
+| PR 门禁 | ✅ | 只跑 `--profile core-fast` |
+| RAG proxy | ✅ | 独立 `rag` profile，本地或手动运行 |
+| Nightly | ✅ | `full` + vector/rerank/RAGAS/E2E 趋势 |
+| Live / API | ✅ | manual only，不影响 PR |
 
 ---
 
-## 1. 工作流一览
+## 1. Profile 边界
 
-| Job | 触发 | 命令 | 产物 |
+| Profile | 职责 | 是否进入 PR | 外部依赖 |
+|---|---|---:|---|
+| `core-fast` | 产品交付硬门禁：契约、脚本治理、policy/credential、retrieval gate、runtime event/timeline 快检 | ✅ | 无真实 LLM、无 HF、无 vector/rerank、无 live API |
+| `core` | 本地/手动扩展 deterministic suite：session、checkpoint、memory、完整 domain | ❌ | 不要求真实 LLM，但允许 LangGraph/FastAPI 等集成依赖 |
+| `rag` | deterministic RAG proxy 与文档安全验证 | ❌ | 强制 `RAG_USE_VECTOR=false`、`RAG_RERANK_ENABLED=false` |
+| `full` | Nightly 长链路：core + rag + 重模型趋势 + e2e | schedule / workflow_dispatch | 可用 vector/rerank/RAGAS，失败必须有 artifact |
+| `manual/live` | 真实 OpenAI/API key、部署、线上接口 | 手动 | 真实外部服务 |
+
+核心原则：PR CI 是交付门禁，不是能力展示。HF、RAGAS、live LLM、vector/rerank、长 E2E 不作为 PR 必过条件。
+
+---
+
+## 2. Workflow 映射
+
+| Job | 触发 | 命令 | Summary |
 |---|---|---|---|
-| `eval_core` | PR / push（非 schedule） | `core` → `rag` | `eval-suite-summary.json` + `eval-rag-summary.json` |
-| `eval_full_nightly` | cron / `workflow_dispatch` | `full` + vector/rerank env | `eval-suite-summary.json` + `rag_metrics/nightly-latest.json` |
+| `eval_core` | `pull_request` / `push` | `python scripts/verify_eval_suite.py --profile core-fast --summary-json artifacts/eval/eval-core-fast-summary.json` | `overall_pass`、`failed_suites`、`failed_cases`、`runtime_contract_breaks`、`duration_ms` |
+| `eval_full_nightly` | `schedule` / `workflow_dispatch` | `python scripts/verify_eval_suite.py --profile full --suite-timeout-seconds 180` | nightly status、stage、reason、metrics path、`rag_regression.reason` |
 
-**合并规则**：PR job 在 core 与 rag 均 `overall_pass=true` 时才算绿。
+Nightly 的 HuggingFace preload 只是 cache warmup，`continue-on-error: true`。正确性由 `phase4_ragas_nightly` 的 preflight、stage timeout 和 `nightly-latest.json` 决定。
 
 ---
 
-## 2. PR Job（eval_core）
+## 3. core-fast 准入
 
-### 2.1 步骤
+`core-fast` 只放稳定、确定、无外部网络、无真实 LLM、无重模型下载的 suite。目标是 30-35 秒内完成。
+
+允许进入：
+
+| 类型 | 示例 |
+|---|---|
+| 纯契约 | `contract_events`、`eval_cases_contract`、`events_validated` |
+| 脚本治理 | `scripts_manifest`、`eval_suite_timeout_v1` |
+| 轻量 runtime | `runtime_domain --case event_store`、`runtime_domain --case timeline` |
+| policy / credential 快检 | `policy_credentials`、`policy_docs_contract` |
+| context/RAG 纯规则 | `context_providers_v1`、`retrieval_gate_v1` |
+
+不允许进入：
+
+| 类型 | 示例 |
+|---|---|
+| 重模型或向量 | Chroma build、sentence-transformers、CrossEncoder、RAGAS |
+| live 依赖 | OpenAI/API key、线上 HTTP、真实 MCP server |
+| 长链路集成 | `session_mvp`、完整 `runtime_domain --case all`、完整 `memory_domain` |
+| 重包入口 | 因 import 副作用加载 `server.py`、真实 RAG store、LLM provider 的纯函数 verifier |
+
+---
+
+## 4. 失败诊断
+
+Domain verifier 必须在 summary 顶层写出：
+
+```json
+{
+  "failed_cases": ["timeline"],
+  "case_status": {"timeline": "FAIL"},
+  "case_reasons": {"timeline": "AssertionError: ..."}
+}
+```
+
+`verify_eval_suite.py` 会把 domain case 提升为第一屏诊断，例如：
 
 ```text
-checkout → pip install -r requirements.txt
-  → verify_eval_suite.py --profile core
-  → verify_eval_suite.py --profile rag --summary-json artifacts/eval/eval-rag-summary.json
-  → Job Summary（合并 core + rag）
+failed_suites=runtime_timeline_gate
+failed_cases=runtime_domain:timeline
+runtime_contract_breaks=runtime_domain:timeline
 ```
 
-### 2.2 Profile 与套件数
+RAG nightly 必须写 `artifacts/eval/rag_metrics/nightly-latest.json`。聚合语义：
 
-| Profile | 套件数 | CI 是否跑 |
-|---|---:|---|
-| `core-fast` | 24 | ❌ 仅本地 |
-| `core` | **33** | ✅ |
-| `rag` | **15** | ✅ |
-| `e2e` | 1 | ❌（在 `full` 中） |
-| `full` | 51 | Nightly |
-
-Nightly `eval_full_nightly` 额外步骤：
-
-```text
-pip install -r requirements-vector.txt
-restore artifacts/eval/rag_metrics/history cache
-preload HuggingFace embedding + rerank models
-env: RAG_USE_VECTOR=true, RAG_RERANK_ENABLED=true, RAG_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
-  → schedule: verify_eval_suite.py --profile full
-  → workflow_dispatch + enable_ragas=true: verify_eval_suite.py --profile full --enable-ragas
-  → phase4_ragas_nightly 写入 artifacts/eval/rag_metrics/nightly-latest.json
-```
-
----
-
-## 3. core profile（33 套件）
-
-### 3.1 Contract + K/C/S（14）
-
-| 套件 | 脚本 | 验证点 |
-|---|---|---|
-| `contract_events` | `verify_contract_events.py` | `RuntimeEvent` round-trip |
-| `tool_audit_v1` | `verify_tool_audit_v1.py` | Tool 审计 payload |
-| `tool_execution_reliability` | `verify_tool_execution_reliability.py` | Tool timeout / retry |
-| `tool_governance_domain` | `verify_tool_governance_domain.py --case all` | side-effect ledger / read model / policy |
-| `policy_decision_audit_v1` | `verify_policy_decision_audit_v1.py` | policy decision audit |
-| `eval_cases_contract` | `verify_eval_cases_contract.py` | phase4 / golden JSON 契约 |
-| `eval_suite_timeout_v1` | `verify_eval_suite_timeout_v1.py` | suite timeout handling |
-| `scenario_loader` | `verify_scenario_loader.py` | Scenario 加载、HTTP 白名单 |
-| `mcp_capability` | `verify_mcp_capability.py` | MCP mock + stdio |
-| `context_manager` | `verify_context_manager.py` | assemble / `context_built` |
-| `policy_credentials` | `verify_policy_credentials.py` | Credential + PolicyGate scope + audit |
-| `policy_docs_contract` | `verify_policy_docs_contract.py` | Policy 文档与契约一致性 |
-| `events_validated` | `verify_events_validated.py` | `contract_validated` 落库 |
-
-### 3.2 Runtime + Memory + Golden（16）
-
-| 套件 | 脚本 |
+| Reason | 含义 |
 |---|---|
-| `golden_scenarios` | `verify_golden_scenarios.py` |
-| `runtime_domain` | `verify_runtime_domain.py --case all` |
-| `runtime_checkpoint_link` | `verify_runtime_checkpoint_link.py` |
-| `checkpoint_consistency_v2` | `verify_checkpoint_consistency_v2.py` |
-| `observability_domain` | `verify_observability_domain.py --case all` |
-| `plan_module` | `verify_plan_module.py` |
-| `hitl_checkpoint_resume` | `verify_hitl_checkpoint_resume.py` |
-| `session_mvp` | `verify_session_mvp.py` |
-| `memory_checkpoint_consistency` | `verify_memory_checkpoint_consistency.py` |
-| `memory_production_v1` | `verify_memory_production_v1.py` |
-| `memory_production_v2` | `verify_memory_production_v2.py` |
-
-### 3.3 Legacy 图回归（3，原 agent-ci）
-
-| 套件 | 脚本 | PASS 信号 |
-|---|---|---|
-| `phase3_checkpoint` | `verify_phase3_checkpoint.py` | `phase3_step4=PASS` |
-| `phase3_safety_gate` | `verify_phase3_safety_gate.py` | `phase3_safety_gate=PASS` |
-| `phase4_dataset` | `verify_phase4_dataset.py` | `phase4_dataset=PASS` |
+| `nightly_metrics_missing` | artifact 真不存在，视为聚合/脚本 bug |
+| `nightly_metrics_skipped:<reason>` | model/vector preflight skip |
+| `nightly_metrics_timeout:<stage>` | 阶段或 suite timeout |
+| `metric_missing` | artifact 存在但趋势字段缺失 |
 
 ---
 
-## 4. core-fast profile（24 套件，本地）
-
-不含：`golden_scenarios`、`runtime_checkpoint_link`、`session_mvp`、memory 三件套、`phase3_checkpoint`、`mcp_capability`、`observability_correlation`、`plan_module`。
-
-含 Contract 快集 + `runtime_event_store` / `runtime_timeline` / `runtime_execution_engine` / `runtime_durability_v1` + L7/observability 快检 + `phase3_safety_gate` / `phase4_dataset`。
-
-用途：提交前 **5–15 分钟** 级反馈；发 PR 前仍应跑完整 `core` + `rag`。
-
----
-
-## 5. rag profile（domain + 专项套件）
-
-| 套件 | 脚本 | 备注 |
-|---|---|---|
-| `rag_domain` | `verify_rag_domain.py` | 聚合轻量 deterministic RAG case：authority、API path、API ingest、doc security、retrieval scopes、retrieval quality |
-| `private_rag_context_guard_v1` | `verify_private_rag_context_guard_v1.py` | untrusted context header |
-| `private_rag_output_guard_v1` | `verify_private_rag_output_guard_v1.py` | 敏感输出检测 |
-| `phase4_ragas` | `verify_phase4_ragas.py` | PR：`--disable-vector` proxy |
-| `phase4_tool_trajectory` | `verify_phase4_tool_trajectory.py` | 28 case L5 图轨迹 |
-| `extract_validate` | `verify_extract_validate.py` | |
-| `citation_l4` | `verify_citation_l4.py` | |
-| `final_answer_l7` | `verify_final_answer_l7.py` | FinalAnswerModel |
-| `tool_message_policy` | `verify_tool_message_policy.py` | ToolMessage 摘要策略 |
-| `diagnosis_template` | `verify_diagnosis_template.py` | |
-| `tool_router` | `verify_tool_router.py` | 28 case 路由分类 |
-| `rag_hot_reload` | `verify_rag_hot_reload.py` | 无 docs 时可 SKIP |
-| `rag_rerank` | `verify_rag_rerank.py` | 无 rerank 依赖时跳过 rerank 段 |
-
-新增 RAG 轻量验证优先加入 `verify_rag_domain.py`；只有生命周期、真实 Agent loop、外部模型/LLM、跨 API 端到端验证才新增独立脚本。
-
-单 case 调试优先使用：
+## 5. 本地复现
 
 ```powershell
-python scripts/verify_rag_domain.py --case api_ingest
-python scripts/verify_rag_domain.py --case retrieval_quality
-```
+# PR 等价门禁
+python scripts/verify_eval_suite.py --profile core-fast --summary-json artifacts/eval/eval-core-fast-summary.json
 
-### 5.1 Removed RAG wrappers
+# 扩展 deterministic 检查
+python scripts/verify_eval_suite.py --profile core
 
-以下 RAG 单 case wrapper 已删除，统一改用 `verify_rag_domain.py --case <case>`：
+# RAG proxy，不启用 vector/rerank/live LLM
+python scripts/verify_eval_suite.py --profile rag --summary-json artifacts/eval/eval-rag-summary.json
 
-| case | 命令 |
-|---|---|
-| authority dedup | `python scripts/verify_rag_domain.py --case authority_dedup` |
-| API path extraction | `python scripts/verify_rag_domain.py --case api_path_extraction` |
-| API ingest | `python scripts/verify_rag_domain.py --case api_ingest` |
-| doc security ingest | `python scripts/verify_rag_domain.py --case doc_security_ingest` |
-| retrieval scopes | `python scripts/verify_rag_domain.py --case retrieval_scopes` |
-| retrieval quality | `python scripts/verify_rag_domain.py --case retrieval_quality` |
-
-变更验收建议：`verify_rag_domain.py --case all`、`verify_eval_suite.py --profile rag`、`verify_eval_suite.py --profile core-fast`。
-
-### 5.2 Nightly RAG 深测（Wave A + Wave C）
-
-| 套件 | 脚本 | 备注 |
-|---|---|---|
-| `phase4_ragas_nightly` | `verify_phase4_ragas.py` | `--enable-vector` + `bge-large-zh-v1.5` + rerank；L2 context metrics |
-| `rag_e2e_ragas` | `verify_rag_e2e_ragas.py` | retrieve→LLM→RAGAS + L4；无 API key 时 SKIP |
-
-产物：
-- `artifacts/eval/rag_metrics/nightly-latest.json`（proxy + L2）
-- `artifacts/eval/rag_metrics/e2e-latest.json`（RAGAS + citation）
-- `artifacts/eval/rag_metrics/history/`（通过 Actions cache 跨夜跑恢复；gold recall 回归 >0.05 阻断）
-
----
-
-## 6. e2e 与 full
-
-| Profile | 内容 |
-|---|---|
-| `e2e` | `demo_golden_e2e`（Demo 1–6 proxy） |
-| `full` | core（33）+ rag（15）+ nightly（2）+ e2e（1）= **51** |
-
-Nightly schedule 默认不带 `--enable-ragas`，因此 `phase4_ragas` 走 deterministic proxy；向量 + rerank 趋势仍由 `phase4_ragas_nightly` 负责。只有手工 `workflow_dispatch` 且 `enable_ragas=true` 时，才将 `phase4_ragas` 切为 `--mode auto --disable-vector --allow-missing-docs`。
-
----
-
-## 7. 本地复现
-
-**环境**：仓库根目录 + `conda run -n learnagent312`（或已激活的 learnagent312 环境）。
-
-```powershell
-# 本地快检（不进 PR CI）
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile core-fast
-
-# 等价 PR CI
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile core
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile rag --summary-json artifacts/eval/eval-rag-summary.json
-
-# Demo proxy
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile e2e
-
-# 夜跑默认路径
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full
+# Nightly 本地复现，可能因为 HF cache / vector backend 失败，但必须给出具体 reason
+python scripts/verify_eval_suite.py --profile full --suite-timeout-seconds 180
 
 # 手工 RAGAS 增强路径
-conda run -n learnagent312 python scripts/verify_eval_suite.py --profile full --enable-ragas
+python scripts/verify_eval_suite.py --profile full --enable-ragas --suite-timeout-seconds 180
 ```
 
-单套件调试：直接运行 `scripts/verify_*.py`；失败时查看 `artifacts/**/**-summary.json`。
+单 case 调试优先使用 domain verifier：
+
+```powershell
+python scripts/verify_runtime_domain.py --case timeline
+python scripts/verify_rag_domain.py --case retrieval_quality
+python scripts/verify_memory_domain.py --case all
+python scripts/verify_tool_governance_domain.py --case all
+```
 
 ---
 
-## 8. 失败排查
+## 6. 新增 Suite 规则
 
-| 现象 | 优先检查 |
+每个新增 suite 必须声明：
+
+| 字段 | 要求 |
 |---|---|
-| `mcp_capability` FAIL | `pip install mcp>=1.6.0`；无 SDK 时 watermark stdio 段为 SKIP 字符串，会导致 FAIL |
-| `phase3_safety_gate` FAIL | 脚本需 `settings.copilot_allow_job_post=True`；Policy 拦截文案应含 `gated` |
-| `phase4_tool_trajectory` FAIL | `PolicyRegistry` 需挂 `CredentialManager`；见 `verify_phase4_tool_trajectory.py` |
-| `session_mvp` FAIL / 超时 | ChatRunner 段需 `copilot_capabilities=rag,http`；`agent_tool_route_enforce=False`；engine task 清理 |
-| `phase4_ragas` FAIL | Scenario docs 路径、`ingest`、proxy 阈值 |
-| `rag_regression.reason=no_history/insufficient_history` | 新启用或 cache 未恢复；summary 会 warning，下一次夜跑应有历史 |
-| `rag_regression.reason=nightly_metrics_missing` | `phase4_ragas_nightly` 没产出 `nightly-latest.json`；通常是向量模型/后端未就绪，应修复而非 fallback |
-| core / rag 聚合 FAIL | 对应 `eval-suite-summary.json` / `eval-rag-summary.json` 的 `failed_suites` |
-| 套件超时 | `--suite-timeout-seconds`（默认 180）；聚合层会保留 stdout/stderr tail；RAGAS auto 另有软超时并回退 proxy |
+| profile | `core-fast` / `core` / `rag` / `full` / `manual` |
+| 预期耗时 | 是否影响 35s PR 预算 |
+| 外部依赖 | 是否需要网络、真实 API key、HF cache、vector backend |
+| status contract | summary JSON 或 stdout 必须有明确 status key |
+| artifact | 失败时能定位到 case/stage/reason |
 
----
-
-## 9. 非目标
-
-- 不在本文维护各 `verify_*.py` 实现细节（见 [eval-design.md](./eval-design.md)）
-- 不替代 [agent-learning-guide.md](./agent-learning-guide.md) 的架构与成熟度表
-- 已删除脚本（`verify_phase4_overall`、`verify_credentials_m14` 等）不再文档化
-
-
----
-
-## Appendix: Checkpoint Consistency v2
-
-`checkpoint_consistency_v2` is covered by `scripts/verify_checkpoint_consistency_v2.py` and is included in `core-fast`. The suite verifies `checkpoint_consistency_checked`, Timeline `checkpoint.consistency_v2`, missing-checkpoint warning semantics, and debug bundle export.
-
-`scripts/export_run_debug_bundle.py` is a local troubleshooting tool, not a default CI gate. It exports EventStore events, Timeline projection, latest consistency payloads, and checkpoint SQLite raw inspection for one run.
+默认规则：能进 domain verifier 就不要新增物理脚本；能放 `core` 就不要放 `core-fast`；需要 live key、重模型、长 E2E 的只放 `full` 或 `manual`。
 

@@ -27,11 +27,21 @@ def run_domain_verifier(
     case_results = [_run_case(name, cases[name]) for name in names]
     passed = all(item["status"] == "PASS" for item in case_results)
     checks = {str(item["case"]): item["status"] == "PASS" for item in case_results}
+    failed_cases = [str(item["case"]) for item in case_results if item["status"] != "PASS"]
+    case_status = {str(item["case"]): str(item["status"]) for item in case_results}
+    case_reasons = {
+        str(item["case"]): _case_reason(item)
+        for item in case_results
+        if item["status"] != "PASS"
+    }
     summary = {
         "suite_name": suite_name,
         "status": "PASS" if passed else "FAIL",
         "case": args.case,
         "checks": checks,
+        "failed_cases": failed_cases,
+        "case_status": case_status,
+        "case_reasons": case_reasons,
         "cases": case_results,
         "duration_ms": sum(int(item["duration_ms"]) for item in case_results),
     }
@@ -39,9 +49,23 @@ def run_domain_verifier(
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"checks={json.dumps(checks, ensure_ascii=False)}")
+    print(f"failed_cases={','.join(failed_cases)}")
     print(f"summary_json={summary_path}")
     print(f"{suite_name}={'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
+
+
+def _case_reason(item: dict[str, object]) -> str:
+    error = str(item.get("error") or "").strip()
+    if error:
+        return error
+    stderr_tail = item.get("stderr_tail")
+    if isinstance(stderr_tail, list) and stderr_tail:
+        return str(stderr_tail[-1])
+    stdout_tail = item.get("stdout_tail")
+    if isinstance(stdout_tail, list) and stdout_tail:
+        return str(stdout_tail[-1])
+    return f"return_code={item.get('return_code')}"
 
 
 def _run_case(name: str, fn: CaseFn) -> dict[str, object]:
@@ -70,4 +94,3 @@ def _run_case(name: str, fn: CaseFn) -> dict[str, object]:
         "stderr_tail": stderr.getvalue().splitlines()[-20:],
         "error": error,
     }
-

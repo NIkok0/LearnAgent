@@ -138,6 +138,37 @@ def _load_summary_payload(summary_json: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _domain_suite_name(spec_suite_name: str, summary_payload: dict[str, Any]) -> str:
+    raw = summary_payload.get("suite_name")
+    name = str(raw or "").strip()
+    return name or spec_suite_name
+
+
+def _domain_failed_cases(suite_name: str, summary_payload: dict[str, Any]) -> list[str]:
+    raw = summary_payload.get("failed_cases")
+    if not isinstance(raw, list):
+        return []
+    domain_name = _domain_suite_name(suite_name, summary_payload)
+    out: list[str] = []
+    for item in raw:
+        case = str(item or "").strip()
+        if case:
+            out.append(f"{domain_name}:{case}")
+    return out
+
+
+def _domain_case_reasons(suite_name: str, summary_payload: dict[str, Any]) -> dict[str, Any]:
+    raw = summary_payload.get("case_reasons")
+    if not isinstance(raw, dict):
+        return {}
+    domain_name = _domain_suite_name(suite_name, summary_payload)
+    return {
+        f"{domain_name}:{case}": reason
+        for case, reason in raw.items()
+        if str(case or "").strip()
+    }
+
+
 def _suite_status(return_code: int, kv: dict[str, str]) -> str:
     status, _source = _suite_status_with_source(return_code, kv, summary_payload={}, spec=None)
     return status
@@ -322,6 +353,8 @@ def main() -> int:
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
             summary_payload = _load_summary_payload(summary_json)
+            suite_failed_cases = _domain_failed_cases(spec.suite_name, summary_payload)
+            case_reasons = _domain_case_reasons(spec.suite_name, summary_payload)
             status, status_source = _suite_status_with_source(
                 proc.returncode,
                 kv,
@@ -343,6 +376,8 @@ def main() -> int:
                     "duration_ms": elapsed,
                     "summary_json": summary_json,
                     "checks": checks,
+                    "failed_cases": suite_failed_cases,
+                    "case_reasons": case_reasons,
                     "artifacts": [summary_json] if summary_json else [],
                     "errors": errors,
                     "stdout_tail": stdout.strip().splitlines()[-12:],
@@ -364,6 +399,8 @@ def main() -> int:
             summary_json = _extract_summary_json(kv)
             checks = _load_checks_from_summary(summary_json)
             summary_payload = _load_summary_payload(summary_json)
+            suite_failed_cases = _domain_failed_cases(spec.suite_name, summary_payload)
+            case_reasons = _domain_case_reasons(spec.suite_name, summary_payload)
             out = stdout.splitlines()[-12:]
             err = stderr.splitlines()[-12:]
             timeout_error = f"timeout_after_seconds={args.suite_timeout_seconds}"
@@ -380,6 +417,8 @@ def main() -> int:
                     "duration_ms": elapsed,
                     "summary_json": summary_json,
                     "checks": checks,
+                    "failed_cases": suite_failed_cases,
+                    "case_reasons": case_reasons,
                     "artifacts": [summary_json] if summary_json else [],
                     "errors": errors,
                     "stdout_tail": out,
@@ -388,6 +427,19 @@ def main() -> int:
             )
     failed = [item for item in results if item["status"] == "FAIL"]
     skipped = [item for item in results if item["status"] == "SKIP"]
+    failed_cases = [
+        str(case)
+        for item in failed
+        for case in (item.get("failed_cases") if isinstance(item.get("failed_cases"), list) else [])
+    ]
+    failed_case_reasons: dict[str, Any] = {}
+    for item in failed:
+        suite_name = str(item.get("suite_name") or "")
+        reasons = item.get("case_reasons")
+        if not isinstance(reasons, dict):
+            continue
+        for case, reason in reasons.items():
+            failed_case_reasons[str(case)] = reason
     slow_suites = sorted(
         (
             {
@@ -418,11 +470,16 @@ def main() -> int:
         for item in failed
         if "scenario" in str(item["suite_name"]) or item["suite_name"] == "golden_scenarios"
     ]
-    runtime_contract_breaks = [
-        item["suite_name"]
-        for item in failed
-        if str(item["suite_name"]).startswith("runtime_") or item["suite_name"] in {"session_mvp"}
-    ]
+    runtime_contract_breaks: list[str] = []
+    for item in failed:
+        suite_name = str(item["suite_name"])
+        if not (suite_name.startswith("runtime_") or suite_name in {"session_mvp"}):
+            continue
+        item_failed_cases = item.get("failed_cases")
+        if isinstance(item_failed_cases, list) and item_failed_cases:
+            runtime_contract_breaks.extend(str(case) for case in item_failed_cases)
+        else:
+            runtime_contract_breaks.append(suite_name)
     contract_suite_names = {spec.suite_name for spec in CONTRACT_SUITES}
     contract_metrics: dict[str, Any] = {}
     contract_schema_ok = True
@@ -435,6 +492,7 @@ def main() -> int:
             contract_schema_ok = False
         if checks.get("contract_schema_ok") is False:
             contract_schema_ok = False
+    collect_rag_metrics = args.profile in {"rag", "full"}
     rag_metrics: dict[str, Any] = {}
     nightly_metrics_status = ""
     nightly_metrics_skip_reason = ""
@@ -442,8 +500,9 @@ def main() -> int:
     nightly_metrics_timeout_reason = ""
     nightly_metrics_timed_out = False
     nightly_metrics_path = ROOT / "artifacts/eval/rag_metrics/nightly-latest.json"
-    has_nightly_suite = any(item["suite_name"] == "phase4_ragas_nightly" for item in results)
-    if nightly_metrics_path.is_file():
+    collect_nightly_metrics = args.profile == "full"
+    has_nightly_suite = collect_nightly_metrics and any(item["suite_name"] == "phase4_ragas_nightly" for item in results)
+    if collect_nightly_metrics and nightly_metrics_path.is_file():
         try:
             nightly_payload = json.loads(nightly_metrics_path.read_text(encoding="utf-8"))
             nightly_metrics_status = str(nightly_payload.get("status") or "")
@@ -457,7 +516,7 @@ def main() -> int:
                     rag_metrics["profile"] = nightly_payload.get("profile", "nightly")
         except Exception:
             pass
-    if not rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
+    if collect_rag_metrics and not rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
         for item in results:
             if item["suite_name"] not in {"phase4_ragas", "phase4_ragas_nightly"}:
                 continue
@@ -507,7 +566,7 @@ def main() -> int:
             }
             rag_regression_warnings.append("rag_regression:nightly_metrics_missing")
             overall_pass = False
-    if rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
+    if collect_rag_metrics and rag_metrics and not nightly_metrics_skipped and not nightly_metrics_timed_out:
         from copilot_agent.eval.rag_metrics_trend import detect_gold_recall_regression  # noqa: WPS433
 
         rag_regression = detect_gold_recall_regression(
@@ -531,6 +590,8 @@ def main() -> int:
         "suites_total": len(results),
         "suites_failed": len(failed),
         "failed_suites": [item["suite_name"] for item in failed],
+        "failed_cases": failed_cases,
+        "failed_case_reasons": failed_case_reasons,
         "skipped_suites": [item["suite_name"] for item in skipped],
         "failed_scenarios": failed_scenarios,
         "runtime_contract_breaks": runtime_contract_breaks,
@@ -557,6 +618,8 @@ def main() -> int:
     print(f"suites_total={out['suites_total']}")
     print(f"suites_failed={out['suites_failed']}")
     print(f"failed_suites={','.join(out['failed_suites'])}")
+    print(f"failed_cases={','.join(out['failed_cases'])}")
+    print(f"failed_case_reasons={json.dumps(out['failed_case_reasons'], ensure_ascii=False)}")
     print(f"skipped_suites={','.join(out['skipped_suites'])}")
     print(f"failed_scenarios={','.join(out['failed_scenarios'])}")
     print(f"runtime_contract_breaks={','.join(out['runtime_contract_breaks'])}")

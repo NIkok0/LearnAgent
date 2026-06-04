@@ -109,6 +109,10 @@ LEGACY_SUITES: tuple[SuiteSpec, ...] = (
 
 CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
+        suite_name="dependency_compat",
+        script="scripts/verify_dependency_compat.py",
+    ),
+    SuiteSpec(
         suite_name="contract_events",
         script="scripts/verify_contract_events.py",
         args=("--event-store-path", "storage/verify-contract-events-eval.sqlite"),
@@ -121,11 +125,6 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="tool_execution_reliability",
         script="scripts/verify_tool_execution_reliability.py",
-    ),
-    SuiteSpec(
-        suite_name="tool_governance_domain",
-        script="scripts/verify_tool_governance_domain.py",
-        args=("--case", "all"),
     ),
     SuiteSpec(
         suite_name="eval_cases_contract",
@@ -144,16 +143,8 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_scenario_loader.py",
     ),
     SuiteSpec(
-        suite_name="skills_v1",
-        script="scripts/verify_skills_v1.py",
-    ),
-    SuiteSpec(
         suite_name="context_providers_v1",
         script="scripts/verify_context_providers_v1.py",
-    ),
-    SuiteSpec(
-        suite_name="context_manager",
-        script="scripts/verify_context_manager.py",
     ),
     SuiteSpec(
         suite_name="retrieval_gate_v1",
@@ -172,46 +163,16 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_events_validated.py",
     ),
     SuiteSpec(
-        suite_name="runtime_domain",
+        suite_name="runtime_event_store_gate",
         script="scripts/verify_runtime_domain.py",
-        args=("--case", "all"),
+        args=("--case", "event_store"),
+        status_key="runtime_domain",
     ),
     SuiteSpec(
-        suite_name="checkpoint_consistency_v2",
-        script="scripts/verify_checkpoint_consistency_v2.py",
-        args=(
-            "--event-store-path",
-            "storage/verify-checkpoint-consistency-events.sqlite",
-            "--checkpoint-path",
-            "storage/verify-checkpoint-consistency-checkpoints.sqlite",
-        ),
-    ),
-    SuiteSpec(
-        suite_name="observability_domain",
-        script="scripts/verify_observability_domain.py",
-        args=("--case", "all"),
-    ),
-    SuiteSpec(
-        suite_name="final_answer_l7",
-        script="scripts/verify_final_answer_l7.py",
-    ),
-    SuiteSpec(
-        suite_name="memory_domain",
-        script="scripts/verify_memory_domain.py",
-        args=("--case", "all"),
-    ),
-    SuiteSpec(
-        suite_name="hitl_checkpoint_resume",
-        script="scripts/verify_hitl_checkpoint_resume.py",
-        args=("--event-store-path", "storage/verify-hitl-checkpoint-resume.sqlite"),
-    ),
-    SuiteSpec(
-        suite_name="phase3_safety_gate",
-        script="scripts/verify_phase3_safety_gate.py",
-    ),
-    SuiteSpec(
-        suite_name="phase4_dataset",
-        script="scripts/verify_phase4_dataset.py",
+        suite_name="runtime_timeline_gate",
+        script="scripts/verify_runtime_domain.py",
+        args=("--case", "timeline"),
+        status_key="runtime_domain",
     ),
 )
 
@@ -547,6 +508,7 @@ def _default_status_key(suite_name: str) -> str | None:
         "context_providers_v1": "verify_context_providers_v1",
         "contract_events": "contract_events",
         "demo_golden_e2e": "demo_golden_e2e",
+        "dependency_compat": "dependency_compat",
         "diagnosis_template": "diagnosis_template",
         "eval_cases_contract": "eval_cases_contract",
         "eval_suite_timeout_v1": "eval_suite_timeout_v1",

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from importlib import import_module
 from pathlib import Path
 from typing import Callable
 
@@ -13,18 +14,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts._domain_verify import run_domain_verifier  # noqa: E402
-from scripts.verify_cases import runtime_durability_v1  # noqa: E402
-from scripts.verify_cases import runtime_event_store  # noqa: E402
-from scripts.verify_cases import runtime_execution_engine  # noqa: E402
-from scripts.verify_cases import runtime_timeline  # noqa: E402
-from scripts import verify_run_state_machine  # noqa: E402
-from scripts import verify_thread_archive_api  # noqa: E402
-from scripts import verify_thread_lifecycle_cleaner  # noqa: E402
 
-def _case(fn: Callable[[], int], args: tuple[str, ...] = ()) -> Callable[[list[str] | None], int]:
+
+def _case(module_name: str, args: tuple[str, ...] = ()) -> Callable[[list[str] | None], int]:
     def run(_argv: list[str] | None = None) -> int:
+        module = import_module(module_name)
+        fn: Callable[[], int] = module.main
         old_argv = sys.argv
-        sys.argv = [fn.__module__, *args]
+        sys.argv = [module_name, *args]
         try:
             return int(fn() or 0)
         finally:
@@ -36,12 +33,12 @@ def _case(fn: Callable[[], int], args: tuple[str, ...] = ()) -> Callable[[list[s
 _RUN_DOMAIN_ID = uuid.uuid4().hex[:8]
 
 CASES = {
-    "event_store": _case(runtime_event_store.main),
-    "timeline": _case(runtime_timeline.main),
-    "execution_engine": _case(runtime_execution_engine.main),
-    "durability": _case(runtime_durability_v1.main),
+    "event_store": _case("scripts.verify_cases.runtime_event_store"),
+    "timeline": _case("scripts.verify_cases.runtime_timeline"),
+    "execution_engine": _case("scripts.verify_cases.runtime_execution_engine"),
+    "durability": _case("scripts.verify_cases.runtime_durability_v1"),
     "run_state_machine": _case(
-        verify_run_state_machine.main,
+        "scripts.verify_run_state_machine",
         (
             "--event-store-path",
             f"storage/verify-runtime-domain-run-state-{_RUN_DOMAIN_ID}.sqlite",
@@ -50,14 +47,14 @@ CASES = {
         ),
     ),
     "thread_lifecycle": _case(
-        verify_thread_lifecycle_cleaner.main,
+        "scripts.verify_thread_lifecycle_cleaner",
         (
             "--event-store-path",
             f"storage/verify-runtime-domain-thread-lifecycle-{_RUN_DOMAIN_ID}.sqlite",
         ),
     ),
     "thread_archive_api": _case(
-        verify_thread_archive_api.main,
+        "scripts.verify_thread_archive_api",
         (
             "--event-store-path",
             f"storage/verify-runtime-domain-thread-archive-{_RUN_DOMAIN_ID}.sqlite",
