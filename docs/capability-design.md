@@ -35,6 +35,21 @@ LearnAgent 的 Capability 层不是一个单独功能，而是一组把“Agent 
 - Capability Pack 提供“可用能力”，Planner / Safety Gate / PolicyGate 决定“本轮怎么用、能不能用”。
 - EventStore 是产品事实源，Capability / Skill / MCP 只写入治理元数据，不把 secret、cookie、raw 用户输入写进事件 payload。
 
+### Embodied / VLA Capability
+
+`embodied` 是面向 SO-ARM101 / SO-101 的机器人能力包，当前 v1 使用 deterministic mock adapter，后续可替换为 LeRobot / real robot driver。它和 RAG、HTTP、MCP 同级，仍受 ToolRegistry / PolicyGate / ToolResultModel 约束。
+
+| Tool | 职责 | 边界 |
+|---|---|---|
+| `observe_scene` | 读取场景摘要 | 只返回 frame id / image hash，不返回 raw image |
+| `run_vla_policy` | 根据 instruction + frame 产生 action chunk | 不直接执行动作 |
+| `execute_action_chunk` | 执行动作块 | 高风险、需审批、需 idempotency |
+| `stop_robot` | 紧急停止 | 不被审批延迟 |
+| `recover_home` | 回安全位姿 | 中风险，需治理 |
+| `label_episode_result` | 记录 rollout 标签 | 用于评估闭环 |
+
+详细设计见 [embodied-vla-design.md](./embodied-vla-design.md)。
+
 ---
 
 ## 3. Skills v1

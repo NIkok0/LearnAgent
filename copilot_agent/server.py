@@ -567,9 +567,9 @@ def get_thread_runs(thread_id: str) -> dict[str, object]:
 
 @app.post("/v1/threads/{thread_id}/runs")
 async def create_run(thread_id: str, req: CreateRunRequest) -> dict[str, object]:
+    _reject_inactive_thread(thread_id)
     if not settings.openai_api_key:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set")
-    _reject_inactive_thread(thread_id)
     event_store.touch_thread(thread_id)
     manager = _require_execution_engine()
     msgs = [m.model_dump() for m in req.messages]
@@ -855,10 +855,10 @@ async def reject_run(run_id: str) -> dict[str, object]:
 
 @app.post("/v1/chat")
 async def chat(req: ChatRequest):
-    if not settings.openai_api_key:
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set")
     conv = req.thread_id or req.conversation_id or str(uuid.uuid4())
     _reject_inactive_thread(conv)
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set")
     event_store.ensure_thread(conv)
     event_store.touch_thread(conv)
     manager = _require_execution_engine()

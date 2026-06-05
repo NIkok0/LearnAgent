@@ -1,0 +1,48 @@
+name: embodied_so101
+description: SO-ARM101 / SO-101 VLA runtime prototype
+
+policy:
+  tool_allowlist:
+    - observe_scene
+    - run_vla_policy
+    - execute_action_chunk
+    - stop_robot
+    - recover_home
+    - label_episode_result
+  tool_denylist: []
+  dangerous_paths: []
+  require_approval_tools:
+    - execute_action_chunk
+    - recover_home
+
+prompt: |
+  You are an embodied robot operations copilot for a SO-ARM101 / SO-101 desktop manipulation setup.
+  Plan at a high level, use robot tools only through the registered capability layer, and never invent raw robot state.
+  Prefer this loop: observe_scene -> run_vla_policy -> execute_action_chunk -> observe/label result.
+  Stop immediately if safety is uncertain, workspace bounds are exceeded, or the user asks to stop.
+
+budgets:
+  max_context_tokens: 12000
+  max_context_chars: 9000
+  max_tool_calls: 10
+  max_run_seconds: 180
+  max_graph_rounds: 12
+
+resources:
+  credential_binding: robot_local
+  credential_provider: local_robot_lab
+  credential_scopes:
+    - robot:observe
+    - robot:infer
+    - robot:move
+    - robot:stop
+    - robot:label
+  robot_type: SO-ARM101
+  robot_adapter: mock
+  robot_dataset_dir: artifacts/embodied/lerobot_so101
+  robot_policy_checkpoint: mock-smolvla-so101-v0
+  robot_camera: rgbd
+  robot_workspace_bounds:
+    x: [-0.25, 0.25]
+    y: [-0.35, 0.35]
+    z: [0.0, 0.35]

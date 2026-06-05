@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -23,29 +24,45 @@ from copilot_agent.settings import settings  # noqa: E402
 async def verify(event_store_path: Path) -> dict[str, object]:
     server.event_store = server.EventStore(str(event_store_path))
     server.execution_engine = None
+    old_env_key = os.environ.pop("OPENAI_API_KEY", None)
+    old_settings_key = settings.openai_api_key
+    settings.openai_api_key = ""
     transport = httpx.ASGITransport(app=server.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        thread_res = await client.post("/v1/threads", json={"title": "archive api verification"})
-        thread_res.raise_for_status()
-        thread = thread_res.json()
-        thread_id = str(thread["id"])
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            thread_res = await client.post("/v1/threads", json={"title": "archive api verification"})
+            thread_res.raise_for_status()
+            thread = thread_res.json()
+            thread_id = str(thread["id"])
 
-        end_thread_res = await client.post("/v1/threads", json={"title": "end api verification"})
-        end_thread_res.raise_for_status()
-        end_thread_id = str(end_thread_res.json()["id"])
-        end_res = await client.post(f"/v1/threads/{end_thread_id}/end", json={"reason": "explicit"})
-        end_read_res = await client.get(f"/v1/threads/{end_thread_id}")
+            end_thread_res = await client.post("/v1/threads", json={"title": "end api verification"})
+            end_thread_res.raise_for_status()
+            end_thread_id = str(end_thread_res.json()["id"])
+            end_res = await client.post(f"/v1/threads/{end_thread_id}/end", json={"reason": "explicit"})
+            end_read_res = await client.get(f"/v1/threads/{end_thread_id}")
 
-        archive_res = await client.post(f"/v1/threads/{thread_id}/archive")
-        read_res = await client.get(f"/v1/threads/{thread_id}")
-        run_res = await client.post(
-            f"/v1/threads/{thread_id}/runs",
-            json={"messages": [{"role": "user", "content": "blocked"}]},
-        )
-        chat_res = await client.post(
-            "/v1/chat",
-            json={"thread_id": thread_id, "messages": [{"role": "user", "content": "blocked"}]},
-        )
+            active_res = await client.post("/v1/threads", json={"title": "active no key verification"})
+            active_res.raise_for_status()
+            active_thread_id = str(active_res.json()["id"])
+            active_run_res = await client.post(
+                f"/v1/threads/{active_thread_id}/runs",
+                json={"messages": [{"role": "user", "content": "needs key"}]},
+            )
+
+            archive_res = await client.post(f"/v1/threads/{thread_id}/archive")
+            read_res = await client.get(f"/v1/threads/{thread_id}")
+            run_res = await client.post(
+                f"/v1/threads/{thread_id}/runs",
+                json={"messages": [{"role": "user", "content": "blocked"}]},
+            )
+            chat_res = await client.post(
+                "/v1/chat",
+                json={"thread_id": thread_id, "messages": [{"role": "user", "content": "blocked"}]},
+            )
+    finally:
+        settings.openai_api_key = old_settings_key
+        if old_env_key is not None:
+            os.environ["OPENAI_API_KEY"] = old_env_key
 
     archived = archive_res.json().get("thread", {})
     readable = read_res.json().get("thread", {})
@@ -69,6 +86,8 @@ async def verify(event_store_path: Path) -> dict[str, object]:
         "run_detail": _detail(run_res),
         "chat_status_code": chat_res.status_code,
         "chat_detail": _detail(chat_res),
+        "active_no_key_run_status_code": active_run_res.status_code,
+        "active_no_key_run_detail": _detail(active_run_res),
     }
 
 
@@ -112,6 +131,8 @@ def main() -> int:
         and summary["run_detail"] == "thread is not active"
         and summary["chat_status_code"] == 409
         and summary["chat_detail"] == "thread is not active"
+        and summary["active_no_key_run_status_code"] == 503
+        and summary["active_no_key_run_detail"] == "OPENAI_API_KEY is not set"
     )
     summary["checks"] = {
         "end_thread": summary["end_status_code"] == 200 and summary["end_status"] == "ended",
@@ -119,6 +140,8 @@ def main() -> int:
         "archived_readable": summary["read_status_code"] == 200 and summary["read_status"] == "archived",
         "archived_blocks_run": summary["run_status_code"] == 409 and summary["run_detail"] == "thread is not active",
         "archived_blocks_chat": summary["chat_status_code"] == 409 and summary["chat_detail"] == "thread is not active",
+        "active_thread_still_requires_key": summary["active_no_key_run_status_code"] == 503
+        and summary["active_no_key_run_detail"] == "OPENAI_API_KEY is not set",
     }
     summary["thread_archive_api"] = "PASS" if passed else "FAIL"
     summary_path = Path(args.summary_json).resolve()

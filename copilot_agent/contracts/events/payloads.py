@@ -195,6 +195,54 @@ class OutputGuardCheckedPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RobotObservationRecordedPayload(BaseModel):
+    robot_type: str = "SO-ARM101"
+    adapter: str = "mock"
+    frame_id: str
+    input_image_hash: str
+    sensor: str = "rgbd"
+    object_count: int = 0
+    workspace_bounds: dict[str, list[float]] = Field(default_factory=dict)
+    raw_image_recorded: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VlaPolicyInferredPayload(BaseModel):
+    policy_checkpoint_id: str
+    frame_id: str
+    instruction_hash: str
+    action_count: int = 0
+    confidence: float | None = None
+    fallback_reason: str = ""
+    model_family: str = "smolvla"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RobotActionExecutedPayload(BaseModel):
+    policy_checkpoint_id: str = ""
+    frame_id: str = ""
+    action_count: int = 0
+    execution_status: Literal["completed", "blocked", "failed", "stopped", "home"] = "completed"
+    success: bool = True
+    safety_decision: Literal["allow", "ask", "deny", "block"] = "allow"
+    reason: str = ""
+    idempotency_key: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RobotEpisodeLabeledPayload(BaseModel):
+    episode_id: str
+    success: bool
+    failure_type: str = ""
+    policy_checkpoint_id: str = ""
+    dataset_dir: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class LlmGenerationPayload(BaseModel):
     trace_id: str = ""
     provider: str = ""

@@ -78,6 +78,54 @@ def verify(event_store_path: Path, thread_id: str) -> dict[str, Any]:
             ),
         ),
         (
+            "robot_observation_recorded",
+            {
+                "robot_type": "SO-ARM101",
+                "adapter": "mock",
+                "frame_id": "frame-1",
+                "input_image_hash": "abc123",
+                "sensor": "rgbd",
+                "object_count": 2,
+                "workspace_bounds": {"x": [-0.25, 0.25], "y": [-0.35, 0.35], "z": [0.0, 0.35]},
+                "raw_image_recorded": False,
+            },
+        ),
+        (
+            "vla_policy_inferred",
+            {
+                "policy_checkpoint_id": "mock-smolvla-so101-v0",
+                "frame_id": "frame-1",
+                "instruction_hash": "ihash",
+                "action_count": 4,
+                "confidence": 0.84,
+                "fallback_reason": "",
+                "model_family": "smolvla",
+            },
+        ),
+        (
+            "robot_action_executed",
+            {
+                "policy_checkpoint_id": "mock-smolvla-so101-v0",
+                "frame_id": "frame-1",
+                "action_count": 4,
+                "execution_status": "completed",
+                "success": True,
+                "safety_decision": "allow",
+                "reason": "",
+                "idempotency_key": "idem-1",
+            },
+        ),
+        (
+            "robot_episode_labeled",
+            {
+                "episode_id": "episode-1",
+                "success": True,
+                "failure_type": "",
+                "policy_checkpoint_id": "mock-smolvla-so101-v0",
+                "dataset_dir": "artifacts/embodied/lerobot_so101",
+            },
+        ),
+        (
             "memory_run_summary",
             {
                 "summary_type": "run",

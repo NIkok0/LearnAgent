@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from copilot_agent.tools.capability.base import CapabilityContext, CapabilityPack
+from copilot_agent.tools.capability.embodied import EmbodiedCapability
 from copilot_agent.tools.capability.http import HttpCapability
 from copilot_agent.tools.capability.mcp import McpCapability
 from copilot_agent.tools.capability.rag import RagCapability
@@ -14,6 +15,7 @@ CAPABILITY_PACKS: dict[str, CapabilityPack] = {
     "rag": RagCapability(),
     "http": HttpCapability(),
     "mcp": McpCapability(),
+    "embodied": EmbodiedCapability(),
 }
 
 

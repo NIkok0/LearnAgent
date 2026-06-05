@@ -30,6 +30,12 @@ MEMORY_EVENTS = {
     "memory_item_deleted",
     "memory_item_delete_proof",
 }
+ROBOT_EVENTS = {
+    "robot_observation_recorded",
+    "vla_policy_inferred",
+    "robot_action_executed",
+    "robot_episode_labeled",
+}
 
 
 class TimelineProjector:
@@ -466,6 +472,20 @@ class TimelineProjector:
                 )
                 continue
 
+            if event_type in ROBOT_EVENTS:
+                items.append(_robot_item(event, payload))
+                if event_type == "robot_action_executed" and payload.get("success") is False:
+                    warnings.append(
+                        {
+                            "code": "robot_action_failed",
+                            "message": "robot action did not complete successfully",
+                            "event_id": event_id,
+                            "reason": payload.get("reason"),
+                            "execution_status": payload.get("execution_status"),
+                        }
+                    )
+                continue
+
             if event_type in MEMORY_EVENTS:
                 items.append(
                     {
@@ -551,6 +571,59 @@ def _lifecycle_item(event: dict[str, Any], payload: dict[str, Any]) -> dict[str,
         "created_at": event.get("created_at"),
         "payload": payload,
     }
+
+
+def _robot_item(event: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(event.get("type", ""))
+    base = {
+        "kind": "robot",
+        "title": event_type,
+        "event_id": int(event.get("id", 0) or 0),
+        "created_at": event.get("created_at"),
+        "event_type": event_type,
+        "payload": payload,
+    }
+    if event_type == "robot_observation_recorded":
+        base.update(
+            {
+                "frame_id": payload.get("frame_id"),
+                "input_image_hash": payload.get("input_image_hash"),
+                "sensor": payload.get("sensor"),
+                "object_count": payload.get("object_count"),
+            }
+        )
+    elif event_type == "vla_policy_inferred":
+        base.update(
+            {
+                "policy_checkpoint_id": payload.get("policy_checkpoint_id"),
+                "frame_id": payload.get("frame_id"),
+                "action_count": payload.get("action_count"),
+                "confidence": payload.get("confidence"),
+                "fallback_reason": payload.get("fallback_reason"),
+            }
+        )
+    elif event_type == "robot_action_executed":
+        base.update(
+            {
+                "policy_checkpoint_id": payload.get("policy_checkpoint_id"),
+                "frame_id": payload.get("frame_id"),
+                "action_count": payload.get("action_count"),
+                "execution_status": payload.get("execution_status"),
+                "success": bool(payload.get("success", True)),
+                "safety_decision": payload.get("safety_decision"),
+                "reason": payload.get("reason"),
+            }
+        )
+    elif event_type == "robot_episode_labeled":
+        base.update(
+            {
+                "episode_id": payload.get("episode_id"),
+                "success": bool(payload.get("success", False)),
+                "failure_type": payload.get("failure_type"),
+                "policy_checkpoint_id": payload.get("policy_checkpoint_id"),
+            }
+        )
+    return base
 
 
 def _call_id(payload: dict[str, Any], event_id: int, warnings: list[dict[str, Any]]) -> str:
@@ -793,6 +866,7 @@ def _debugger_summary(
     side_effect_items = [item for item in items if item.get("kind") == "side_effect"]
     policy_items = [item for item in items if item.get("kind") == "policy"]
     skill_items = [item for item in items if item.get("kind") == "skill"]
+    robot_items = [item for item in items if item.get("kind") == "robot"]
     memory_items = [item for item in items if item.get("kind") == "memory"]
     memory_governance_items = [
         item
@@ -853,6 +927,19 @@ def _debugger_summary(
             ],
         },
         "skill_selected_count": len(skill_items),
+        "robot_rollout": {
+            "total": len(robot_items),
+            "observations": sum(1 for item in robot_items if item.get("event_type") == "robot_observation_recorded"),
+            "policy_inferences": sum(1 for item in robot_items if item.get("event_type") == "vla_policy_inferred"),
+            "actions": sum(1 for item in robot_items if item.get("event_type") == "robot_action_executed"),
+            "labels": sum(1 for item in robot_items if item.get("event_type") == "robot_episode_labeled"),
+            "failed_actions": sum(
+                1
+                for item in robot_items
+                if item.get("event_type") == "robot_action_executed" and item.get("success") is False
+            ),
+            "last_policy_checkpoint_id": _last_robot_value(robot_items, "policy_checkpoint_id"),
+        },
         "memory_governance": {
             "total": len(memory_governance_items),
             "confirmed": sum(1 for item in memory_governance_items if item.get("title") == "memory_item_confirmed"),
@@ -949,6 +1036,14 @@ def _failed_tool_events(events: list[dict[str, Any]]) -> int:
 def _first_payload_value(payloads: list[dict[str, Any]], key: str) -> Any:
     for payload in payloads:
         value = payload.get(key)
+        if value:
+            return value
+    return None
+
+
+def _last_robot_value(items: list[dict[str, Any]], key: str) -> Any:
+    for item in reversed(items):
+        value = item.get(key)
         if value:
             return value
     return None

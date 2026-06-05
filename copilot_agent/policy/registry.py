@@ -220,6 +220,19 @@ class PolicyRegistry:
                         metadata={"path": normalized_path},
                         credential_audits=credential_audits,
                     )
+            if spec is not None and spec.requires_approval_for(args) and not confirm_dangerous:
+                return PolicyDecision(
+                    allowed=True,
+                    requires_approval=True,
+                    decision="ask",
+                    message=f"Tool '{name}' requires approval before execution.",
+                    reason="tool_requires_approval",
+                    tool_name=name,
+                    call_id=call_id,
+                    policy_source="tool_approval_policy",
+                    metadata={"tool_name": name, "category": spec.category},
+                    credential_audits=credential_audits,
+                )
         return PolicyDecision(allowed=True, decision="allow", reason="tool_calls_allowed", credential_audits=credential_audits)
 
 

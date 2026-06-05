@@ -79,6 +79,10 @@ CONTRACT_SUITES: tuple[SuiteSpec, ...] = (
         script="scripts/verify_retrieval_gate_v1.py",
     ),
     SuiteSpec(
+        suite_name="embodied_vla_v1",
+        script="scripts/verify_embodied_vla_v1.py",
+    ),
+    SuiteSpec(
         suite_name="policy_credentials",
         script="scripts/verify_policy_credentials.py",
     ),
@@ -149,6 +153,10 @@ CORE_FAST_SUITES: tuple[SuiteSpec, ...] = (
     SuiteSpec(
         suite_name="retrieval_gate_v1",
         script="scripts/verify_retrieval_gate_v1.py",
+    ),
+    SuiteSpec(
+        suite_name="embodied_vla_v1",
+        script="scripts/verify_embodied_vla_v1.py",
     ),
     SuiteSpec(
         suite_name="policy_credentials",
@@ -512,6 +520,7 @@ def _default_status_key(suite_name: str) -> str | None:
         "diagnosis_template": "diagnosis_template",
         "eval_cases_contract": "eval_cases_contract",
         "eval_suite_timeout_v1": "eval_suite_timeout_v1",
+        "embodied_vla_v1": "embodied_vla_v1",
         "events_validated": "events_validated",
         "extract_validate": "extract_validate",
         "final_answer_l7": "final_answer_l7",

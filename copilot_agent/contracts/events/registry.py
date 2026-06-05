@@ -22,11 +22,15 @@ from copilot_agent.contracts.events.payloads import (
     OutputGuardCheckedPayload,
     PolicyDecisionRecordedPayload,
     RetrievalCompletedPayload,
+    RobotActionExecutedPayload,
+    RobotEpisodeLabeledPayload,
+    RobotObservationRecordedPayload,
     SkillSelectedPayload,
     TokenPayload,
     ToolEndPayload,
     ToolSideEffectRecordedPayload,
     ToolStartPayload,
+    VlaPolicyInferredPayload,
 )
 from copilot_agent.runtime.event_schema import (
     EVENT_APPROVAL_REQUIRED,
@@ -54,6 +58,9 @@ from copilot_agent.runtime.event_schema import (
     EVENT_RAG_DOCUMENT_DELETED,
     EVENT_RAG_DOCUMENT_INGESTED,
     EVENT_RETRIEVAL_COMPLETED,
+    EVENT_ROBOT_ACTION_EXECUTED,
+    EVENT_ROBOT_EPISODE_LABELED,
+    EVENT_ROBOT_OBSERVATION_RECORDED,
     EVENT_RUN_CHECKPOINT_META,
     EVENT_RUN_CONSISTENCY_CHECKED,
     EVENT_RUN_COMPLETED_META,
@@ -66,6 +73,7 @@ from copilot_agent.runtime.event_schema import (
     EVENT_TOOL_END,
     EVENT_TOOL_SIDE_EFFECT_RECORDED,
     EVENT_TOOL_START,
+    EVENT_VLA_POLICY_INFERRED,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -108,6 +116,10 @@ _STRICT_MODELS: dict[str, type[BaseModel]] = {
     EVENT_CREDENTIAL_BINDING_AUDIT: CredentialBindingAuditPayload,
     EVENT_OUTPUT_GUARD_CHECKED: OutputGuardCheckedPayload,
     EVENT_LLM_GENERATION: LlmGenerationPayload,
+    EVENT_ROBOT_OBSERVATION_RECORDED: RobotObservationRecordedPayload,
+    EVENT_VLA_POLICY_INFERRED: VlaPolicyInferredPayload,
+    EVENT_ROBOT_ACTION_EXECUTED: RobotActionExecutedPayload,
+    EVENT_ROBOT_EPISODE_LABELED: RobotEpisodeLabeledPayload,
     EVENT_MEMORY_RUN_SUMMARY: MemoryRunSummaryPayload,
     EVENT_MEMORY_THREAD_SUMMARY: MemoryThreadSummaryPayload,
     EVENT_MEMORY_ITEM_CONFIRMED: MemoryItemGovernancePayload,

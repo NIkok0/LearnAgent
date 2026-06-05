@@ -48,6 +48,12 @@ class ScenarioResourcesConfig(BaseModel):
     http_get_actuator_paths: list[str] = Field(default_factory=lambda: ["/actuator/health"])
     http_get_patterns: list[str] = Field(default_factory=list)
     http_post_paths: list[str] = Field(default_factory=list)
+    robot_type: str = ""
+    robot_adapter: str = "mock"
+    robot_dataset_dir: str = ""
+    robot_policy_checkpoint: str = ""
+    robot_camera: str = "rgbd"
+    robot_workspace_bounds: dict[str, list[float]] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
 
